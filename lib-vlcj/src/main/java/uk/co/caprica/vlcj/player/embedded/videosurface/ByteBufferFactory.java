@@ -20,6 +20,7 @@
 package uk.co.caprica.vlcj.player.embedded.videosurface;
 
 import sun.misc.Unsafe;
+import uk.co.caprica.vlcj.VideoLan4J;
 
 import java.lang.reflect.Field;
 import java.nio.Buffer;
@@ -73,27 +74,27 @@ final class ByteBufferFactory {
 
     /**
      * Allocate a property aligned native byte buffer.
+     * WATERMeDIA Patch
      *
      * @param capacity required size for the buffer
      * @param alignment alignment alignment
      * @return aligned byte buffer
      */
     private static ByteBuffer allocateAlignedBuffer(int capacity, int alignment) {
-        ByteBuffer result;
-        ByteBuffer buffer = ByteBuffer.allocateDirect(capacity + alignment);
+        ByteBuffer buffer = VideoLan4J.createByteBuffer(capacity + alignment); // WATERMeDIA Patch
         long address = getAddress(buffer);
         if ((address & (alignment - 1)) == 0) {
+
             // Stupid cast required see #829
             ((Buffer) buffer).limit(capacity);
-            result = buffer.slice().order(ByteOrder.nativeOrder());
         } else {
             int newPosition = (int) (alignment - (address & (alignment - 1)));
             // Stupid casts required see #829
             ((Buffer) buffer).position(newPosition);
             ((Buffer) buffer).limit(newPosition + capacity);
-            result = buffer.slice().order(ByteOrder.nativeOrder());
         }
-        return result;
+
+        return buffer.slice().order(ByteOrder.nativeOrder()); // WATERMeDIA Patch
     }
 
     private static class UnsafeAccess {

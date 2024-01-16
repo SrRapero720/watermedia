@@ -4,8 +4,11 @@ import org.lwjgl.system.MemoryUtil;
 
 import java.nio.ByteBuffer;
 
-public class MemoryTracking {
-    private static final MemoryUtil.MemoryAllocator ALLOCATOR = MemoryUtil.getAllocator(false);
+public class MemoryAlloc {
+    private static final MemoryUtil.MemoryAllocator ALLOCATOR;
+    static {
+        ALLOCATOR = MemoryUtil.getAllocator(false);
+    }
 
     public static ByteBuffer create(int pSize) {
         long i = ALLOCATOR.malloc(pSize);

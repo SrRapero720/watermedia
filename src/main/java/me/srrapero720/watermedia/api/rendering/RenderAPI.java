@@ -1,21 +1,53 @@
 package me.srrapero720.watermedia.api.rendering;
 
-import me.lib720.watermod.reflect.ReflectTool;
 import me.srrapero720.watermedia.api.WaterMediaAPI;
 import me.srrapero720.watermedia.api.image.ImageRenderer;
 import me.srrapero720.watermedia.loaders.IBootCore;
-import org.lwjgl.BufferUtils;
+import me.srrapero720.watermedia.api.rendering.memory.MemoryAlloc;
 import org.lwjgl.opengl.GL11;
 import org.lwjgl.opengl.GL12;
+import uk.co.caprica.vlcj.VideoLan4J;
 
 import java.awt.image.BufferedImage;
+import java.nio.Buffer;
 import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.nio.IntBuffer;
 
 /**
  * RenderApi is a tool class for OpenGL rendering compatible with all minecraft versions
  */
 public class RenderAPI extends WaterMediaAPI {
+    /**
+     * Creates a DirectByteBuffer unsafe using {@link org.lwjgl.system.MemoryUtil.MemoryAllocator MemoryAllocator}
+     *
+     * <p>In case class was missing uses instead {@link java.nio.ByteBuffer#allocateDirect(int) DirectByteBuffer#allocateDirect(int)}</p>
+     * @param size size of the buffer
+     * @return DirectByteBuffer
+     */
+    public static ByteBuffer createByteBuffer(int size) {
+        try {
+            return MemoryAlloc.create(size);
+        } catch (Throwable t) {
+            return ByteBuffer.allocateDirect(size).order(ByteOrder.nativeOrder());
+        }
+    }
+
+    /**
+     * Resizes direct buffer unsafe using {@link org.lwjgl.system.MemoryUtil.MemoryAllocator MemoryAllocator}
+     *
+     * <p>In case class was missing causes a {@link NoSuchMethodError}</p>
+     * @param buffer buffer to be resized
+     * @param newSize new size of the buffer
+     * @return resized DirectByteBuffer
+     */
+    public static ByteBuffer resizeByteBuffer(ByteBuffer buffer, int newSize) {
+        try {
+            return MemoryAlloc.resize(buffer, newSize);
+        } catch (Throwable t) {
+            throw new NoSuchMethodError("resizeByteBuffer is not available on LWJGL 2.x");
+        }
+    }
 
     /**
      * Created by CreativeMD
@@ -38,7 +70,7 @@ public class RenderAPI extends WaterMediaAPI {
             }
 
         int bytesPerPixel = alpha ? 4 : 3;
-        ByteBuffer buffer = BufferUtils.createByteBuffer(width * height * bytesPerPixel);
+        ByteBuffer buffer = createByteBuffer(width * height * bytesPerPixel);
         for (int pixel : pixels) {
             buffer.put((byte) ((pixel >> 16) & 0xFF)); // Red
             buffer.put((byte) ((pixel >> 8) & 0xFF)); // Green
@@ -46,11 +78,7 @@ public class RenderAPI extends WaterMediaAPI {
             if (alpha) buffer.put((byte) ((pixel >> 24) & 0xFF)); // Alpha
         }
 
-        /*
-         * FLIP method changes what class type returns in new JAVA versions, in runtime causes a JVM crash by that
-         * THIS EXECUTES {@link ByteBuffer#flip }
-         */
-        ReflectTool.invoke("flip", buffer.getClass(), buffer);
+        ((Buffer) buffer).flip();
 
         int textureID = GL11.glGenTextures(); //Generate texture ID
         GL11.glBindTexture(GL11.GL_TEXTURE_2D, textureID); // Bind texture ID
@@ -114,7 +142,6 @@ public class RenderAPI extends WaterMediaAPI {
     }
 
     public RenderAPI() {
-        super();
     }
 
     @Override
@@ -124,12 +151,12 @@ public class RenderAPI extends WaterMediaAPI {
 
     @Override
     public boolean prepare(IBootCore bootCore) throws Exception {
-        return false;
+        return true;
     }
 
     @Override
     public void start(IBootCore bootCore) throws Exception {
-
+        VideoLan4J.setByteBufferBuilder(RenderAPI::createByteBuffer);
     }
 
     @Override
