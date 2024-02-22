@@ -1,11 +1,11 @@
 package me.srrapero720.watermedia.api.image;
 
 import me.lib720.watermod.concurrent.ThreadCore;
-import me.srrapero720.watermedia.api.image.decoders.GifDecoder;
-import me.srrapero720.watermedia.api.url.UrlAPI;
-import me.srrapero720.watermedia.api.url.fixers.URLFixer;
-import me.srrapero720.watermedia.core.CacheCore;
-import me.srrapero720.watermedia.core.tools.DataTool;
+import me.lib720.watermod.safety.TryCore;
+import me.srrapero720.watermedia.api.cache.CacheAPI;
+import me.srrapero720.watermedia.api.cache.CacheEntry;
+import me.srrapero720.watermedia.api.network.DynamicURL;
+import org.apache.commons.io.IOUtils;
 import org.apache.logging.log4j.Marker;
 import org.apache.logging.log4j.MarkerManager;
 
@@ -17,7 +17,6 @@ import java.awt.image.BufferedImage;
 import java.io.*;
 import java.net.ConnectException;
 import java.net.HttpURLConnection;
-import java.net.URL;
 import java.net.URLConnection;
 import java.text.DateFormat;
 import java.text.ParseException;
@@ -28,7 +27,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 import static me.srrapero720.watermedia.WaterMedia.LOGGER;
-import static me.srrapero720.watermedia.core.tools.DataTool.USER_AGENT;
+import static me.srrapero720.watermedia.api.network.NetworkAPI.USER_AGENT;
 
 /**
  * Tool to fetch new images from internet
@@ -72,11 +71,10 @@ public class ImageFetch {
     public void start() { EX.execute(this::run); }
     private void run() {
         try {
-            URLFixer.Result result = UrlAPI.fixURL(url);
-            if (result == null) throw new IllegalArgumentException("Invalid URL");
-            if (result.assumeVideo) throw new NoPictureException();
+            DynamicURL result = new DynamicURL(url);
+            if (result.isVideo()) throw new NoPictureException();
 
-            byte[] data = load(url, result.url);
+            byte[] data = load(result);
             String type = readType(data);
 
             try (ByteArrayInputStream in = new ByteArrayInputStream(data)) {
@@ -111,10 +109,10 @@ public class ImageFetch {
         }
     }
 
-    private static byte[] load(String originalUrl, URL url) throws IOException, NoPictureException {
-        CacheCore.Entry entry = CacheCore.getEntry(originalUrl);
+    private static byte[] load(DynamicURL url) throws IOException, NoPictureException {
+        CacheCore.Entry entry = CacheCore.getEntry(url.getSource());
         long requestTime = System.currentTimeMillis();
-        URLConnection request = url.openConnection();
+        URLConnection request = url.asURL().openConnection();
         request.setDefaultUseCaches(false);
         request.setRequestProperty("Accept", "image/*");
         int code = -1;
@@ -177,14 +175,14 @@ public class ImageFetch {
                     if (file.exists()) try (FileInputStream fileStream = new FileInputStream(file)) {
                         return DataTool.readAllBytes(fileStream);
                     } finally {
-                        CacheCore.updateEntry(new CacheCore.Entry(originalUrl, freshTag, lastTimestamp, expTimestamp));
+                        CacheCore.updateEntry(new CacheCore.Entry(url.getSource(), freshTag, lastTimestamp, expTimestamp));
                     }
                 }
             }
 
 
             byte[] data = DataTool.readAllBytes(in);
-            CacheCore.saveFile(originalUrl, tag, lastTimestamp, expTimestamp, data);
+            CacheCore.saveFile(url.getSource(), tag, lastTimestamp, expTimestamp, data);
             return data;
         } finally {
             if (request instanceof HttpURLConnection) ((HttpURLConnection) request).disconnect();
