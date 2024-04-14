@@ -15,7 +15,9 @@ public class TwitterPatch extends URLPatch {
 
     @Override
     public boolean isValid(DynamicURL dynamicURL) {
-        return (dynamicURL.asURL().getHost().equals("www.twitter.com") || dynamicURL.asURL().getHost().equals("twitter.com")) && dynamicURL.asURL().getPath().matches("/[a-zA-Z0-9_]+/status/[0-9]+");
+        return (dynamicURL.asURL().getHost().equals("www.x.com") || dynamicURL.asURL().getHost().equals("x.com") ||
+                dynamicURL.asURL().getHost().equals("www.twitter.com") || dynamicURL.asURL().getHost().equals("twitter.com"))
+                && dynamicURL.asURL().getPath().matches("/[a-zA-Z0-9_]+/status/[0-9]+");
     }
 
     @Override
