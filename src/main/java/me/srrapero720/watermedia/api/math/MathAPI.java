@@ -237,18 +237,6 @@ public class MathAPI extends WaterMediaAPI {
     public static int argb(int a, int r, int g, int b) { return (a << 24) | (r << 16) | (g << 8) | b; }
 
     /**
-     * Creates a hexadecimal color based on gave params
-     * All values need to be in a range of 0 ~ 255
-     * @param a Alpha
-     * @param r Red
-     * @param g Green
-     * @param b Blue
-     * @return HEX color
-     * @deprecated renamed to {@link MathAPI#argb(int, int, int, int)}
-     */
-    public static int getColorARGB(int a, int r, int g, int b) { return (a << 24) | (r << 16) | (g << 8) | b; }
-
-    /**
      * Converts arguments into an ease-in value usable on animations.
      *
      * @param start The beginning of the result across time.
