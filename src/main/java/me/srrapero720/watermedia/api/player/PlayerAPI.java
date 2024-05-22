@@ -3,6 +3,7 @@ package me.srrapero720.watermedia.api.player;
 import me.srrapero720.watermedia.OperativeSystem;
 import me.srrapero720.watermedia.WaterMedia;
 import me.srrapero720.watermedia.api.WaterMediaAPI;
+import me.srrapero720.watermedia.api.config.WaterConfig;
 import me.srrapero720.watermedia.api.player.vlc.SimplePlayer;
 import me.srrapero720.watermedia.core.tools.IOTool;
 import me.srrapero720.watermedia.core.tools.JarTool;
@@ -91,22 +92,13 @@ public class PlayerAPI extends WaterMediaAPI {
     }
 
     // LOADING
-    private final Path dir;
-    private final Path logs;
+    private Path dir;
+    private Path logs;
 
-    private final File binOutput;
-    private final File cfgOutput;
+    private File binOutput;
+    private File cfgOutput;
 
     private boolean extract;
-    public PlayerAPI() {
-        super();
-        ILoader bootstrap = WaterMedia.getLoader();
-        this.dir = bootstrap.tempDir().resolve("videolan");
-        this.logs = bootstrap.tempDir().resolve("logs/videolan.log");
-
-        this.binOutput = bootstrap.tempDir().resolve(VIDEOLAN_BIN_ASSET).toFile();
-        this.cfgOutput = bootstrap.tempDir().resolve(VIDEOLAN_VER_ASSET).toFile();
-    }
 
     @Override
     public Priority priority() {
@@ -115,6 +107,13 @@ public class PlayerAPI extends WaterMediaAPI {
 
     @Override
     public boolean prepare(ILoader bootCore) throws Exception {
+        ILoader bootstrap = WaterMedia.getLoader();
+        this.dir = Paths.get(WaterConfig.vlcInstallPath);
+        this.logs = dir.toAbsolutePath().resolve("logs/videolan.log");
+
+        this.zipOutputFile = bootstrap.tempDir().resolve(VIDEOLAN_BIN_ASSET).toFile();
+        this.configOutputFile = zipOutputFile.toPath().getParent().resolve(VIDEOLAN_CFG_NAME).toFile();
+
         String versionInJar = JarTool.readString(VIDEOLAN_VER_ASSET);
         String versionInFile = IOTool.readString(cfgOutput.toPath());
         boolean wrapped = OperativeSystem.isWrapped();

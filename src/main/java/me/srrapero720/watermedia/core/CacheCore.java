@@ -2,6 +2,7 @@ package me.srrapero720.watermedia.core;
 
 import me.srrapero720.watermedia.api.WaterInternalAPI;
 import me.srrapero720.watermedia.core.tools.DataTool;
+import me.srrapero720.watermedia.api.config.WaterConfig;
 import me.srrapero720.watermedia.loaders.ILoader;
 import org.apache.logging.log4j.Marker;
 import org.apache.logging.log4j.MarkerManager;
@@ -61,48 +62,20 @@ public class CacheCore extends WaterInternalAPI {
             boolean saved = false;
             File file = entry$getFile(entry.url);
 
-            try (OutputStream out = Files.newOutputStream(file.toPath())) {
-                out.write(data);
-                saved = true;
-            } catch (Exception e) { LOGGER.error(IT, "Failed to save cache file {}", url, e); }
-
-            // SAVE INDEX FIST
-            if (saved && refreshAll()) ENTRIES.put(url, entry);
-            else if (file.exists()) file.delete();
-        }
-    }
-
-    public static Entry getEntry(String url) {
-        synchronized (ENTRIES) {
-            return ENTRIES.get(url);
-        }
-    }
-
-    public static void updateEntry(Entry fresh) {
-        synchronized (ENTRIES) {
-            ENTRIES.put(fresh.url, fresh);
-        }
-    }
-
-    public static void deleteEntry(String url) {
-        synchronized (ENTRIES) {
-            ENTRIES.remove(url);
-            File file = entry$getFile(url);
-            if (file.exists()) file.delete();
-        }
-    }
-
     @Override
     public Priority priority() {
         return Priority.HIGHEST;
     }
 
     @Override
-    public boolean prepare(ILoader bootCore) throws Exception {
-        // SETUP
-        dir = bootCore.tempDir().toAbsolutePath().resolve("cache/pictures").toFile();
+    public boolean prepare(ILoader bootCore) {
+        dir = new File(WaterConfig.vlcInstallPath, "cache/pictures");
         index = new File(dir, "index");
-        LOGGER.info(IT, "Mounted on path '{}'", dir);
+
+        if (!released) {
+            LOGGER.error(IT, "Failed due boot API while is not released, boot cancelled");
+            return false;
+        }
 
         return !init;
     }
