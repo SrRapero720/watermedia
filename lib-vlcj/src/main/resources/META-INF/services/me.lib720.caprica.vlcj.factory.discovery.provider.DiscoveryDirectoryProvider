@@ -1,8 +1,0 @@
-me.lib720.caprica.vlcj.factory.discovery.provider.CustomDirectoryProvider
-me.lib720.caprica.vlcj.factory.discovery.provider.ConfigurationFileDiscoveryDirectoryProvider
-me.lib720.caprica.vlcj.factory.discovery.provider.JnaLibraryPathDirectoryProvider
-me.lib720.caprica.vlcj.factory.discovery.provider.LinuxWellKnownDirectoryProvider
-me.lib720.caprica.vlcj.factory.discovery.provider.OsxWellKnownDirectoryProvider
-me.lib720.caprica.vlcj.factory.discovery.provider.SystemPathDirectoryProvider
-me.lib720.caprica.vlcj.factory.discovery.provider.UserDirDirectoryProvider
-me.lib720.caprica.vlcj.factory.discovery.provider.WindowsInstallDirectoryProvider
