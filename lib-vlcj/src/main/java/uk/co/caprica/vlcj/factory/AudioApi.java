@@ -19,10 +19,10 @@
 
 package uk.co.caprica.vlcj.factory;
 
-import uk.co.caprica.vlcj.binding.LibVlc;
-import uk.co.caprica.vlcj.binding.NativeString;
 import uk.co.caprica.vlcj.binding.internal.libvlc_audio_output_device_t;
 import uk.co.caprica.vlcj.binding.internal.libvlc_audio_output_t;
+import uk.co.caprica.vlcj.binding.lib.LibVlc;
+import uk.co.caprica.vlcj.binding.support.strings.NativeString;
 import uk.co.caprica.vlcj.player.base.AudioDevice;
 
 import java.util.ArrayList;

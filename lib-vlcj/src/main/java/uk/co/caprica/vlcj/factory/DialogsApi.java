@@ -20,7 +20,7 @@
 package uk.co.caprica.vlcj.factory;
 
 import com.sun.jna.Pointer;
-import uk.co.caprica.vlcj.binding.LibVlc;
+import uk.co.caprica.vlcj.binding.lib.LibVlc;
 
 /**
  * Behaviour pertaining to native dialogs.

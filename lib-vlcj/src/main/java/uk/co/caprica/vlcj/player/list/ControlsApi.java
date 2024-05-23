@@ -19,7 +19,7 @@
 
 package uk.co.caprica.vlcj.player.list;
 
-import uk.co.caprica.vlcj.binding.LibVlc;
+import uk.co.caprica.vlcj.binding.lib.LibVlc;
 
 /**
  * Behaviour pertaining to media list player controls, like play, pause, stop of the list as a whole, play a specific

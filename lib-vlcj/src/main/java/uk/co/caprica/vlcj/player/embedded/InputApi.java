@@ -19,7 +19,7 @@
 
 package uk.co.caprica.vlcj.player.embedded;
 
-import uk.co.caprica.vlcj.binding.LibVlc;
+import uk.co.caprica.vlcj.binding.lib.LibVlc;
 
 /**
  * Behaviour pertaining to keyboard/mouse input-events.

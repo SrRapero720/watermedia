@@ -21,8 +21,8 @@ package uk.co.caprica.vlcj.media;
 
 import com.sun.jna.Pointer;
 import uk.co.caprica.vlcj.binding.internal.libvlc_picture_t;
-import uk.co.caprica.vlcj.binding.support.size_tByReference;
-import uk.co.caprica.vlcj.binding.LibVlc;
+import uk.co.caprica.vlcj.binding.lib.LibVlc;
+import uk.co.caprica.vlcj.binding.support.types.size_tByReference;
 
 /**
  * Picture.

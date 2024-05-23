@@ -22,11 +22,11 @@ package uk.co.caprica.vlcj.media.callback;
 import com.sun.jna.Pointer;
 import com.sun.jna.ptr.LongByReference;
 import com.sun.jna.ptr.PointerByReference;
-import uk.co.caprica.vlcj.binding.internal.libvlc_media_read_cb;
-import uk.co.caprica.vlcj.binding.internal.libvlc_media_seek_cb;
 import uk.co.caprica.vlcj.binding.internal.libvlc_media_close_cb;
 import uk.co.caprica.vlcj.binding.internal.libvlc_media_open_cb;
-import uk.co.caprica.vlcj.binding.support.size_t;
+import uk.co.caprica.vlcj.binding.internal.libvlc_media_read_cb;
+import uk.co.caprica.vlcj.binding.internal.libvlc_media_seek_cb;
+import uk.co.caprica.vlcj.binding.support.types.size_t;
 
 import java.io.IOException;
 

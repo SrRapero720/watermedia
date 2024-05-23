@@ -19,7 +19,7 @@
 
 package uk.co.caprica.vlcj.support.version;
 
-import uk.co.caprica.vlcj.binding.LibVlc;
+import uk.co.caprica.vlcj.binding.lib.LibVlc;
 
 /**
  * Holder for runtime LibVLC version information.

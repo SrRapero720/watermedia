@@ -20,7 +20,7 @@
 package uk.co.caprica.vlcj.media;
 
 import uk.co.caprica.vlcj.VideoLan4J;
-import uk.co.caprica.vlcj.binding.NativeUri;
+import uk.co.caprica.vlcj.binding.support.strings.NativeUri;
 
 import java.net.URL;
 import java.util.regex.Pattern;

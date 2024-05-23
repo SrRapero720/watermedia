@@ -19,7 +19,7 @@
 
 package uk.co.caprica.vlcj.factory;
 
-import uk.co.caprica.vlcj.binding.LibVlc;
+import uk.co.caprica.vlcj.binding.lib.LibVlc;
 import uk.co.caprica.vlcj.binding.internal.libvlc_module_description_t;
 import uk.co.caprica.vlcj.log.NativeLog;
 import uk.co.caprica.vlcj.media.TrackType;

@@ -19,10 +19,10 @@
 
 package uk.co.caprica.vlcj.media;
 
-import uk.co.caprica.vlcj.binding.NativeString;
 import uk.co.caprica.vlcj.binding.internal.libvlc_media_stats_t;
+import uk.co.caprica.vlcj.binding.lib.LibVlc;
+import uk.co.caprica.vlcj.binding.support.strings.NativeString;
 import uk.co.caprica.vlcj.player.base.State;
-import uk.co.caprica.vlcj.binding.LibVlc;
 
 import java.util.List;
 

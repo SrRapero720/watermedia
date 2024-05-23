@@ -17,58 +17,17 @@
  * Copyright 2009-2019 Caprica Software Limited.
  */
 
-package uk.co.caprica.vlcj.binding;
+package uk.co.caprica.vlcj.binding.lib;
 
 import com.sun.jna.Native;
-import com.sun.jna.StringArray;
-import uk.co.caprica.vlcj.binding.support.size_t;
-import uk.co.caprica.vlcj.binding.support.size_tByReference;
-import uk.co.caprica.vlcj.binding.internal.libvlc_audio_cleanup_cb;
-import uk.co.caprica.vlcj.binding.internal.libvlc_audio_drain_cb;
-import uk.co.caprica.vlcj.binding.internal.libvlc_audio_flush_cb;
-import uk.co.caprica.vlcj.binding.internal.libvlc_audio_output_device_t;
-import uk.co.caprica.vlcj.binding.internal.libvlc_audio_output_t;
-import uk.co.caprica.vlcj.binding.internal.libvlc_audio_pause_cb;
-import uk.co.caprica.vlcj.binding.internal.libvlc_audio_play_cb;
-import uk.co.caprica.vlcj.binding.internal.libvlc_audio_resume_cb;
-import uk.co.caprica.vlcj.binding.internal.libvlc_audio_set_volume_cb;
-import uk.co.caprica.vlcj.binding.internal.libvlc_audio_setup_cb;
-import uk.co.caprica.vlcj.binding.internal.libvlc_callback_t;
-import uk.co.caprica.vlcj.binding.internal.libvlc_dialog_cbs;
-import uk.co.caprica.vlcj.binding.internal.libvlc_dialog_id;
-import uk.co.caprica.vlcj.binding.internal.libvlc_display_callback_t;
-import uk.co.caprica.vlcj.binding.internal.libvlc_equalizer_t;
-import uk.co.caprica.vlcj.binding.internal.libvlc_event_e;
-import uk.co.caprica.vlcj.binding.internal.libvlc_event_u;
-import uk.co.caprica.vlcj.binding.internal.libvlc_event_manager_t;
-import uk.co.caprica.vlcj.binding.internal.libvlc_instance_t;
-import uk.co.caprica.vlcj.binding.internal.libvlc_lock_callback_t;
-import uk.co.caprica.vlcj.binding.internal.libvlc_log_cb;
-import uk.co.caprica.vlcj.binding.internal.libvlc_log_t;
-import uk.co.caprica.vlcj.binding.internal.libvlc_media_close_cb;
-import uk.co.caprica.vlcj.binding.internal.libvlc_media_discoverer_t;
-import uk.co.caprica.vlcj.binding.internal.libvlc_media_list_player_t;
-import uk.co.caprica.vlcj.binding.internal.libvlc_media_list_t;
-import uk.co.caprica.vlcj.binding.internal.libvlc_media_open_cb;
-import uk.co.caprica.vlcj.binding.internal.libvlc_media_player_t;
-import uk.co.caprica.vlcj.binding.internal.libvlc_media_read_cb;
-import uk.co.caprica.vlcj.binding.internal.libvlc_media_seek_cb;
-import uk.co.caprica.vlcj.binding.internal.libvlc_media_stats_t;
-import uk.co.caprica.vlcj.binding.internal.libvlc_media_t;
-import uk.co.caprica.vlcj.binding.internal.libvlc_module_description_t;
-import uk.co.caprica.vlcj.binding.internal.libvlc_picture_t;
-import uk.co.caprica.vlcj.binding.internal.libvlc_renderer_discoverer_t;
-import uk.co.caprica.vlcj.binding.internal.libvlc_renderer_item_t;
-import uk.co.caprica.vlcj.binding.internal.libvlc_media_thumbnail_request_t;
-import uk.co.caprica.vlcj.binding.internal.libvlc_track_description_t;
-import uk.co.caprica.vlcj.binding.internal.libvlc_unlock_callback_t;
-import uk.co.caprica.vlcj.binding.internal.libvlc_video_cleanup_cb;
-import uk.co.caprica.vlcj.binding.internal.libvlc_video_format_cb;
-import uk.co.caprica.vlcj.binding.internal.libvlc_video_viewpoint_t;
-
 import com.sun.jna.Pointer;
+import com.sun.jna.StringArray;
 import com.sun.jna.ptr.IntByReference;
 import com.sun.jna.ptr.PointerByReference;
+import uk.co.caprica.vlcj.binding.support.runtime.RuntimeUtil;
+import uk.co.caprica.vlcj.binding.internal.*;
+import uk.co.caprica.vlcj.binding.support.types.size_t;
+import uk.co.caprica.vlcj.binding.support.types.size_tByReference;
 
 /**
  * JNA interface to the libvlc native library.

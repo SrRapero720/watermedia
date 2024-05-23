@@ -17,7 +17,9 @@
  * Copyright 2009-2019 Caprica Software Limited.
  */
 
-package uk.co.caprica.vlcj.binding;
+package uk.co.caprica.vlcj.binding.support.init;
+
+import uk.co.caprica.vlcj.binding.lib.LibX11;
 
 import javax.swing.*;
 import java.awt.*;

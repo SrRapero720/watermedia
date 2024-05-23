@@ -19,7 +19,7 @@
 
 package uk.co.caprica.vlcj.player.renderer;
 
-import uk.co.caprica.vlcj.binding.LibVlc;
+import uk.co.caprica.vlcj.binding.lib.LibVlc;
 import uk.co.caprica.vlcj.binding.internal.libvlc_renderer_discoverer_t;
 
 /**

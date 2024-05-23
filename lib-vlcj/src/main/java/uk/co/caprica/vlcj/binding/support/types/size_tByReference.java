@@ -17,22 +17,21 @@
  * Copyright 2009-2019 Caprica Software Limited.
  */
 
-package uk.co.caprica.vlcj.binding.support;
+package uk.co.caprica.vlcj.binding.support.types;
 
-import com.sun.jna.IntegerType;
 import com.sun.jna.Native;
+import com.sun.jna.Pointer;
+import com.sun.jna.ptr.ByReference;
 
-/**
- * Native size_t type.
- */
-@SuppressWarnings("serial")
-public class size_t extends IntegerType {
+public class size_tByReference extends ByReference {
 
-    public size_t() {
-        this(0);
+    public size_tByReference() {
+        super(Native.SIZE_T_SIZE);
     }
 
-    public size_t(long value) {
-        super(Native.SIZE_T_SIZE, value);
+    public size_t getValue() {
+        Pointer pointer = getPointer();
+        return new size_t(Native.SIZE_T_SIZE == 8 ? pointer.getLong(0) : pointer.getInt(0));
     }
+
 }

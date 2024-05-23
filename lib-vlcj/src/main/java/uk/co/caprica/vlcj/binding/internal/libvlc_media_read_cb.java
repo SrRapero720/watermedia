@@ -19,10 +19,9 @@
 
 package uk.co.caprica.vlcj.binding.internal;
 
-import uk.co.caprica.vlcj.binding.support.size_t;
-
 import com.sun.jna.Callback;
 import com.sun.jna.Pointer;
+import uk.co.caprica.vlcj.binding.support.types.size_t;
 
 /**
  * Native read media callback.

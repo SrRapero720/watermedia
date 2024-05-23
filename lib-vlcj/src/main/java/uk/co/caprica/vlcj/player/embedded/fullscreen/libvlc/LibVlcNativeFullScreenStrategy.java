@@ -19,7 +19,7 @@
 
 package uk.co.caprica.vlcj.player.embedded.fullscreen.libvlc;
 
-import uk.co.caprica.vlcj.binding.LibVlc;
+import uk.co.caprica.vlcj.binding.lib.LibVlc;
 import uk.co.caprica.vlcj.binding.internal.libvlc_media_player_t;
 import uk.co.caprica.vlcj.player.embedded.fullscreen.FullScreenStrategy;
 

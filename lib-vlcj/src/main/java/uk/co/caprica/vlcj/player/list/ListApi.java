@@ -19,7 +19,7 @@
 
 package uk.co.caprica.vlcj.player.list;
 
-import uk.co.caprica.vlcj.binding.LibVlc;
+import uk.co.caprica.vlcj.binding.lib.LibVlc;
 import uk.co.caprica.vlcj.medialist.EventApi;
 import uk.co.caprica.vlcj.medialist.MediaApi;
 import uk.co.caprica.vlcj.medialist.MediaList;

@@ -20,7 +20,7 @@
 package uk.co.caprica.vlcj.player.component;
 
 import uk.co.caprica.vlcj.VideoLan4J;
-import uk.co.caprica.vlcj.binding.RuntimeUtil;
+import uk.co.caprica.vlcj.binding.support.runtime.RuntimeUtil;
 import uk.co.caprica.vlcj.factory.MediaPlayerFactory;
 import uk.co.caprica.vlcj.player.base.MediaPlayer;
 import uk.co.caprica.vlcj.player.component.callback.CallbackImagePainter;

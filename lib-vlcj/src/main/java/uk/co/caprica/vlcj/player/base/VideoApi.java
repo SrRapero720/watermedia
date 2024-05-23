@@ -20,10 +20,10 @@
 package uk.co.caprica.vlcj.player.base;
 
 import com.sun.jna.ptr.IntByReference;
-import uk.co.caprica.vlcj.binding.LibVlc;
-import uk.co.caprica.vlcj.binding.NativeString;
 import uk.co.caprica.vlcj.binding.internal.libvlc_video_adjust_option_t;
 import uk.co.caprica.vlcj.binding.internal.libvlc_video_viewpoint_t;
+import uk.co.caprica.vlcj.binding.lib.LibVlc;
+import uk.co.caprica.vlcj.binding.support.strings.NativeString;
 
 import java.awt.*;
 import java.util.List;

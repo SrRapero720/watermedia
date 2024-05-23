@@ -17,9 +17,10 @@
  * Copyright 2009-2019 Caprica Software Limited.
  */
 
-package uk.co.caprica.vlcj.binding;
+package uk.co.caprica.vlcj.binding.support.strings;
 
 import com.sun.jna.Pointer;
+import uk.co.caprica.vlcj.binding.lib.LibVlc;
 
 /**
  * Encapsulation of access to native strings.

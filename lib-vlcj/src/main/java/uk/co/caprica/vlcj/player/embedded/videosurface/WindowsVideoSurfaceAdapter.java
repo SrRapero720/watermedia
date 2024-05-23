@@ -20,7 +20,7 @@
 package uk.co.caprica.vlcj.player.embedded.videosurface;
 
 import com.sun.jna.Pointer;
-import uk.co.caprica.vlcj.binding.LibVlc;
+import uk.co.caprica.vlcj.binding.lib.LibVlc;
 import uk.co.caprica.vlcj.player.base.MediaPlayer;
 
 /**

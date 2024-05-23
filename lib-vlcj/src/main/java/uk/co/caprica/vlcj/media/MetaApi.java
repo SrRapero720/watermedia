@@ -20,8 +20,8 @@
 package uk.co.caprica.vlcj.media;
 
 import com.sun.jna.Pointer;
-import uk.co.caprica.vlcj.binding.LibVlc;
-import uk.co.caprica.vlcj.binding.NativeString;
+import uk.co.caprica.vlcj.binding.lib.LibVlc;
+import uk.co.caprica.vlcj.binding.support.strings.NativeString;
 
 import java.util.HashMap;
 import java.util.Map;

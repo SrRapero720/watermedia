@@ -22,10 +22,9 @@ package uk.co.caprica.vlcj.media;
 import com.sun.jna.Pointer;
 import com.sun.jna.Structure;
 import com.sun.jna.ptr.PointerByReference;
-import uk.co.caprica.vlcj.binding.NativeString;
-import me.lib720.caprica.vlcj.binding.internal.*;
-import uk.co.caprica.vlcj.binding.LibVlc;
 import uk.co.caprica.vlcj.binding.internal.*;
+import uk.co.caprica.vlcj.binding.lib.LibVlc;
+import uk.co.caprica.vlcj.binding.support.strings.NativeString;
 
 import java.util.*;
 

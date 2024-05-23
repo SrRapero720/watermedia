@@ -17,13 +17,13 @@
  * Copyright 2009-2019 Caprica Software Limited.
  */
 
-package uk.co.caprica.vlcj.binding;
+package uk.co.caprica.vlcj.binding.lib;
 
 import com.sun.jna.Native;
 import com.sun.jna.Pointer;
 import com.sun.jna.win32.StdCallLibrary;
 import com.sun.jna.win32.W32APIOptions;
-import uk.co.caprica.vlcj.binding.support.size_t;
+import uk.co.caprica.vlcj.binding.support.types.size_t;
 
 public interface Kernel32 extends StdCallLibrary {
 
