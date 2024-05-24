@@ -23,9 +23,8 @@ import com.sun.jna.CallbackThreadInitializer;
 import com.sun.jna.Native;
 import com.sun.jna.Pointer;
 import uk.co.caprica.vlcj.VideoLan4J;
-import uk.co.caprica.vlcj.binding.lib.LibVlc;
-import me.lib720.caprica.vlcj.binding.internal.*;
 import uk.co.caprica.vlcj.binding.internal.*;
+import uk.co.caprica.vlcj.binding.lib.LibVlc;
 
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;

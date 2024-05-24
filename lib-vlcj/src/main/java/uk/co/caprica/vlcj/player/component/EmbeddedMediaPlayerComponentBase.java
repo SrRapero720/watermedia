@@ -19,7 +19,6 @@
 
 package uk.co.caprica.vlcj.player.component;
 
-import me.lib720.caprica.vlcj.media.*;
 import uk.co.caprica.vlcj.media.*;
 import uk.co.caprica.vlcj.player.base.MediaPlayer;
 import uk.co.caprica.vlcj.player.base.MediaPlayerEventListener;

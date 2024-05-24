@@ -19,12 +19,11 @@
 
 package uk.co.caprica.vlcj.player.base;
 
-import uk.co.caprica.vlcj.binding.lib.LibVlc;
 import uk.co.caprica.vlcj.binding.internal.libvlc_media_t;
-import uk.co.caprica.vlcj.media.*;
-import me.lib720.caprica.vlcj.media.*;
+import uk.co.caprica.vlcj.binding.lib.LibVlc;
 import uk.co.caprica.vlcj.media.EventApi;
 import uk.co.caprica.vlcj.media.SubitemApi;
+import uk.co.caprica.vlcj.media.*;
 import uk.co.caprica.vlcj.media.callback.CallbackMedia;
 
 import java.net.URL;

@@ -27,9 +27,8 @@ import uk.co.caprica.vlcj.player.component.callback.CallbackImagePainter;
 import uk.co.caprica.vlcj.player.component.callback.ScaledCallbackImagePainter;
 import uk.co.caprica.vlcj.player.embedded.EmbeddedMediaPlayer;
 import uk.co.caprica.vlcj.player.embedded.fullscreen.FullScreenStrategy;
-import me.lib720.caprica.vlcj.player.embedded.videosurface.callback.*;
-import uk.co.caprica.vlcj.player.embedded.videosurface.callback.format.RV32BufferFormat;
 import uk.co.caprica.vlcj.player.embedded.videosurface.callback.*;
+import uk.co.caprica.vlcj.player.embedded.videosurface.callback.format.RV32BufferFormat;
 
 import javax.swing.*;
 import java.awt.*;
