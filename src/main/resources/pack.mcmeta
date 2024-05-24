@@ -1,8 +1,6 @@
 {
     "pack": {
-        "description": {
-            "text": "${modid} resources"
-        },
+        "description": "$brandname stub resources",
         "pack_format": 5
     }
 }

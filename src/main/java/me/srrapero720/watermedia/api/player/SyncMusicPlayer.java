@@ -1,6 +1,6 @@
 package me.srrapero720.watermedia.api.player;
 
-import me.lib720.caprica.vlcj.factory.MediaPlayerFactory;
+import uk.co.caprica.vlcj.factory.MediaPlayerFactory;
 
 /**
  * Player variant with NO VIDEO

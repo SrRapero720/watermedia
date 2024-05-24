@@ -1,18 +1,18 @@
 {
   "schemaVersion": 1,
-  "id": "${modid}",
-  "version": "${modversion}",
-  "name": "${modname}",
-  "description": "${moddescription}",
-  "authors": ${modauthorlist},
+  "id": "$id",
+  "version": "$version",
+  "name": "$brandname",
+  "description": "$description",
+  "authors": ${authors_list},
+  "contributors": ${contributors_list}
   "contact": {
     "homepage": "https://www.curseforge.com/minecraft/mc-mods/watermedia/",
     "sources": "https://github.com/SrRapero720/watermedia",
     "issues": "https://github.com/SrRapero720/watermedia/issues",
     "email": "SrRapero720@hotmail.com"
   },
-
-  "license": "${modlicense}",
+  "license": "$license",
   "icon": "pack.png",
   "environment": "client",
   "entrypoints": {
@@ -24,6 +24,6 @@
     "fancyvideo_api": "*"
   },
   "depends": {
-    "java": ">=8"
+    "java": "$javarange"
   }
 }

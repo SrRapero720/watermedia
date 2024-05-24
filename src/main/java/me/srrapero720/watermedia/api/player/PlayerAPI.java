@@ -1,9 +1,5 @@
 package me.srrapero720.watermedia.api.player;
 
-import me.lib720.caprica.vlcj.VideoLan4J;
-import me.lib720.caprica.vlcj.binding.RuntimeUtil;
-import me.lib720.caprica.vlcj.factory.MediaPlayerFactory;
-import me.lib720.caprica.vlcj.factory.discovery.NativeDiscovery;
 import me.srrapero720.watermedia.OperativeSystem;
 import me.srrapero720.watermedia.WaterMedia;
 import me.srrapero720.watermedia.api.WaterMediaAPI;
@@ -16,6 +12,10 @@ import org.apache.commons.io.file.PathUtils;
 import org.apache.commons.lang3.ArrayUtils;
 import org.apache.logging.log4j.Marker;
 import org.apache.logging.log4j.MarkerManager;
+import uk.co.caprica.vlcj.VideoLan4J;
+import uk.co.caprica.vlcj.binding.support.runtime.RuntimeUtil;
+import uk.co.caprica.vlcj.factory.MediaPlayerFactory;
+import uk.co.caprica.vlcj.factory.discovery.NativeDiscovery;
 
 import java.io.File;
 import java.io.IOException;

@@ -1,26 +1,21 @@
-import groovy.json.JsonOutput
 import net.darkhax.curseforgegradle.TaskPublishCurseForge
 
 plugins {
     id 'java'
     id 'idea'
-    id 'com.github.johnrengelman.shadow' version '8.1.1'
-    id 'com.google.osdetector' version '1.7.3'
+    id 'com.github.johnrengelman.shadow' version '8.1.+'
+    id 'com.google.osdetector' version '1.7.+'
     id 'com.modrinth.minotaur' version '2.+'
     id 'net.darkhax.curseforgegradle' version '1.1.+'
 }
 
-/* JAR INFO */
-version = modversion
-group = modgroup
-base { archivesName = "${modid}" }
+base {
+    archivesName = id
+    libsDirectory = new File("buildjars/");
+}
 
-/* JAVA CONFIG */
 java {
     withSourcesJar()
-    withJavadocJar()
-
-    /* SOURCE AND TARGET JAVA VERSION */
     sourceCompatibility = targetCompatibility = JavaVersion.VERSION_1_8
 }
 
@@ -29,78 +24,65 @@ sourcesJar {
     exclude("videolan/**.7z")
 }
 
-println "Gradle Java: ${JavaVersion.current()}"
-println "Java: ${System.getProperty 'java.version'}, JVM: ${System.getProperty 'java.vm.version'} (${System.getProperty 'java.vendor'}), Arch: ${System.getProperty 'os.arch'}"
+println("Gradle Java: ${JavaVersion.current()}")
+println("Java: ${System.getProperty 'java.version'}, JVM: ${System.getProperty 'java.vm.version'} (${System.getProperty 'java.vendor'}), Arch: ${System.getProperty 'os.arch'}, Encoding: ${System.getProperty "file.encoding"}")
 
-/* PROJECT REPOSITORIES */
 repositories {
     mavenCentral()
     maven { url 'https://jitpack.io' }
     maven { url "https://repo.spongepowered.org/maven" }
-    maven { url "https://maven.tterrag.com/" }
 }
 
 configurations {
     shadow.extendsFrom(implementation)
+    library
+}
+
+sourceSets {
+    test.compileClasspath += configurations.library
+    test.runtimeClasspath += configurations.library
+    test.compileClasspath += configurations.shadow
+    test.runtimeClasspath += configurations.shadow
+
+    main.compileClasspath += configurations.library
 }
 
 dependencies {
-    // FabricLoader (just to give loading support on FABRIC)
-    compileOnly("net.fabricmc:fabric-loader:${project.fabricv}") {
+    compileOnly("net.fabricmc:fabric-loader:$fabric_version") {
         exclude group: 'org.slf4j', module: 'slf4j-api'
     }
 
-    // LIBRARIES TO BE SHADOW
-    shadow ('com.github.sealedtx:java-youtube-downloader:3.2.3')
-    // THIS FREAKING DEP CARRIES 'CODEC', 'LANG3' AND 'COMMONS-IO'
-    shadow ('org.apache.commons:commons-compress:1.26.1') {
-//        exclude group: 'org.apache.commons', module: 'commons-lang3'
-//        exclude group: 'commons-io', module: 'commons-io'
-    }
-    shadow ('org.tukaani:xz:1.9')
+    // DEPENDENCIES
+    shadow "com.github.sealedtx:java-youtube-downloader:$jyd_version"
+    shadow "org.apache.commons:commons-compress:$commoncompress_version" // CARRIES 'CODEC', 'LANG3' AND 'COMMONS-IO'
+    shadow "org.tukaani:xz:$tukaani_version"
     shadow project(":lib-vlcj")
 
     // DEPENDENCIES INCLUDED IN MINECRAFT
-    compileOnly 'net.java.dev.jna:jna:4.4.0'
-    compileOnly 'net.java.dev.jna:platform:3.4.0'
-    compileOnly 'org.apache.logging.log4j:log4j-api:2.15.0'
-    compileOnly 'org.apache.logging.log4j:log4j-core:2.17.1'
-    compileOnly 'org.apache.commons:commons-lang3:3.12.0'
-    compileOnly 'commons-io:commons-io:2.7'
-    compileOnly 'com.google.code.gson:gson:2.10.1'
-    compileOnly 'org.lwjgl:lwjgl-opengl:3.2.2'
-    compileOnly 'org.lwjgl:lwjgl-openal:3.1.1'
-    compileOnly 'org.ow2.asm:asm-tree:9.1'
-    compileOnly(project(":lib-forge")) // MOCKED FORGE CLASSES - REMOVED ON JAR
+    library "net.java.dev.jna:jna:$jna_version"
+    library "net.java.dev.jna:platform:$jnaplatform_version"
+    library "org.apache.logging.log4j:log4j-api:$log4j_version"
+    library "org.apache.logging.log4j:log4j-core:$log4jcore_version"
+    library "org.apache.commons:commons-lang3:$commonslang3_version"
+    library "commons-io:commons-io:$commonsio_version"
+    library "com.google.code.gson:gson:$gson_version"
+    library "org.lwjgl:lwjgl-opengl:$opengl_version"
+    library "org.lwjgl:lwjgl-glfw:$opengl_version"
+    library "org.lwjgl:lwjgl-openal:$openal_version"
+    compileOnly project(":lib-forge")
 
     // TEST
-    testImplementation 'org.apache.logging.log4j:log4j-api:2.20.0'
-    testImplementation 'org.apache.logging.log4j:log4j-core:2.20.0'
-    testImplementation 'org.apache.commons:commons-lang3:3.12.0'
-    testImplementation 'commons-io:commons-io:2.7'
-    testImplementation 'com.google.code.gson:gson:2.10.1'
-    testImplementation 'org.lwjgl:lwjgl:3.2.2'
-    testImplementation 'org.lwjgl:lwjgl-opengl:3.2.2'
-    testImplementation 'org.lwjgl:lwjgl-openal:3.1.1'
-    testImplementation 'org.lwjgl:lwjgl-glfw:3.2.2'
-    testImplementation 'net.java.dev.jna:jna:4.4.0'
-    testImplementation 'net.java.dev.jna:platform:3.4.0'
-
-    testRuntimeOnly("org.lwjgl:lwjgl:3.2.2:natives-$osdetector.os")
-    testRuntimeOnly("org.lwjgl:lwjgl-opengl:3.2.2:natives-$osdetector.os")
-    testRuntimeOnly("org.lwjgl:lwjgl-glfw:3.2.2:natives-$osdetector.os")
+    testRuntimeOnly "org.lwjgl:lwjgl:$opengl_version:natives-$osdetector.os"
+    testRuntimeOnly "org.lwjgl:lwjgl-opengl:$opengl_version:natives-$osdetector.os"
+    testRuntimeOnly "org.lwjgl:lwjgl-glfw:$opengl_version:natives-$osdetector.os"
 }
 
 // Process target resources with mod info
-processResources {
-    filesMatching(['META-INF/mods.toml', 'pack.mcmeta', 'fabric.mod.json', "watermedia/version.cfg"]) {
-        def combinedMap = [:]
-        combinedMap.putAll(rootProject.properties)
-        combinedMap.putAll([
-                modauthorlist: JsonOutput.toJson(modauthor.trim().replaceAll(" ", "").split(","))
-        ])
 
-        expand(combinedMap)
+processResources {
+    outputs.upToDateWhen { false }
+    filesMatching(['META-INF/mods.toml', 'pack.mcmeta', 'fabric.mod.json', "watermedia/version.cfg"]) {
+        expand(project.properties)
     }
 }
 
@@ -127,65 +109,60 @@ shadowJar {
     archiveClassifier = ""
 }
 
-tasks.withType(JavaCompile).configureEach {
-    it.options.encoding = 'UTF-8'
-}
-tasks.processResources.outputs.upToDateWhen { false }
-
-// DO NOT RUN
 jar {
     duplicatesStrategy = DuplicatesStrategy.WARN
 
     manifest {
-        attributes([
-                "Specification-Title"       : modname,
-                "Specification-Vendor"      : modauthor,
-                "Specification-Version"     : modversion,
-                "Implementation-Title"      : modname,
-                "Implementation-Version"    : modversion,
-                "Implementation-Vendor"     : modauthor,
-                "Implementation-Timestamp"  : new Date().format("yyyy-MM-dd'T'HH:mm:ssZ")
-        ])
+        attributes "Specification-Title": id
+        attributes "Specification-Vendor": authors
+        attributes "Specification-Version": version
+        attributes "Implementation-Title": brandname
+        attributes "Implementation-Version": version
+        attributes "Implementation-Vendor": authors
+        attributes "Implementation-Timestamp": new Date().format("yyyy-MM-dd'T'HH:mm:ssZ")
+        attributes "Main-Class": "me.srrapero720.watermedia.Main"
     }
 
     finalizedBy "shadowJar"
 }
 
-task upload(type: GradleBuild) {
+task publishMod(type: GradleBuild) {
     description 'Uploads new version to modrinth and curseforge.'
     group = 'publishing'
-    tasks = [ 'curseforge', 'modrinth' ]
+    if (System.getenv("CURSEFORGE_TOKEN") != null && System.getenv("MODRINTH_TOKEN") != null) {
+        tasks = [ 'publishCurseForge', 'modrinth' ]
+    }
 }
 
-task curseforge(type: TaskPublishCurseForge) {
+task publishCurseForge(type: TaskPublishCurseForge) {
     disableVersionDetection()
 
     apiToken = System.getenv("CURSEFORGE_TOKEN") != null ? System.getenv("CURSEFORGE_TOKEN") : "empty"
 
     // MAIN FILE
     def mainFile = upload(curseforgeid, shadowJar)
-    mainFile.displayName = modnamebig + "/" + modversion
+    mainFile.displayName = brandname + "/" + version
     mainFile.changelog = getChangelogText(false)
     mainFile.changelogType = "markdown"
     mainFile.addModLoader("Forge", "NeoForge")
     mainFile.addJavaVersion("Java 21", "Java 17", "Java 11", "Java 8")
     mainFile.addGameVersion("1.16.5", "1.18.2", "1.19.2", "1.20.1", "client")
     mainFile.addIncompatibility("fancyvideo-api")
-    mainFile.releaseType = modversiontype
+    mainFile.releaseType = versiontype.toUpperCase()
 }
 
-tasks.modrinth.enabled = System.getenv("MODRINTH_TOKEN") != null
-tasks.modrinth.group = 'publishing'
 modrinth {
     token = System.getenv("MODRINTH_TOKEN")
-    versionName = modnamebig + "/" + modversion
+    versionName = brandname + "/" + version
     projectId = modrinthid
-    versionNumber = modversion
+    versionNumber = version
     versionType = versiontype
     uploadFile = shadowJar
     loaders = [ "forge", "neoforge" ]
     gameVersions = [ "1.16.5", "1.18.2", "1.19.2", "1.20.1" ]
     changelog = getChangelogText(true)
+
+    group = 'publishing'
 }
 
 String getChangelogText(boolean latest) {

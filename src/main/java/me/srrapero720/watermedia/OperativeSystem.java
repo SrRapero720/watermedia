@@ -1,7 +1,7 @@
 package me.srrapero720.watermedia;
 
 import com.sun.jna.Platform;
-import me.lib720.caprica.vlcj.binding.RuntimeUtil;
+import uk.co.caprica.vlcj.binding.support.runtime.RuntimeUtil;
 
 import static me.srrapero720.watermedia.WaterMedia.IT;
 import static me.srrapero720.watermedia.WaterMedia.LOGGER;

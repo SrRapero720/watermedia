@@ -1,7 +1,7 @@
 package me.srrapero720.watermedia.core.tools;
 
 import com.sun.jna.Platform;
-import me.lib720.caprica.vlcj.binding.RuntimeUtil;
+import uk.co.caprica.vlcj.binding.support.runtime.RuntimeUtil;
 import org.apache.logging.log4j.Marker;
 import org.apache.logging.log4j.MarkerManager;
 

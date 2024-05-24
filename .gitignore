@@ -16,6 +16,7 @@ bins
 
 # gradle
 build
+buildjars
 .gradle
 
 # other
