@@ -14,6 +14,10 @@ base {
     libsDirectory = new File("buildjars/");
 }
 
+test {
+    useJUnitPlatform()
+}
+
 java {
     withSourcesJar()
     sourceCompatibility = targetCompatibility = JavaVersion.VERSION_1_8
@@ -28,6 +32,7 @@ println("Gradle Java: ${JavaVersion.current()}")
 println("Java: ${System.getProperty 'java.version'}, JVM: ${System.getProperty 'java.vm.version'} (${System.getProperty 'java.vendor'}), Arch: ${System.getProperty 'os.arch'}, Encoding: ${System.getProperty "file.encoding"}")
 
 repositories {
+    google()
     mavenCentral()
     maven { url 'https://jitpack.io' }
     maven { url "https://repo.spongepowered.org/maven" }
@@ -71,7 +76,9 @@ dependencies {
     library "org.lwjgl:lwjgl-openal:$openal_version"
     compileOnly project(":lib-forge")
 
-    // TEST
+    // TEST DEPENDENCIES
+    testImplementation 'org.junit.jupiter:junit-jupiter-api:5.8.1'
+    testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine:5.8.1'
     testRuntimeOnly "org.lwjgl:lwjgl:$opengl_version:natives-$osdetector.os"
     testRuntimeOnly "org.lwjgl:lwjgl-opengl:$opengl_version:natives-$osdetector.os"
     testRuntimeOnly "org.lwjgl:lwjgl-glfw:$opengl_version:natives-$osdetector.os"
