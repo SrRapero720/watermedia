@@ -4,6 +4,7 @@ plugins {
 }
 
 base {
+    archivesName = id
     sourceCompatibility = JavaVersion.VERSION_1_8
     targetCompatibility = JavaVersion.VERSION_1_8
 }
@@ -18,11 +19,42 @@ repositories {
     maven { url 'https://jitpack.io' }
 }
 
+configurations {
+    api
+}
+
+sourceSets {
+    main.compileClasspath += configurations.api
+    main.runtimeClasspath += configurations.api
+}
+
 dependencies {
-    implementation "com.github.WaterMediaTeam:videolan-natives:$vlcj_natives_version"
+    api "com.github.WaterMediaTeam:videolan-natives:$vlcj_natives_version"
     compileOnly 'uk.co.caprica:vlcj-osx-stubs:1.0.0'
     compileOnly 'net.java.dev.jna:jna:4.4.0'
     compileOnly 'net.java.dev.jna:platform:3.4.0'
     compileOnly 'org.apache.logging.log4j:log4j-api:2.15.0'
     compileOnly 'org.apache.logging.log4j:log4j-core:2.17.1'
+}
+
+jar {
+    manifest {
+        attributes "Specification-Title": id
+        attributes "Specification-Vendor": authors
+        attributes "Specification-Version": version
+        attributes "Implementation-Title": brandname
+        attributes "Implementation-Version": version
+        attributes "Implementation-Vendor": authors
+        attributes "Implementation-Timestamp": new Date().format("yyyy-MM-dd'T'HH:mm:ssZ")
+    }
+
+    from {
+        configurations.api.collect {
+            it.isDirectory() ? it.matching {
+                exclude '*', 'META-INF/**'
+            } : zipTree(it).matching {
+                exclude '*', 'META-INF/**'
+            }
+        }
+    }
 }
