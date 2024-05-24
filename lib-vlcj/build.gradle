@@ -15,9 +15,11 @@ java {
 
 repositories {
     mavenCentral()
+    maven { url 'https://jitpack.io' }
 }
 
 dependencies {
+    implementation "com.github.WaterMediaTeam:videolan-natives:$vlcj_natives_version"
     compileOnly 'uk.co.caprica:vlcj-osx-stubs:1.0.0'
     compileOnly 'net.java.dev.jna:jna:4.4.0'
     compileOnly 'net.java.dev.jna:platform:3.4.0'
