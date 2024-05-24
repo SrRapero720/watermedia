@@ -1,7 +1,7 @@
 package me.srrapero720.watermedia.loaders;
 
 import me.srrapero720.watermedia.WaterMedia;
-import me.srrapero720.watermedia.core.tools.exceptions.IllegalTLauncherException;
+import me.srrapero720.watermedia.tools.exceptions.IllegalTLauncherException;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.loader.api.FabricLoader;
 import net.fabricmc.loader.api.entrypoint.PreLaunchEntrypoint;

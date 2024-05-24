@@ -3,7 +3,7 @@ package me.srrapero720.watermedia.api.image;
 import me.srrapero720.watermedia.api.image.decoders.GifDecoder;
 import me.srrapero720.watermedia.api.math.MathAPI;
 import me.srrapero720.watermedia.api.rendering.RenderAPI;
-import me.srrapero720.watermedia.core.tools.DataTool;
+import me.srrapero720.watermedia.tools.ByteTool;
 
 import java.awt.image.BufferedImage;
 import java.nio.ByteBuffer;
@@ -169,7 +169,7 @@ public class ImageRenderer {
             Arrays.fill(this.textures, -1);
         } else {
             this.flush();
-            RenderAPI.deleteTexture(DataTool.filterValue(this.textures, -1));
+            RenderAPI.deleteTexture(ByteTool.filterValue(this.textures, -1));
             Arrays.fill(this.textures, -1);
         }
     }

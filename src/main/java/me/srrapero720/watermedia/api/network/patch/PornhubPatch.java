@@ -3,7 +3,7 @@ package me.srrapero720.watermedia.api.network.patch;
 import me.srrapero720.watermedia.api.network.DynamicRequest;
 import me.srrapero720.watermedia.api.network.DynamicURL;
 import me.srrapero720.watermedia.api.network.models.pornhub.VideoQuality;
-import me.srrapero720.watermedia.tools.ByteTools;
+import me.srrapero720.watermedia.tools.ByteTool;
 import me.srrapero720.watermedia.tools.exceptions.PatchingURLException;
 
 import java.io.InputStream;
@@ -31,7 +31,7 @@ public class PornhubPatch extends URLPatch {
     public DynamicURL patch(DynamicURL dynamicURL, Quality prefQuality) throws PatchingURLException {
         super.patch(dynamicURL, prefQuality);
         try (DynamicRequest connection = new DynamicRequest(dynamicURL); InputStream reader = connection.getInputStream()) {
-            String source = new String(ByteTools.readAllBytes(reader), StandardCharsets.UTF_8);
+            String source = new String(ByteTool.readAllBytes(reader), StandardCharsets.UTF_8);
 
             List<String> urls = new ArrayList<>();
             List<VideoQuality> videoQualities = new ArrayList<>();

@@ -5,7 +5,7 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import me.srrapero720.watermedia.api.network.streams.StreamQuality;
-import me.srrapero720.watermedia.tools.ByteTools;
+import me.srrapero720.watermedia.tools.ByteTool;
 
 import java.io.IOException;
 import java.io.OutputStream;
@@ -65,8 +65,8 @@ public class Twitch {
         int responseCode = conn.getResponseCode();
         if (responseCode == HttpURLConnection.HTTP_NOT_FOUND) throw new StreamNotFound("Stream not found");
         return (responseCode == HttpURLConnection.HTTP_OK) ?
-                new String(ByteTools.readAllBytes(conn.getInputStream())) :
-                new String(ByteTools.readAllBytes(conn.getErrorStream()));
+                new String(ByteTool.readAllBytes(conn.getInputStream())) :
+                new String(ByteTool.readAllBytes(conn.getErrorStream()));
     }
 
     private static JsonElement post(String id, boolean isVOD) throws IOException {
@@ -80,7 +80,7 @@ public class Twitch {
             os.write(buildJsonString(id, isVOD).getBytes(StandardCharsets.UTF_8));
         }
 
-        return new JsonParser().parse(new String(ByteTools.readAllBytes(conn.getInputStream())));
+        return new JsonParser().parse(new String(ByteTool.readAllBytes(conn.getInputStream())));
     }
 
     /**

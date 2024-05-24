@@ -1,4 +1,4 @@
-package me.srrapero720.watermedia.core.tools;
+package me.srrapero720.watermedia.tools;
 
 import org.apache.logging.log4j.Marker;
 import org.apache.logging.log4j.MarkerManager;

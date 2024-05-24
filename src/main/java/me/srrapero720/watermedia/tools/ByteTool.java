@@ -1,4 +1,4 @@
-package me.srrapero720.watermedia.core.tools;
+package me.srrapero720.watermedia.tools;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -7,7 +7,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.ServiceLoader;
 
-public class DataTool {
+public class ByteTool {
     public static final String USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Safari/537.36 Edg/112.0.1722.68";
     private static final int DEFAULT_BUFFER_SIZE = 8192;
     private static final int MAX_BUFFER_SIZE = Integer.MAX_VALUE - 8;

@@ -1,4 +1,4 @@
-package me.srrapero720.watermedia.core.tools;
+package me.srrapero720.watermedia.tools;
 
 import me.srrapero720.watermedia.api.image.decoders.GifDecoder;
 import org.apache.commons.compress.archivers.sevenz.SevenZArchiveEntry;

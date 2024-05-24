@@ -1,11 +1,11 @@
 package me.srrapero720.watermedia.api.image;
 
 import me.lib720.watermod.concurrent.ThreadCore;
-import me.lib720.watermod.safety.TryCore;
 import me.srrapero720.watermedia.api.cache.CacheAPI;
 import me.srrapero720.watermedia.api.cache.CacheEntry;
+import me.srrapero720.watermedia.api.image.decoders.GifDecoder;
 import me.srrapero720.watermedia.api.network.DynamicURL;
-import org.apache.commons.io.IOUtils;
+import me.srrapero720.watermedia.tools.ByteTool;
 import org.apache.logging.log4j.Marker;
 import org.apache.logging.log4j.MarkerManager;
 
@@ -105,12 +105,12 @@ public class ImageFetch {
                 LOGGER.error(IT, "An exception occurred while loading image", e);
             }
             if (failed != null) failed.run(e);
-            CacheCore.deleteEntry(url);
+            CacheAPI.deleteEntry(url);
         }
     }
 
     private static byte[] load(DynamicURL url) throws IOException, NoPictureException {
-        CacheCore.Entry entry = CacheCore.getEntry(url.getSource());
+        CacheEntry entry = CacheAPI.getEntry(url.getSource());
         long requestTime = System.currentTimeMillis();
         URLConnection request = url.asURL().openConnection();
         request.setDefaultUseCaches(false);
@@ -141,7 +141,7 @@ public class ImageFetch {
 
             // EXPIRATION GETTER FIRST
             if (maxAge != null && !maxAge.isEmpty()) {
-                long parsed = DataTool.parseLongOr(maxAge, -1);
+                long parsed = ByteTool.parseLongOr(maxAge, -1);
                 if (parsed != -1)
                     expTimestamp = requestTime + Long.parseLong(maxAge) * 100;
             }
@@ -173,16 +173,16 @@ public class ImageFetch {
                     File file = entry.getFile();
 
                     if (file.exists()) try (FileInputStream fileStream = new FileInputStream(file)) {
-                        return DataTool.readAllBytes(fileStream);
+                        return ByteTool.readAllBytes(fileStream);
                     } finally {
-                        CacheCore.updateEntry(new CacheCore.Entry(url.getSource(), freshTag, lastTimestamp, expTimestamp));
+                        CacheAPI.updateEntry(new CacheEntry(url.getSource(), freshTag, lastTimestamp, expTimestamp));
                     }
                 }
             }
 
 
-            byte[] data = DataTool.readAllBytes(in);
-            CacheCore.saveFile(url.getSource(), tag, lastTimestamp, expTimestamp, data);
+            byte[] data = ByteTool.readAllBytes(in);
+            CacheAPI.saveFile(url.getSource(), tag, lastTimestamp, expTimestamp, data);
             return data;
         } finally {
             if (request instanceof HttpURLConnection) ((HttpURLConnection) request).disconnect();

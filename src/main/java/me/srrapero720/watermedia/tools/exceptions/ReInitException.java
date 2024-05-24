@@ -1,4 +1,4 @@
-package me.srrapero720.watermedia.core.tools.exceptions;
+package me.srrapero720.watermedia.tools.exceptions;
 
 public class ReInitException extends Exception {
     public ReInitException(String module) {

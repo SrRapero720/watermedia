@@ -1,8 +1,8 @@
 package me.srrapero720.watermedia.loaders;
 
 import me.srrapero720.watermedia.WaterMedia;
-import me.srrapero720.watermedia.core.tools.exceptions.IllegalEnvironmentException;
-import me.srrapero720.watermedia.core.tools.exceptions.IllegalTLauncherException;
+import me.srrapero720.watermedia.tools.exceptions.IllegalEnvironmentException;
+import me.srrapero720.watermedia.tools.exceptions.IllegalTLauncherException;
 import net.minecraftforge.fml.ExtensionPoint;
 import net.minecraftforge.fml.ModLoadingContext;
 import net.minecraftforge.fml.common.Mod;

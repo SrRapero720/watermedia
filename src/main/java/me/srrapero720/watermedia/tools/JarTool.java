@@ -1,4 +1,4 @@
-package me.srrapero720.watermedia.core.tools;
+package me.srrapero720.watermedia.tools;
 
 import com.google.gson.Gson;
 import com.google.gson.reflect.TypeToken;
@@ -26,7 +26,7 @@ public class JarTool {
     @Deprecated
     public static String readString(ClassLoader loader, String source) {
         try {
-            byte[] bytes = DataTool.readAllBytes(readResource$byClassLoader(source, loader));
+            byte[] bytes = ByteTool.readAllBytes(readResource$byClassLoader(source, loader));
             return new String(bytes, Charset.defaultCharset());
         } catch (Exception e) {
             return null;
@@ -87,7 +87,7 @@ public class JarTool {
     // WITHOUT CLASSLOADER OPTIONS
     public static String readString(String from) {
         try (InputStream is = readResource(from)) {
-            byte[] bytes = DataTool.readAllBytes(is);
+            byte[] bytes = ByteTool.readAllBytes(is);
             return new String(bytes, Charset.defaultCharset());
         } catch (Exception e) {
             return null;

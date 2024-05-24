@@ -1,9 +1,9 @@
 package me.srrapero720.watermedia;
 
 import me.srrapero720.watermedia.api.WaterMediaAPI;
-import me.srrapero720.watermedia.core.tools.DataTool;
-import me.srrapero720.watermedia.core.tools.JarTool;
 import me.srrapero720.watermedia.loaders.ILoader;
+import me.srrapero720.watermedia.tools.ByteTool;
+import me.srrapero720.watermedia.tools.JarTool;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.logging.log4j.Marker;
@@ -58,7 +58,7 @@ public class WaterMedia {
 			return;
 		}
 
-		List<WaterMediaAPI> modules = DataTool.toList(ServiceLoader.load(WaterMediaAPI.class));
+		List<WaterMediaAPI> modules = ByteTool.toList(ServiceLoader.load(WaterMediaAPI.class));
 		modules.sort(Comparator.comparingInt(e -> e.priority().ordinal()));
 
 		for (WaterMediaAPI m: modules) {

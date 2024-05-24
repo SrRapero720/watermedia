@@ -1,6 +1,6 @@
 package me.srrapero720.watermedia;
 
-import me.srrapero720.watermedia.core.tools.exceptions.ReInitException;
+import me.srrapero720.watermedia.tools.exceptions.ReInitException;
 
 public class Testo {
     public static void main(String[] args) throws ReInitException {

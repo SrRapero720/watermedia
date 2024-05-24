@@ -1,17 +1,17 @@
 package me.srrapero720.watermedia.api.player.vlc;
 
-import uk.co.caprica.vlcj.factory.MediaPlayerFactory;
-import uk.co.caprica.vlcj.player.embedded.videosurface.callback.BufferFormat;
 import me.srrapero720.watermedia.api.player.PlayerAPI;
 import me.srrapero720.watermedia.api.player.SyncBasePlayer;
 import me.srrapero720.watermedia.api.rendering.RenderAPI;
-import me.srrapero720.watermedia.core.tools.annotations.Experimental;
+import me.srrapero720.watermedia.tools.annotations.Experimental;
 import org.apache.logging.log4j.Marker;
 import org.apache.logging.log4j.MarkerManager;
 import org.lwjgl.opengl.GL11;
 import org.lwjgl.opengl.GL12;
 import org.lwjgl.opengl.GL15;
 import org.lwjgl.opengl.GL21;
+import uk.co.caprica.vlcj.factory.MediaPlayerFactory;
+import uk.co.caprica.vlcj.player.embedded.videosurface.callback.BufferFormat;
 
 import java.awt.*;
 import java.nio.Buffer;

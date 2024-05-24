@@ -1,5 +1,11 @@
 package me.srrapero720.watermedia.api.player;
 
+import me.srrapero720.watermedia.api.network.DynamicURL;
+import me.srrapero720.watermedia.api.network.NetworkAPI;
+import me.srrapero720.watermedia.tools.ThreadTool;
+import me.srrapero720.watermedia.tools.annotations.Experimental;
+import org.apache.logging.log4j.Marker;
+import org.apache.logging.log4j.MarkerManager;
 import uk.co.caprica.vlcj.binding.support.runtime.RuntimeUtil;
 import uk.co.caprica.vlcj.factory.MediaPlayerFactory;
 import uk.co.caprica.vlcj.media.InfoApi;
@@ -10,12 +16,6 @@ import uk.co.caprica.vlcj.player.base.State;
 import uk.co.caprica.vlcj.player.component.CallbackMediaPlayerComponent;
 import uk.co.caprica.vlcj.player.embedded.videosurface.callback.RenderCallback;
 import uk.co.caprica.vlcj.player.embedded.videosurface.callback.SimpleBufferFormatCallback;
-import me.srrapero720.watermedia.api.url.UrlAPI;
-import me.srrapero720.watermedia.api.url.fixers.URLFixer;
-import me.srrapero720.watermedia.core.tools.ThreadTool;
-import me.srrapero720.watermedia.core.tools.annotations.Experimental;
-import org.apache.logging.log4j.Marker;
-import org.apache.logging.log4j.MarkerManager;
 
 import java.net.URL;
 
@@ -70,11 +70,11 @@ public abstract class SyncBasePlayer {
     private boolean rpa(CharSequence url) { // request player action
         if (raw == null) return false;
         try {
-            URLFixer.Result result = UrlAPI.fixURL(url.toString());
+            DynamicURL result = NetworkAPI.patchURL(new DynamicURL(url.toString()));
             if (result == null) throw new IllegalArgumentException("Invalid URL");
 
-            this.url = result.url;
-            this.live = result.assumeStream;
+            this.url = result.asURL();
+            this.live = result.isStream();
             return true;
         } catch (Exception e) {
             LOGGER.error(IT, "Failed to load player", e);
