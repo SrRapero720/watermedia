@@ -1,5 +1,5 @@
 me.srrapero720.watermedia.api.player.PlayerAPI
-me.srrapero720.watermedia.core.CacheCore
+me.srrapero720.watermedia.api.cache.CacheAPI
 me.srrapero720.watermedia.api.image.ImageAPI
 me.srrapero720.watermedia.api.config.ConfigAPI
 me.srrapero720.watermedia.api.image.ImageAPI

@@ -57,7 +57,7 @@ public interface ILoader {
      */
     ILoader DEFAULT = new ILoader() {
         private final Path tmpPath = new File(System.getProperty("java.io.tmpdir")).toPath().toAbsolutePath().resolve("watermedia");
-        private final Path processPath = new File("").toPath().toAbsolutePath();
+        private final Path processPath = new File("build/data").toPath().toAbsolutePath();
 
         @Override
         public String name() {
