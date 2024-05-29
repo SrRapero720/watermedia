@@ -1,6 +1,7 @@
 package me.srrapero720.watermedia;
 
 import com.sun.jna.Platform;
+import me.srrapero720.watermedia.runtime.UnsupportedArchitechtureException;
 import uk.co.caprica.vlcj.binding.support.runtime.RuntimeUtil;
 
 import static me.srrapero720.watermedia.WaterMedia.IT;
@@ -46,12 +47,13 @@ public enum OperativeSystem {
     public static String getArch() { return OS.arch; }
 
     private static OperativeSystem getOs() {
+        if (!Platform.is64Bit()) throw new UnsupportedArchitechtureException();
         switch (Platform.ARCH) {
             case "x86-64":
             case "amd64":
-                if (RuntimeUtil.isWindows()) return WIN_X64;
-                if (RuntimeUtil.isMac()) return MAC_X64;
-                if (RuntimeUtil.isNix()) return NIX_X64;
+                if (Platform.isWindows()) return WIN_X64;
+                if (Platform.isMac()) return MAC_X64;
+                if (Platform.isLinux()) return NIX_X64;
             case "arm64":
                 if (RuntimeUtil.isWindows()) return WIN_ARM64;
                 if (RuntimeUtil.isMac()) return MAC_ARM64;
