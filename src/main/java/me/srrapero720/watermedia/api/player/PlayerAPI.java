@@ -1,5 +1,6 @@
 package me.srrapero720.watermedia.api.player;
 
+import com.sun.jna.Platform;
 import me.srrapero720.watermedia.OperativeSystem;
 import me.srrapero720.watermedia.WaterMedia;
 import me.srrapero720.watermedia.api.WaterMediaAPI;
@@ -13,8 +14,6 @@ import org.apache.commons.io.file.PathUtils;
 import org.apache.commons.lang3.ArrayUtils;
 import org.apache.logging.log4j.Marker;
 import org.apache.logging.log4j.MarkerManager;
-import uk.co.caprica.vlcj.VideoLan4J;
-import uk.co.caprica.vlcj.binding.support.runtime.RuntimeUtil;
 import uk.co.caprica.vlcj.factory.MediaPlayerFactory;
 import uk.co.caprica.vlcj.factory.discovery.NativeDiscovery;
 
@@ -166,12 +165,12 @@ public class PlayerAPI extends WaterMediaAPI {
         }
 
         // VLCJ INIT
-        VideoLan4J.init(dir.toAbsolutePath());
+//        VideoLan4J.init(dir.toAbsolutePath()); //
 
         // VLC INIT, this need to be soft-crashed because api and game can still work without VLC
         try {
             String[] args = JarTool.readArrayAndParse("videolan/arguments.json", ARGVARS);
-            String[] args2 = ArrayUtils.addAll(args, RuntimeUtil.isWindows() ? "--aout=directsound" : "--aout={mmdevice,waveout}");
+            String[] args2 = ArrayUtils.addAll(args, Platform.isWindows() ? "--aout=directsound" : "--aout={mmdevice,waveout}");
             DEFAULT_FACTORY = customFactory(args2);
             DEFAULT_SONG_FACTORY = customFactory(ArrayUtils.addAll(args, "--vout=none"));
         } catch (Exception e) {

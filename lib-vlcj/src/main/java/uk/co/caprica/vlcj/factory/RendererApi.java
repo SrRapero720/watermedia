@@ -25,7 +25,7 @@ import com.sun.jna.ptr.PointerByReference;
 import uk.co.caprica.vlcj.binding.internal.libvlc_rd_description_t;
 import uk.co.caprica.vlcj.binding.internal.libvlc_renderer_discoverer_t;
 import uk.co.caprica.vlcj.binding.lib.LibVlc;
-import uk.co.caprica.vlcj.binding.support.types.size_t;
+import uk.co.caprica.vlcj.binding.lib.types.size_t;
 import uk.co.caprica.vlcj.player.renderer.RendererDiscoverer;
 import uk.co.caprica.vlcj.player.renderer.RendererDiscovererDescription;
 

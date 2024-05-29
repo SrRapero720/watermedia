@@ -1,12 +1,12 @@
 package me.srrapero720.watermedia.api.player;
 
+import com.sun.jna.Platform;
 import me.srrapero720.watermedia.api.network.DynamicURL;
 import me.srrapero720.watermedia.api.network.NetworkAPI;
 import me.srrapero720.watermedia.tools.ThreadTool;
 import me.srrapero720.watermedia.tools.annotations.Experimental;
 import org.apache.logging.log4j.Marker;
 import org.apache.logging.log4j.MarkerManager;
-import uk.co.caprica.vlcj.binding.support.runtime.RuntimeUtil;
 import uk.co.caprica.vlcj.factory.MediaPlayerFactory;
 import uk.co.caprica.vlcj.media.InfoApi;
 import uk.co.caprica.vlcj.media.MediaType;
@@ -271,7 +271,7 @@ public abstract class SyncBasePlayer {
      */
     public long getDuration() {
         if (raw == null) return 0L;
-        if (!isValid() || (RuntimeUtil.isNix() && getRawPlayerState().equals(State.STOPPED))) return 0L;
+        if (!isValid() || (Platform.isLinux() && getRawPlayerState().equals(State.STOPPED))) return 0L;
         return raw.mediaPlayer().status().length();
     }
 

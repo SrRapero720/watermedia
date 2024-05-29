@@ -20,8 +20,8 @@
 package uk.co.caprica.vlcj.media;
 
 import com.sun.jna.Pointer;
+import uk.co.caprica.vlcj.VideoLan4J;
 import uk.co.caprica.vlcj.binding.lib.LibVlc;
-import uk.co.caprica.vlcj.binding.support.strings.NativeString;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -83,7 +83,7 @@ public final class MetaApi extends BaseApi {
     }
 
     private String getMetaValue(Pointer pointer) {
-        return NativeString.copyAndFreeNativeString(pointer);
+        return VideoLan4J.copyAndFreeNativeString(pointer);
     }
 
 }

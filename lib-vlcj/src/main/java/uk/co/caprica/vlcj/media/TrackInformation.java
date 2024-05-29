@@ -22,9 +22,9 @@ package uk.co.caprica.vlcj.media;
 import com.sun.jna.Pointer;
 import com.sun.jna.Structure;
 import com.sun.jna.ptr.PointerByReference;
+import uk.co.caprica.vlcj.VideoLan4J;
 import uk.co.caprica.vlcj.binding.internal.*;
 import uk.co.caprica.vlcj.binding.lib.LibVlc;
-import uk.co.caprica.vlcj.binding.support.strings.NativeString;
 
 import java.util.*;
 
@@ -105,15 +105,15 @@ final class TrackInformation {
 
     private static TrackInfo getUnknownTrackInfo(libvlc_media_track_t track) {
         return new UnknownTrackInfo(
-            track.i_codec,
-            track.i_original_fourcc,
-            track.i_id,
-            track.i_profile,
-            track.i_level,
-            track.i_bitrate,
-            NativeString.copyNativeString(track.psz_language),
-            NativeString.copyNativeString(track.psz_description),
-            codecDescription(TrackType.UNKNOWN, track.i_codec)
+                track.i_codec,
+                track.i_original_fourcc,
+                track.i_id,
+                track.i_profile,
+                track.i_level,
+                track.i_bitrate,
+                VideoLan4J.copyNativeString(track.psz_language),
+                VideoLan4J.copyNativeString(track.psz_description),
+                codecDescription(TrackType.UNKNOWN, track.i_codec)
         );
     }
 
@@ -121,28 +121,28 @@ final class TrackInformation {
         track.u.setType(libvlc_video_track_t.class);
         track.u.read();
         return new VideoTrackInfo(
-            track.i_codec,
-            track.i_original_fourcc,
-            track.i_id,
-            track.i_profile,
-            track.i_level,
-            track.i_bitrate,
-            NativeString.copyNativeString(track.psz_language),
-            NativeString.copyNativeString(track.psz_description),
-            track.u.video.i_width,
-            track.u.video.i_height,
-            track.u.video.i_sar_num,
-            track.u.video.i_sar_den,
-            track.u.video.i_frame_rate_num,
-            track.u.video.i_frame_rate_den,
-            VideoOrientation.videoOrientation(track.u.video.i_orientation),
-            VideoProjection.videoProjection(track.u.video.i_projection),
-            track.u.video.pose.f_yaw,
-            track.u.video.pose.f_pitch,
-            track.u.video.pose.f_roll,
-            track.u.video.pose.f_field_of_view,
-            null,
-            codecDescription(TrackType.VIDEO, track.i_codec)
+                track.i_codec,
+                track.i_original_fourcc,
+                track.i_id,
+                track.i_profile,
+                track.i_level,
+                track.i_bitrate,
+                VideoLan4J.copyNativeString(track.psz_language),
+                VideoLan4J.copyNativeString(track.psz_description),
+                track.u.video.i_width,
+                track.u.video.i_height,
+                track.u.video.i_sar_num,
+                track.u.video.i_sar_den,
+                track.u.video.i_frame_rate_num,
+                track.u.video.i_frame_rate_den,
+                VideoOrientation.videoOrientation(track.u.video.i_orientation),
+                VideoProjection.videoProjection(track.u.video.i_projection),
+                track.u.video.pose.f_yaw,
+                track.u.video.pose.f_pitch,
+                track.u.video.pose.f_roll,
+                track.u.video.pose.f_field_of_view,
+                null,
+                codecDescription(TrackType.VIDEO, track.i_codec)
         );
     }
 
@@ -150,16 +150,16 @@ final class TrackInformation {
         track.u.setType(libvlc_audio_track_t.class);
         track.u.read();
         return new AudioTrackInfo(
-            track.i_codec,
-            track.i_original_fourcc,
-            track.i_id,
-            track.i_profile,
-            track.i_level,
-            track.i_bitrate,
-            NativeString.copyNativeString(track.psz_language),
-            NativeString.copyNativeString(track.psz_description),
-            track.u.audio.i_channels,
-            track.u.audio.i_rate,
+                track.i_codec,
+                track.i_original_fourcc,
+                track.i_id,
+                track.i_profile,
+                track.i_level,
+                track.i_bitrate,
+                VideoLan4J.copyNativeString(track.psz_language),
+                VideoLan4J.copyNativeString(track.psz_description),
+                track.u.audio.i_channels,
+                track.u.audio.i_rate,
             codecDescription(TrackType.AUDIO, track.i_codec)
         );
     }
@@ -168,16 +168,16 @@ final class TrackInformation {
         track.u.setType(libvlc_subtitle_track_t.class);
         track.u.read();
         return new TextTrackInfo(
-            track.i_codec,
-            track.i_original_fourcc,
-            track.i_id,
-            track.i_profile,
-            track.i_level,
-            track.i_bitrate,
-            NativeString.copyNativeString(track.psz_language),
-            NativeString.copyNativeString(track.psz_description),
-            NativeString.copyNativeString(track.u.subtitle.psz_encoding),
-            codecDescription(TrackType.TEXT, track.i_codec)
+                track.i_codec,
+                track.i_original_fourcc,
+                track.i_id,
+                track.i_profile,
+                track.i_level,
+                track.i_bitrate,
+                VideoLan4J.copyNativeString(track.psz_language),
+                VideoLan4J.copyNativeString(track.psz_description),
+                VideoLan4J.copyNativeString(track.u.subtitle.psz_encoding),
+                codecDescription(TrackType.TEXT, track.i_codec)
         );
     }
 

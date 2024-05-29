@@ -20,10 +20,10 @@
 package uk.co.caprica.vlcj.player.base;
 
 import com.sun.jna.ptr.IntByReference;
+import uk.co.caprica.vlcj.VideoLan4J;
 import uk.co.caprica.vlcj.binding.internal.libvlc_video_adjust_option_t;
 import uk.co.caprica.vlcj.binding.internal.libvlc_video_viewpoint_t;
 import uk.co.caprica.vlcj.binding.lib.LibVlc;
-import uk.co.caprica.vlcj.binding.support.strings.NativeString;
 
 import java.awt.*;
 import java.util.List;
@@ -185,7 +185,7 @@ public final class VideoApi extends BaseApi {
      * @return aspect ratio
      */
     public String aspectRatio() {
-        return NativeString.copyAndFreeNativeString(LibVlc.libvlc_video_get_aspect_ratio(mediaPlayerInstance));
+        return VideoLan4J.copyAndFreeNativeString(LibVlc.libvlc_video_get_aspect_ratio(mediaPlayerInstance));
     }
 
     /**
@@ -221,7 +221,7 @@ public final class VideoApi extends BaseApi {
      * @return crop geometry
      */
     public String cropGeometry() {
-        return NativeString.copyAndFreeNativeString(LibVlc.libvlc_video_get_crop_geometry(mediaPlayerInstance));
+        return VideoLan4J.copyAndFreeNativeString(LibVlc.libvlc_video_get_crop_geometry(mediaPlayerInstance));
     }
 
     /**

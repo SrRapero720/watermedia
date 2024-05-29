@@ -19,7 +19,7 @@
 
 package uk.co.caprica.vlcj.player.component;
 
-import uk.co.caprica.vlcj.binding.support.runtime.RuntimeUtil;
+import com.sun.jna.Platform;
 import uk.co.caprica.vlcj.factory.MediaPlayerFactory;
 import uk.co.caprica.vlcj.player.embedded.EmbeddedMediaPlayer;
 import uk.co.caprica.vlcj.player.embedded.fullscreen.FullScreenStrategy;
@@ -135,7 +135,7 @@ public class EmbeddedMediaPlayerComponent extends EmbeddedMediaPlayerComponentBa
 
     private void initInputEvents(InputEvents inputEvents) {
         if (inputEvents == null) {
-            inputEvents = RuntimeUtil.isNix() || RuntimeUtil.isMac() ? InputEvents.DEFAULT : InputEvents.DISABLE_NATIVE;
+            inputEvents = Platform.isLinux() || Platform.isMac() ? InputEvents.DEFAULT : InputEvents.DISABLE_NATIVE;
         }
         switch (inputEvents) {
             case NONE:

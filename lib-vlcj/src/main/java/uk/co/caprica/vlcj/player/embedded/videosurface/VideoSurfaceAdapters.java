@@ -19,7 +19,7 @@
 
 package uk.co.caprica.vlcj.player.embedded.videosurface;
 
-import uk.co.caprica.vlcj.binding.support.runtime.RuntimeUtil;
+import com.sun.jna.Platform;
 
 /**
  * Utility class to create a {@link VideoSurfaceAdapter} for the current run-time operating system.
@@ -35,11 +35,11 @@ public final class VideoSurfaceAdapters {
      * @return video surface adapter
      */
     public static VideoSurfaceAdapter getVideoSurfaceAdapter() {
-        if (RuntimeUtil.isNix()) {
+        if (Platform.isLinux()) {
             return new LinuxVideoSurfaceAdapter();
-        } else if (RuntimeUtil.isWindows()) {
+        } else if (Platform.isWindows()) {
             return new WindowsVideoSurfaceAdapter();
-        } else if (RuntimeUtil.isMac()) {
+        } else if (Platform.isMac()) {
             return new OsxVideoSurfaceAdapter();
         } else {
             throw new RuntimeException("Unable to create a video surface - failed to detect a supported operating system");

@@ -19,8 +19,8 @@
 
 package uk.co.caprica.vlcj.player.component;
 
+import com.sun.jna.Platform;
 import uk.co.caprica.vlcj.VideoLan4J;
-import uk.co.caprica.vlcj.binding.support.runtime.RuntimeUtil;
 import uk.co.caprica.vlcj.factory.MediaPlayerFactory;
 import uk.co.caprica.vlcj.player.base.MediaPlayer;
 import uk.co.caprica.vlcj.player.component.callback.CallbackImagePainter;
@@ -164,13 +164,13 @@ public class CallbackMediaPlayerComponent extends EmbeddedMediaPlayerComponentBa
         return new BufferFormatCallback() {
             @Override
             public void allocatedBuffers(ByteBuffer[] buffers) {
-                VideoLan4J.native$checkClassLoader(mediaPlayer.getClassLoader());
+                VideoLan4J.checkClassLoader(mediaPlayer.getClassLoader());
                 cb.allocatedBuffers(buffers);
             }
 
             @Override
             public BufferFormat getBufferFormat(int sourceWidth, int sourceHeight) {
-                VideoLan4J.native$checkClassLoader(mediaPlayer.getClassLoader());
+                VideoLan4J.checkClassLoader(mediaPlayer.getClassLoader());
                 return cb.getBufferFormat(sourceWidth, sourceHeight);
             }
         };
@@ -178,7 +178,7 @@ public class CallbackMediaPlayerComponent extends EmbeddedMediaPlayerComponentBa
 
     private RenderCallback init$buildClassLoaderSafeCallback(RenderCallback cb) {
         return (mediaPlayer, nativeBuffers, bufferFormat) -> {
-            VideoLan4J.native$checkClassLoader(mediaPlayer.getClassLoader());
+            VideoLan4J.checkClassLoader(mediaPlayer.getClassLoader());
             cb.display(mediaPlayer, nativeBuffers, bufferFormat);
         };
     }
@@ -276,7 +276,7 @@ public class CallbackMediaPlayerComponent extends EmbeddedMediaPlayerComponentBa
 
     private void initInputEvents(InputEvents inputEvents) {
         if (inputEvents == null) {
-            inputEvents = RuntimeUtil.isNix() || RuntimeUtil.isMac() ? InputEvents.DEFAULT : InputEvents.DISABLE_NATIVE;
+            inputEvents = Platform.isLinux() || Platform.isMac() ? InputEvents.DEFAULT : InputEvents.DISABLE_NATIVE;
         }
         switch (inputEvents) {
             case NONE:

@@ -19,9 +19,9 @@
 
 package uk.co.caprica.vlcj.media;
 
+import uk.co.caprica.vlcj.VideoLan4J;
 import uk.co.caprica.vlcj.binding.internal.libvlc_media_stats_t;
 import uk.co.caprica.vlcj.binding.lib.LibVlc;
-import uk.co.caprica.vlcj.binding.support.strings.NativeString;
 import uk.co.caprica.vlcj.player.base.State;
 
 import java.util.List;
@@ -44,7 +44,7 @@ public final class InfoApi extends BaseApi {
      * @return media resource locator
      */
     public String mrl() {
-        return NativeString.copyAndFreeNativeString(LibVlc.libvlc_media_get_mrl(mediaInstance));
+        return VideoLan4J.copyAndFreeNativeString(LibVlc.libvlc_media_get_mrl(mediaInstance));
     }
 
     /**

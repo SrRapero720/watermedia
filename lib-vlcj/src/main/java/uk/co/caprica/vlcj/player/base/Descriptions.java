@@ -22,12 +22,12 @@ package uk.co.caprica.vlcj.player.base;
 import com.sun.jna.Pointer;
 import com.sun.jna.Structure;
 import com.sun.jna.ptr.PointerByReference;
+import uk.co.caprica.vlcj.VideoLan4J;
 import uk.co.caprica.vlcj.binding.internal.libvlc_chapter_description_t;
 import uk.co.caprica.vlcj.binding.internal.libvlc_media_player_t;
 import uk.co.caprica.vlcj.binding.internal.libvlc_title_description_t;
 import uk.co.caprica.vlcj.binding.internal.libvlc_track_description_t;
 import uk.co.caprica.vlcj.binding.lib.LibVlc;
-import uk.co.caprica.vlcj.binding.support.strings.NativeString;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -39,7 +39,7 @@ final class Descriptions {
         PointerByReference titles = new PointerByReference();
         int titleCount = LibVlc.libvlc_media_player_get_full_title_descriptions(mediaPlayerInstance, titles);
         if (titleCount != -1) {
-            result = new ArrayList<TitleDescription>(titleCount);
+            result = new ArrayList<>(titleCount);
             Pointer[] pointers = titles.getValue().getPointerArray(0, titleCount);
             for (Pointer pointer : pointers) {
                 // WATERMeDIA PATCH - start
@@ -47,11 +47,11 @@ final class Descriptions {
 //                libvlc_title_description_t titleDescription = ReflectTool.invokeWithReturn("newInstance", Structure.class, null, libvlc_title_description_t.class, pointer);
                 // WATERMeDIA PATCH - end
                 titleDescription.read();
-                result.add(new TitleDescription(titleDescription.i_duration, NativeString.copyNativeString(titleDescription.psz_name), titleDescription.b_menu != 0));
+                result.add(new TitleDescription(titleDescription.i_duration, VideoLan4J.copyNativeString(titleDescription.psz_name), titleDescription.b_menu != 0));
             }
             LibVlc.libvlc_title_descriptions_release(titles.getValue(), titleCount);
         } else {
-            result = new ArrayList<TitleDescription>(0);
+            result = new ArrayList<>(0);
         }
         return result;
 
@@ -70,11 +70,11 @@ final class Descriptions {
 //                libvlc_chapter_description_t chapterDescription = ReflectTool.invokeWithReturn("newInstance", Structure.class, null, libvlc_chapter_description_t.class, pointer);
                 // WATERMeDIA PATCH - end
                 chapterDescription.read();
-                result.add(new ChapterDescription(chapterDescription.i_time_offset, chapterDescription.i_duration, NativeString.copyNativeString(chapterDescription.psz_name)));
+                result.add(new ChapterDescription(chapterDescription.i_time_offset, chapterDescription.i_duration, VideoLan4J.copyNativeString(chapterDescription.psz_name)));
             }
             LibVlc.libvlc_chapter_descriptions_release(chapters.getValue(), chapterCount);
         } else {
-            result = new ArrayList<ChapterDescription>(0);
+            result = new ArrayList<>(0);
         }
         return result;
     }

@@ -24,12 +24,12 @@ import com.sun.jna.Native;
 import com.sun.jna.Pointer;
 import com.sun.jna.ptr.IntByReference;
 import com.sun.jna.ptr.PointerByReference;
+import uk.co.caprica.vlcj.VideoLan4J;
 import uk.co.caprica.vlcj.binding.internal.libvlc_instance_t;
 import uk.co.caprica.vlcj.binding.internal.libvlc_log_cb;
 import uk.co.caprica.vlcj.binding.internal.libvlc_log_t;
 import uk.co.caprica.vlcj.binding.lib.LibC;
 import uk.co.caprica.vlcj.binding.lib.LibVlc;
-import uk.co.caprica.vlcj.binding.support.strings.NativeString;
 
 import java.nio.ByteBuffer;
 import java.util.List;
@@ -201,7 +201,7 @@ public final class NativeLog {
     private String getString(PointerByReference pointer) {
         // The string is copied but not freed, the native string will be reclaimed when the native callback returns
         Pointer value = pointer.getValue();
-        return value != null ? NativeString.copyNativeString(value) : null;
+        return value != null ? VideoLan4J.copyNativeString(value) : null;
     }
 
     /**

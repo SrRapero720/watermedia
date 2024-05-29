@@ -173,7 +173,7 @@ abstract public class NativeEventManager<E,L> {
      * @param event event to raise, may be <code>null</code> and if so will be ignored
      */
     public final void raiseEvent(EventNotification<L> event) {
-        VideoLan4J.native$checkClassLoader(classLoader); // WATERMeDIA PATCH
+        VideoLan4J.checkClassLoader(classLoader); // WATERMeDIA PATCH
         if (event != null && !eventListenerList.isEmpty()) {
             for (L listener : eventListenerList) {
                  event.notify(listener);
@@ -203,7 +203,7 @@ abstract public class NativeEventManager<E,L> {
 
         @Override
         public void callback(libvlc_event_t event, Pointer userData) {
-            VideoLan4J.native$checkClassLoader(classLoader); // WATERMeDIA PATCH
+            VideoLan4J.checkClassLoader(classLoader); // WATERMeDIA PATCH
             raiseEvent(onCreateEvent(libvlcInstance, event, eventObject));
         }
 

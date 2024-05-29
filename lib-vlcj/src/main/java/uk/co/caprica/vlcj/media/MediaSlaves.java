@@ -21,10 +21,10 @@ package uk.co.caprica.vlcj.media;
 
 import com.sun.jna.Pointer;
 import com.sun.jna.ptr.PointerByReference;
+import uk.co.caprica.vlcj.VideoLan4J;
 import uk.co.caprica.vlcj.binding.internal.libvlc_media_slave_t;
 import uk.co.caprica.vlcj.binding.internal.libvlc_media_t;
 import uk.co.caprica.vlcj.binding.lib.LibVlc;
-import uk.co.caprica.vlcj.binding.support.strings.NativeString;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -42,7 +42,7 @@ final class MediaSlaves {
             Pointer[] pointers = slavesPointer.getValue().getPointerArray(0, numberOfSlaves);
             for (Pointer pointer : pointers) {
                 libvlc_media_slave_t slave = new libvlc_media_slave_t(pointer);
-                result.add(new MediaSlave(NativeString.copyNativeString(slave.psz_uri), MediaSlaveType.mediaSlaveType(slave.i_type), slave.i_priority));
+                result.add(new MediaSlave(VideoLan4J.copyNativeString(slave.psz_uri), MediaSlaveType.mediaSlaveType(slave.i_type), slave.i_priority));
             }
         }
         // In this case the native structure must be freed even if the count is zero

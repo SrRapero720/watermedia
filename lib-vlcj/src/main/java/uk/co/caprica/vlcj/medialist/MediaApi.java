@@ -19,9 +19,9 @@
 
 package uk.co.caprica.vlcj.medialist;
 
+import uk.co.caprica.vlcj.VideoLan4J;
 import uk.co.caprica.vlcj.binding.internal.libvlc_media_t;
 import uk.co.caprica.vlcj.binding.lib.LibVlc;
-import uk.co.caprica.vlcj.binding.support.strings.NativeString;
 import uk.co.caprica.vlcj.media.Media;
 import uk.co.caprica.vlcj.media.MediaFactory;
 import uk.co.caprica.vlcj.media.MediaRef;
@@ -221,7 +221,7 @@ public final class MediaApi extends BaseApi {
             List<String> result = new ArrayList<String>(count);
             for (int i = 0; i < count; i++) {
                 libvlc_media_t item = LibVlc.libvlc_media_list_item_at_index(mediaListInstance, i);
-                result.add(NativeString.copyAndFreeNativeString(LibVlc.libvlc_media_get_mrl(item)));
+                result.add(VideoLan4J.copyAndFreeNativeString(LibVlc.libvlc_media_get_mrl(item)));
                 LibVlc.libvlc_media_release(item);
             }
             return result;
@@ -243,7 +243,7 @@ public final class MediaApi extends BaseApi {
             libvlc_media_t media = LibVlc.libvlc_media_list_item_at_index(mediaListInstance, index);
             if (media != null) {
                 try {
-                    return NativeString.copyAndFreeNativeString(LibVlc.libvlc_media_get_mrl(media));
+                    return VideoLan4J.copyAndFreeNativeString(LibVlc.libvlc_media_get_mrl(media));
                 }
                 finally {
                     LibVlc.libvlc_media_release(media);

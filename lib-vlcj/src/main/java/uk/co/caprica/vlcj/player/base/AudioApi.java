@@ -19,10 +19,10 @@
 
 package uk.co.caprica.vlcj.player.base;
 
+import uk.co.caprica.vlcj.VideoLan4J;
 import uk.co.caprica.vlcj.binding.internal.libvlc_audio_output_device_t;
 import uk.co.caprica.vlcj.binding.internal.libvlc_equalizer_t;
 import uk.co.caprica.vlcj.binding.lib.LibVlc;
-import uk.co.caprica.vlcj.binding.support.strings.NativeString;
 import uk.co.caprica.vlcj.player.base.callback.AudioCallback;
 
 import java.util.ArrayList;
@@ -78,7 +78,7 @@ public final class AudioApi extends BaseApi implements EqualizerListener {
      * @return identifier of the current audio output device, or <code>null</code> if not available
      */
     public String outputDevice() {
-        return NativeString.copyAndFreeNativeString(LibVlc.libvlc_audio_output_device_get(mediaPlayerInstance));
+        return VideoLan4J.copyAndFreeNativeString(LibVlc.libvlc_audio_output_device_get(mediaPlayerInstance));
     }
 
     /**
@@ -109,8 +109,8 @@ public final class AudioApi extends BaseApi implements EqualizerListener {
         if (audioDevices != null) {
             libvlc_audio_output_device_t audioDevice = audioDevices;
             while (audioDevice != null) {
-                String device = NativeString.copyNativeString(audioDevice.psz_device);
-                String description = NativeString.copyNativeString(audioDevice.psz_description);
+                String device = VideoLan4J.copyNativeString(audioDevice.psz_device);
+                String description = VideoLan4J.copyNativeString(audioDevice.psz_description);
                 result.add(new AudioDevice(device, description));
                 audioDevice = audioDevice.p_next;
             }

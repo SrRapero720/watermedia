@@ -19,9 +19,9 @@
 
 package uk.co.caprica.vlcj.factory.discovery.provider;
 
+import com.sun.jna.Platform;
 import com.sun.jna.platform.win32.Advapi32Util;
 import com.sun.jna.platform.win32.WinReg;
-import uk.co.caprica.vlcj.binding.support.runtime.RuntimeUtil;
 import uk.co.caprica.vlcj.factory.discovery.NativeDiscovery;
 
 import java.io.File;
@@ -64,7 +64,7 @@ public class WindowsInstallDirectoryProvider implements DiscoveryDirectoryProvid
 
     @Override
     public boolean supported() {
-        return RuntimeUtil.isWindows();
+        return Platform.isWindows();
     }
 
     private String getVlcInstallDir() {

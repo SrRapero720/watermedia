@@ -19,9 +19,10 @@
 
 package uk.co.caprica.vlcj.media;
 
-import uk.co.caprica.vlcj.binding.lib.LibVlc;
+import uk.co.caprica.vlcj.VideoLan4J;
 import uk.co.caprica.vlcj.binding.internal.libvlc_instance_t;
 import uk.co.caprica.vlcj.binding.internal.libvlc_media_t;
+import uk.co.caprica.vlcj.binding.lib.LibVlc;
 import uk.co.caprica.vlcj.media.callback.CallbackMedia;
 
 import java.net.URL;
@@ -233,10 +234,7 @@ public final class MediaFactory {
     }
 
     private static libvlc_media_t newMediaInstance(libvlc_instance_t libvlcInstance, URL url) {
-        String mrl = MediaResourceLocator.encodeMrl(url);
-        return MediaResourceLocator.isLocation(mrl) ?
-            LibVlc.libvlc_media_new_location(libvlcInstance, mrl) :
-            LibVlc.libvlc_media_new_path(libvlcInstance, mrl);
+        return VideoLan4J.getMediaInstance(libvlcInstance, url);
     }
 
     private static libvlc_media_t newMediaInstance(libvlc_instance_t libvlcInstance, CallbackMedia callbackMedia) {

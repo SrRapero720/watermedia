@@ -2,7 +2,6 @@ package me.srrapero720.watermedia;
 
 import com.sun.jna.Platform;
 import me.srrapero720.watermedia.runtime.UnsupportedArchitechtureException;
-import uk.co.caprica.vlcj.binding.support.runtime.RuntimeUtil;
 
 import static me.srrapero720.watermedia.WaterMedia.IT;
 import static me.srrapero720.watermedia.WaterMedia.LOGGER;
@@ -55,14 +54,14 @@ public enum OperativeSystem {
                 if (Platform.isMac()) return MAC_X64;
                 if (Platform.isLinux()) return NIX_X64;
             case "arm64":
-                if (RuntimeUtil.isWindows()) return WIN_ARM64;
-                if (RuntimeUtil.isMac()) return MAC_ARM64;
-                if (RuntimeUtil.isNix()) return NIX_ARM64;
+                if (Platform.isWindows()) return WIN_ARM64;
+                if (Platform.isMac()) return MAC_ARM64;
+                if (Platform.isLinux()) return NIX_ARM64;
             case "armel":
             case "arm":
-                if (RuntimeUtil.isWindows()) return WIN_ARM;
-                if (RuntimeUtil.isMac()) return MAC_ARM;
-                if (RuntimeUtil.isNix()) return NIX_ARM;
+                if (Platform.isWindows()) return WIN_ARM;
+                if (Platform.isMac()) return MAC_ARM;
+                if (Platform.isLinux()) return NIX_ARM;
             case "x86":
                 throw new IllegalStateException("Detected unsupported arch x86");
             default:

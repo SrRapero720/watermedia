@@ -44,12 +44,14 @@ configurations {
 }
 
 sourceSets {
-    test.compileClasspath += configurations.library
-    test.runtimeClasspath += configurations.library
+    // SHADOW
     test.compileClasspath += configurations.shadow
     test.runtimeClasspath += configurations.shadow
 
+    // LIBRARY
     main.compileClasspath += configurations.library
+    test.compileClasspath += configurations.library
+    test.runtimeClasspath += configurations.library
 }
 
 dependencies {
@@ -60,7 +62,8 @@ dependencies {
     }
 
     // DEPENDENCIES
-    shadow "com.github.sealedtx:java-youtube-downloader:$jyd_version"
+    shadow "com.github.WaterMediaTeam:videolan-natives:$vlcj_natives_version"
+    shadow "com.github.WaterMediaTeam:ytdl-java:$jyd_version"
     shadow "org.apache.commons:commons-compress:$commoncompress_version" // CARRIES 'CODEC', 'LANG3' AND 'COMMONS-IO'
     shadow "org.tukaani:xz:$tukaani_version"
     shadow project(":lib-vlcj")

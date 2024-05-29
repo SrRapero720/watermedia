@@ -20,8 +20,9 @@
 package uk.co.caprica.vlcj.factory.discovery.strategy;
 
 import com.sun.jna.NativeLibrary;
+import com.sun.jna.Platform;
+import uk.co.caprica.vlcj.VideoLan4J;
 import uk.co.caprica.vlcj.binding.lib.LibC;
-import uk.co.caprica.vlcj.binding.support.runtime.RuntimeUtil;
 import uk.co.caprica.vlcj.factory.discovery.provider.DirectoryProviderDiscoveryStrategy;
 
 /**
@@ -47,7 +48,7 @@ public class OsxNativeDiscoveryStrategy extends DirectoryProviderDiscoveryStrate
 
     @Override
     public boolean supported() {
-        return RuntimeUtil.isMac();
+        return Platform.isMac();
     }
 
     @Override
@@ -63,8 +64,8 @@ public class OsxNativeDiscoveryStrategy extends DirectoryProviderDiscoveryStrate
      * @param path
      */
     private void forceLoadLibVlcCore(String path) {
-        NativeLibrary.addSearchPath(RuntimeUtil.getLibVlcCoreLibraryName(), path);
-        NativeLibrary.getInstance(RuntimeUtil.getLibVlcCoreLibraryName());
+        NativeLibrary.addSearchPath(VideoLan4J.LIBVLC_NAME, path);
+        NativeLibrary.getInstance(VideoLan4J.LIBVLCCORE_NAME);
     }
 
     @Override

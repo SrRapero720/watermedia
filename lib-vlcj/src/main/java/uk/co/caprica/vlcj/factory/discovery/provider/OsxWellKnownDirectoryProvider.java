@@ -19,7 +19,7 @@
 
 package uk.co.caprica.vlcj.factory.discovery.provider;
 
-import uk.co.caprica.vlcj.binding.support.runtime.RuntimeUtil;
+import com.sun.jna.Platform;
 
 /**
  * Implementation of a directory provider that returns a list of well-known directory locations to search on OSX.
@@ -38,7 +38,7 @@ public class OsxWellKnownDirectoryProvider extends WellKnownDirectoryProvider {
 
     @Override
     public boolean supported() {
-        return RuntimeUtil.isMac();
+        return Platform.isMac();
     }
 
 }

@@ -20,11 +20,11 @@
 package uk.co.caprica.vlcj.player.embedded.videosurface;
 
 import com.sun.jna.NativeLong;
+import com.sun.jna.Platform;
 import com.sun.jna.Pointer;
-import uk.co.caprica.vlcj.binding.support.runtime.RuntimeUtil;
 import uk.co.caprica.vlcj.binding.lib.Kernel32;
 import uk.co.caprica.vlcj.binding.lib.LibC;
-import uk.co.caprica.vlcj.binding.support.types.size_t;
+import uk.co.caprica.vlcj.binding.lib.types.size_t;
 import uk.co.caprica.vlcj.player.embedded.videosurface.callback.BufferFormat;
 
 import java.nio.ByteBuffer;
@@ -75,7 +75,7 @@ final class NativeBuffers {
             nativeBuffers[i] = buffer;
             pointers[i] = Pointer.createConstant(ByteBufferFactory.getAddress(buffer));
             if (lockBuffers) {
-                if (!RuntimeUtil.isWindows()) {
+                if (!Platform.isWindows()) {
                     LibC.INSTANCE.mlock(pointers[i], new NativeLong(buffer.capacity()));
                 } else {
                     Kernel32.INSTANCE.VirtualLock(pointers[i], new size_t(buffer.capacity()));
@@ -89,7 +89,7 @@ final class NativeBuffers {
         if (nativeBuffers != null) {
             if (lockBuffers) {
                 for (int i = 0; i < nativeBuffers.length; i++) {
-                    if (!RuntimeUtil.isWindows()) {
+                    if (!Platform.isWindows()) {
                         LibC.INSTANCE.munlock(pointers[i], new NativeLong(nativeBuffers[i].capacity()));
                     } else {
                         Kernel32.INSTANCE.VirtualUnlock(pointers[i], new size_t(nativeBuffers[i].capacity()));

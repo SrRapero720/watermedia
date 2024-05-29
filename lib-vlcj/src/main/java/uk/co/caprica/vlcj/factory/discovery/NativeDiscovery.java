@@ -2,19 +2,19 @@ package uk.co.caprica.vlcj.factory.discovery;
 
 import com.sun.jna.NativeLibrary;
 import com.sun.jna.StringArray;
-import uk.co.caprica.vlcj.binding.lib.LibVlc;
-import uk.co.caprica.vlcj.binding.support.runtime.RuntimeUtil;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+import org.apache.logging.log4j.Marker;
+import org.apache.logging.log4j.MarkerManager;
+import uk.co.caprica.vlcj.VideoLan4J;
 import uk.co.caprica.vlcj.binding.internal.libvlc_instance_t;
+import uk.co.caprica.vlcj.binding.lib.LibVlc;
 import uk.co.caprica.vlcj.factory.MediaPlayerFactory;
 import uk.co.caprica.vlcj.factory.discovery.strategy.LinuxNativeDiscoveryStrategy;
 import uk.co.caprica.vlcj.factory.discovery.strategy.NativeDiscoveryStrategy;
 import uk.co.caprica.vlcj.factory.discovery.strategy.OsxNativeDiscoveryStrategy;
 import uk.co.caprica.vlcj.factory.discovery.strategy.WindowsNativeDiscoveryStrategy;
 import uk.co.caprica.vlcj.support.version.LibVlcVersion;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
-import org.apache.logging.log4j.Marker;
-import org.apache.logging.log4j.MarkerManager;
 
 import java.lang.ref.Reference;
 import java.lang.reflect.Field;
@@ -119,7 +119,7 @@ public class NativeDiscovery {
                     String path = discoveryStrategy.discover();
                     if (path != null) {
                         if (discoveryStrategy.onFound(path)) {
-                            NativeLibrary.addSearchPath(RuntimeUtil.getLibVlcLibraryName(), path);
+                            NativeLibrary.addSearchPath(VideoLan4J.LIBVLC_NAME, path);
                         }
                         tryPluginPath(path, discoveryStrategy);
                         if (tryLoadingLibrary()) {
@@ -166,10 +166,10 @@ public class NativeDiscovery {
 
             Map<String, Reference<NativeLibrary>> libs = (Map<String, Reference<NativeLibrary>>) libraries.get(null);
             Map<String, List<String>> paths = (Map<String, List<String>>) searchPaths.get(null);
-            libs.remove(RuntimeUtil.getLibVlcCoreLibraryName());
-            paths.remove(RuntimeUtil.getLibVlcCoreLibraryName());
-            libs.remove(RuntimeUtil.getLibVlcLibraryName());
-            paths.remove(RuntimeUtil.getLibVlcLibraryName());
+            libs.remove(VideoLan4J.LIBVLCCORE_NAME);
+            paths.remove(VideoLan4J.LIBVLCCORE_NAME);
+            libs.remove(VideoLan4J.LIBVLC_NAME);
+            paths.remove(VideoLan4J.LIBVLC_NAME);
             return true;
         } catch (IllegalArgumentException | IllegalAccessException | NoSuchFieldException e) {
             LOGGER.error(IT, "attemptFix failed", e);

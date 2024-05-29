@@ -34,7 +34,7 @@ final class ResetMediaEventHandler extends MediaPlayerEventAdapter {
 
     @Override
     public void finished(MediaPlayer mediaPlayer) {
-        VideoLan4J.native$checkClassLoader(mediaPlayer.getClassLoader()); // WATERMeDIA PATCH
+        VideoLan4J.checkClassLoader(mediaPlayer.getClassLoader()); // WATERMeDIA PATCH
         // It is not allowed to call back into LibVLC from this native thread, so offload to a task to repeat play
         mediaPlayer.submit(new ResetMediaTask(mediaPlayer));
     }

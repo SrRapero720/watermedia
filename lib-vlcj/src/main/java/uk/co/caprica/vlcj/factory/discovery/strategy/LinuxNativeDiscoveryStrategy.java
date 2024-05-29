@@ -19,8 +19,8 @@
 
 package uk.co.caprica.vlcj.factory.discovery.strategy;
 
+import com.sun.jna.Platform;
 import uk.co.caprica.vlcj.binding.lib.LibC;
-import uk.co.caprica.vlcj.binding.support.runtime.RuntimeUtil;
 import uk.co.caprica.vlcj.factory.discovery.provider.DirectoryProviderDiscoveryStrategy;
 
 /**
@@ -44,7 +44,7 @@ public class LinuxNativeDiscoveryStrategy extends DirectoryProviderDiscoveryStra
 
     @Override
     public boolean supported() {
-        return RuntimeUtil.isNix();
+        return Platform.isLinux();
     }
 
     @Override

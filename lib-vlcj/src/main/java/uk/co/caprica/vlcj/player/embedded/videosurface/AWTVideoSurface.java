@@ -20,8 +20,8 @@
 package uk.co.caprica.vlcj.player.embedded.videosurface;
 
 import com.sun.jna.Native;
+import com.sun.jna.Platform;
 import uk.co.caprica.vlcj.binding.lib.LibX11;
-import uk.co.caprica.vlcj.binding.support.runtime.RuntimeUtil;
 
 import java.awt.*;
 
@@ -52,7 +52,7 @@ abstract class AWTVideoSurface extends VideoSurface {
      * One-time initialisation.
      */
     static {
-        if (RuntimeUtil.isNix()) {
+        if (Platform.isLinux()) {
             LibX11.INSTANCE.XInitThreads();
             System.loadLibrary("jawt");
         }

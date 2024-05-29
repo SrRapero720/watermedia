@@ -19,10 +19,10 @@
 
 package uk.co.caprica.vlcj.factory;
 
+import uk.co.caprica.vlcj.VideoLan4J;
 import uk.co.caprica.vlcj.binding.internal.libvlc_audio_output_device_t;
 import uk.co.caprica.vlcj.binding.internal.libvlc_audio_output_t;
 import uk.co.caprica.vlcj.binding.lib.LibVlc;
-import uk.co.caprica.vlcj.binding.support.strings.NativeString;
 import uk.co.caprica.vlcj.player.base.AudioDevice;
 
 import java.util.ArrayList;
@@ -51,8 +51,8 @@ public final class AudioApi extends BaseApi {
         if (audioOutputs != null) {
             libvlc_audio_output_t audioOutput = audioOutputs;
             while (audioOutput != null) {
-                String name = NativeString.copyNativeString(audioOutput.psz_name);
-                String description = NativeString.copyNativeString(audioOutput.psz_description);
+                String name = VideoLan4J.copyNativeString(audioOutput.psz_name);
+                String description = VideoLan4J.copyNativeString(audioOutput.psz_description);
                 result.add(new AudioOutput(name, description, getAudioOutputDevices(name)));
                 audioOutput = audioOutput.p_next;
             }
@@ -73,8 +73,8 @@ public final class AudioApi extends BaseApi {
         if (audioDevices != null) {
             libvlc_audio_output_device_t audioDevice = audioDevices;
             while(audioDevice != null) {
-                String device = NativeString.copyNativeString(audioDevice.psz_device);
-                String description = NativeString.copyNativeString(audioDevice.psz_description);
+                String device = VideoLan4J.copyNativeString(audioDevice.psz_device);
+                String description = VideoLan4J.copyNativeString(audioDevice.psz_description);
                 result.add(new AudioDevice(device, description));
                 audioDevice = audioDevice.p_next;
             }
