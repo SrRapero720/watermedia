@@ -53,6 +53,8 @@ sourceSets {
 }
 
 dependencies {
+    // MODLOADERS
+    compileOnly 'com.github.WaterMediaTeam:modloaders:1.0.0'
     compileOnly("net.fabricmc:fabric-loader:$fabric_version") {
         exclude group: 'org.slf4j', module: 'slf4j-api'
     }
@@ -74,7 +76,6 @@ dependencies {
     library "org.lwjgl:lwjgl-opengl:$opengl_version"
     library "org.lwjgl:lwjgl-glfw:$opengl_version"
     library "org.lwjgl:lwjgl-openal:$openal_version"
-    compileOnly project(":lib-forge")
 
     // TEST DEPENDENCIES
     testImplementation 'org.junit.jupiter:junit-jupiter-api:5.8.1'

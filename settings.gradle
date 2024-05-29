@@ -24,4 +24,4 @@ buildscript {
     }
 }
 
-include 'lib-vlcj', 'lib-forge'
+include 'lib-vlcj'
