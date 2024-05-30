@@ -17,7 +17,7 @@
  * Copyright 2009-2019 Caprica Software Limited.
  */
 
-package uk.co.caprica.vlcj.factory.discovery.strategy;
+package uk.co.caprica.vlcj.discovery.strategy;
 
 import java.io.File;
 import java.nio.file.Files;
@@ -28,8 +28,8 @@ import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-import static uk.co.caprica.vlcj.factory.discovery.NativeDiscovery.IT;
-import static uk.co.caprica.vlcj.factory.discovery.NativeDiscovery.LOGGER;
+import static uk.co.caprica.vlcj.discovery.NativeDiscovery.IT;
+import static uk.co.caprica.vlcj.discovery.NativeDiscovery.LOGGER;
 
 /**
  * Base implementation of a native discovery strategy that searches a list of directories for a list of files.

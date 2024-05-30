@@ -22,7 +22,6 @@ package uk.co.caprica.vlcj.waiter;
 /**
  * Exception thrown when a media player condition instance triggers in response to an error.
  */
-@SuppressWarnings("serial")
 public final class UnexpectedWaiterErrorException extends RuntimeException {
 
     UnexpectedWaiterErrorException() {

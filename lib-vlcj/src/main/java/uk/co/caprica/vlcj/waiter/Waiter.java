@@ -66,7 +66,7 @@ public abstract class Waiter<C, R> {
     /**
      * Result status indicator.
      */
-    private final AtomicReference<ResultStatus> resultStatus = new AtomicReference<ResultStatus>();
+    private final AtomicReference<ResultStatus> resultStatus = new AtomicReference<>();
 
     /**
      * Optional result.

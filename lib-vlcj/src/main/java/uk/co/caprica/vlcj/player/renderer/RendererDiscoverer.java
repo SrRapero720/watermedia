@@ -19,8 +19,8 @@
 
 package uk.co.caprica.vlcj.player.renderer;
 
-import uk.co.caprica.vlcj.binding.lib.LibVlc;
 import uk.co.caprica.vlcj.binding.internal.libvlc_renderer_discoverer_t;
+import uk.co.caprica.vlcj.binding.lib.LibVlc;
 
 /**
  * Encapsulation of a native renderer discoverer instance.
@@ -30,7 +30,7 @@ public final class RendererDiscoverer {
     /**
      * Native renderer discoverer instance.
      */
-    protected final libvlc_renderer_discoverer_t discovererInstance;
+    final libvlc_renderer_discoverer_t discovererInstance;
 
     private final EventApi eventApi;
     private final ListApi  listApi;

@@ -2,16 +2,6 @@ pluginManagement {
     repositories {
         mavenCentral()
         gradlePluginPortal()
-        maven { url 'https://maven.fabricmc.net/' }
-    }
-}
-
-buildscript {
-    repositories {
-        mavenCentral()
-    }
-    dependencies {
-        classpath group: 'org.codehaus.groovy', name: 'groovy-all', version: '3.0.9'
     }
 }
 

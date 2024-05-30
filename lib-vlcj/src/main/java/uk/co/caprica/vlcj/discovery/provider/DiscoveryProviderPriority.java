@@ -17,33 +17,23 @@
  * Copyright 2009-2019 Caprica Software Limited.
  */
 
-package uk.co.caprica.vlcj.factory.discovery.provider;
-
-import java.io.File;
+package uk.co.caprica.vlcj.discovery.provider;
 
 /**
- * Implementation of a directory provider that searches the operating system native search path.
+ * Priority values used by the standard {@link DiscoveryDirectoryProvider} implementations.
  */
-public class SystemPathDirectoryProvider implements DiscoveryDirectoryProvider {
+public interface DiscoveryProviderPriority {
 
-    @Override
-    public int priority() {
-        return DiscoveryProviderPriority.SYSTEM_PATH;
-    }
+    int CONFIG_FILE = 1;
 
-    @Override
-    public String[] directories() {
-        String path = System.getenv("PATH");
-        if (path != null) {
-            return path.split(File.pathSeparator);
-        } else {
-            return new String[0];
-        }
-    }
+    int JNA_LIBRARY_PATH = -1;
 
-    @Override
-    public boolean supported() {
-        return true;
-    }
+    int USER_DIR = -2;
+
+    int INSTALL_DIR = -3;
+
+    int WELL_KNOWN_DIRECTORY = -3;
+
+    int SYSTEM_PATH = -4;
 
 }

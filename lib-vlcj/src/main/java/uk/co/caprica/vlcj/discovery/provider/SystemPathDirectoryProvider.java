@@ -17,34 +17,33 @@
  * Copyright 2009-2019 Caprica Software Limited.
  */
 
-package uk.co.caprica.vlcj.factory.discovery.provider;
+package uk.co.caprica.vlcj.discovery.provider;
 
 import java.io.File;
 
 /**
- * Implementation of a directory provider that uses the "jna.library.path" system property.
- * <p>
- * If using "jna.library.path" correctly, the native library should be found directly by JNA, but this provider
- * implementation may still be useful as it will set the VLC_PLUGIN_PATH.
+ * Implementation of a directory provider that searches the operating system native search path.
  */
-public class JnaLibraryPathDirectoryProvider implements DiscoveryDirectoryProvider {
-
-    private static final String SYSTEM_PROPERTY_NAME = "jna.library.path";
+public class SystemPathDirectoryProvider implements DiscoveryDirectoryProvider {
 
     @Override
     public int priority() {
-        return DiscoveryProviderPriority.JNA_LIBRARY_PATH;
+        return DiscoveryProviderPriority.SYSTEM_PATH;
     }
 
     @Override
     public String[] directories() {
-        // The null-check is taken care of in the supported() method
-        return System.getProperty("jna.library.path").split(File.pathSeparator);
+        String path = System.getenv("PATH");
+        if (path != null) {
+            return path.split(File.pathSeparator);
+        } else {
+            return new String[0];
+        }
     }
 
     @Override
     public boolean supported() {
-        return System.getProperty(SYSTEM_PROPERTY_NAME) != null;
+        return true;
     }
 
 }

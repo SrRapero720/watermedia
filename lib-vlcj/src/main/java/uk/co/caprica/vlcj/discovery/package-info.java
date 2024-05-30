@@ -1,5 +1,7 @@
 /**
  * Provides components that can be used to automatically discover the location of the LibVLC native libraries in the
  * absence of proper run-time environment configuration.
+ * @deprecated This is going to be rewrited to videolan-natives
  */
-package uk.co.caprica.vlcj.factory.discovery;
+@Deprecated
+package uk.co.caprica.vlcj.discovery;

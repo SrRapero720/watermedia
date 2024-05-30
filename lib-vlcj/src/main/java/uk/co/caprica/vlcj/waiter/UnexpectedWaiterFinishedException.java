@@ -23,7 +23,6 @@ package uk.co.caprica.vlcj.waiter;
  * Exception thrown when a media player condition instance triggers in response to the media finishing (reaching the
  * end) unexpectedly before the conditional wait is satisfied.
  */
-@SuppressWarnings("serial")
 public final class UnexpectedWaiterFinishedException extends RuntimeException {
 
     UnexpectedWaiterFinishedException() {

@@ -20,10 +20,10 @@
 package uk.co.caprica.vlcj.factory;
 
 import com.sun.jna.StringArray;
-import uk.co.caprica.vlcj.binding.lib.LibVlc;
 import uk.co.caprica.vlcj.binding.internal.libvlc_instance_t;
-import uk.co.caprica.vlcj.factory.discovery.NativeDiscovery;
-import uk.co.caprica.vlcj.factory.discovery.strategy.NativeDiscoveryStrategy;
+import uk.co.caprica.vlcj.binding.lib.LibVlc;
+import uk.co.caprica.vlcj.discovery.NativeDiscovery;
+import uk.co.caprica.vlcj.discovery.strategy.NativeDiscoveryStrategy;
 import uk.co.caprica.vlcj.support.eventmanager.TaskExecutor;
 import uk.co.caprica.vlcj.support.version.LibVlcVersion;
 
@@ -166,7 +166,9 @@ public class MediaPlayerFactory {
      *
      * @param discovery native discovery used to find the native library, may be <code>null</code>
      * @throws NativeLibraryMappingException if one or more of the declared method bindings in {@link LibVlc} could not be found in the native library that was loaded
+     * @deprecated Discovery is provided by WATERMeDIA
      */
+    @Deprecated
     private void discoverNativeLibrary(NativeDiscovery discovery) {
         if (discovery != null) {
             // The discover method return value is not currently used, since we try and load the native library whether

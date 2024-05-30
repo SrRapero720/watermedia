@@ -17,7 +17,7 @@
  * Copyright 2009-2020 Caprica Software Limited.
  */
 
-package uk.co.caprica.vlcj.factory.discovery.provider;
+package uk.co.caprica.vlcj.discovery.provider;
 
 import java.io.File;
 import java.io.FileNotFoundException;

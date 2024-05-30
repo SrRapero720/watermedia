@@ -17,23 +17,18 @@
  * Copyright 2009-2019 Caprica Software Limited.
  */
 
-package uk.co.caprica.vlcj.factory.discovery.provider;
+package uk.co.caprica.vlcj.discovery.provider;
 
 /**
- * Priority values used by the standard {@link DiscoveryDirectoryProvider} implementations.
+ * Base implementation for directory provider that searches well-known directories.
+ * <p>
+ * This base class is used simply to set the appropriate priority value.
  */
-public interface DiscoveryProviderPriority {
+abstract public class WellKnownDirectoryProvider implements DiscoveryDirectoryProvider {
 
-    int CONFIG_FILE = 1;
-
-    int JNA_LIBRARY_PATH = -1;
-
-    int USER_DIR = -2;
-
-    int INSTALL_DIR = -3;
-
-    int WELL_KNOWN_DIRECTORY = -3;
-
-    int SYSTEM_PATH = -4;
+    @Override
+    public int priority() {
+        return DiscoveryProviderPriority.WELL_KNOWN_DIRECTORY;
+    }
 
 }

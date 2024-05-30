@@ -17,13 +17,13 @@
  * Copyright 2009-2019 Caprica Software Limited.
  */
 
-package uk.co.caprica.vlcj.factory.discovery.strategy;
+package uk.co.caprica.vlcj.discovery.strategy;
 
 import com.sun.jna.NativeLibrary;
 import com.sun.jna.Platform;
 import uk.co.caprica.vlcj.VideoLan4J;
 import uk.co.caprica.vlcj.binding.lib.LibC;
-import uk.co.caprica.vlcj.factory.discovery.provider.DirectoryProviderDiscoveryStrategy;
+import uk.co.caprica.vlcj.discovery.provider.DirectoryProviderDiscoveryStrategy;
 
 /**
  * Default implementation of a native discovery strategy that searches directories on the OSX operating system.

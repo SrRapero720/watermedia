@@ -1,7 +1,7 @@
 package me.srrapero720.watermedia.api.config.support;
 
 import me.srrapero720.watermedia.api.config.WaterConfig;
-import uk.co.caprica.vlcj.factory.discovery.provider.DiscoveryDirectoryProvider;
+import uk.co.caprica.vlcj.discovery.provider.DiscoveryDirectoryProvider;
 
 public class CustomDirectoryProvider implements DiscoveryDirectoryProvider {
     @Override

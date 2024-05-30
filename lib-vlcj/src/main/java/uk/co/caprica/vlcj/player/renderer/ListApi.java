@@ -28,7 +28,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
  */
 public final class ListApi extends BaseApi {
 
-    private final List<RendererItem> rendererItems = new CopyOnWriteArrayList<RendererItem>();
+    private final List<RendererItem> rendererItems = new CopyOnWriteArrayList<>();
 
     ListApi(RendererDiscoverer rendererDiscoverer) {
         super(rendererDiscoverer);
@@ -40,7 +40,7 @@ public final class ListApi extends BaseApi {
      * @return
      */
     public List<RendererItem> rendererItems() {
-        return new ArrayList<RendererItem>(rendererItems);
+        return new ArrayList<>(rendererItems);
     }
 
     /**
@@ -52,7 +52,7 @@ public final class ListApi extends BaseApi {
      * @return
      */
     public boolean contains(RendererItem containsItem) {
-        for (RendererItem rendererItem : rendererItems) {
+        for (RendererItem rendererItem: rendererItems) {
             if (rendererItem.rendererItemInstance().equals(containsItem.rendererItemInstance())) {
                 return true;
             }
@@ -65,7 +65,7 @@ public final class ListApi extends BaseApi {
     }
 
     void itemDeleted(RendererItem itemDeleted) {
-        for (RendererItem rendererItem : rendererItems) {
+        for (RendererItem rendererItem: rendererItems) {
             if (rendererItem.rendererItemInstance().equals(itemDeleted.rendererItemInstance())) {
                 rendererItems.remove(rendererItem);
                 break;

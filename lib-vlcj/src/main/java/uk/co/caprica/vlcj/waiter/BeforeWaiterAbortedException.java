@@ -22,10 +22,8 @@ package uk.co.caprica.vlcj.waiter;
 /**
  * Exception thrown when a media player condition instance triggers aborts by returning <code>false</code> in an
  */
-@SuppressWarnings("serial")
 public final class BeforeWaiterAbortedException extends RuntimeException {
 
     BeforeWaiterAbortedException() {
     }
-
 }

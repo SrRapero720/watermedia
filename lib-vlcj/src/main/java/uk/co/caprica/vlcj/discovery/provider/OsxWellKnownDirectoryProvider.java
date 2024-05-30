@@ -17,31 +17,18 @@
  * Copyright 2009-2019 Caprica Software Limited.
  */
 
-package uk.co.caprica.vlcj.factory.discovery.provider;
+package uk.co.caprica.vlcj.discovery.provider;
 
 import com.sun.jna.Platform;
 
 /**
- * Implementation of a directory provider that returns a list of well-known directory locations to search on Linux.
+ * Implementation of a directory provider that returns a list of well-known directory locations to search on OSX.
  */
-public class LinuxWellKnownDirectoryProvider extends WellKnownDirectoryProvider {
+public class OsxWellKnownDirectoryProvider extends WellKnownDirectoryProvider {
 
-    // WATERMeDIA PATCH - This is patched, not sure what but is patched
     private static final String[] DIRECTORIES = {
-            "/usr/lib/x86_64-linux-gnu",
-            "/usr/lib64",
-            "/usr/local/lib64",
-            "/usr/lib/i386-linux-gnu",
-            "/usr/lib",
-            "/usr/lib/vlc",
-            "/usr/bin/",
-            "/usr/bin/vlc",
-            "/usr/local/lib",
-            "/usr/local/lib/vlc",
-            "/var/lib/flatpak",
-            "/var/lib/flatpak/org.videolan.VLC",
-            "/var/lib/flatpak/app/org.videolan.VLC",
-            "/bin"
+        "/Applications/VLC.app/Contents/Frameworks",
+        "/Applications/VLC.app/Contents/MacOS/lib"
     };
 
     @Override
@@ -51,6 +38,7 @@ public class LinuxWellKnownDirectoryProvider extends WellKnownDirectoryProvider 
 
     @Override
     public boolean supported() {
-        return Platform.isLinux();
+        return Platform.isMac();
     }
+
 }

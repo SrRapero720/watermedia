@@ -17,39 +17,39 @@
  * Copyright 2009-2019 Caprica Software Limited.
  */
 
-package uk.co.caprica.vlcj.factory.discovery.strategy;
+package uk.co.caprica.vlcj.discovery.strategy;
 
 import com.sun.jna.Platform;
 import uk.co.caprica.vlcj.binding.lib.LibC;
-import uk.co.caprica.vlcj.factory.discovery.provider.DirectoryProviderDiscoveryStrategy;
+import uk.co.caprica.vlcj.discovery.provider.DirectoryProviderDiscoveryStrategy;
 
 /**
- * Default implementation of a native discovery strategy that searches directories on the Windows operating system.
+ * Default implementation of a native discovery strategy that searches directories on the Linux operating system.
  */
-public class WindowsNativeDiscoveryStrategy extends DirectoryProviderDiscoveryStrategy {
+public class LinuxNativeDiscoveryStrategy extends DirectoryProviderDiscoveryStrategy {
 
     private static final String[] FILENAME_PATTERNS = new String[] {
-        "libvlc\\.dll",
-        "libvlccore\\.dll"
+        "libvlc\\.so(?:\\.\\d)*",
+        "libvlccore\\.so(?:\\.\\d)*"
     };
 
     private static final String[] PLUGIN_PATH_FORMATS = new String[] {
-        "%s\\plugins",
-        "%s\\vlc\\plugins"
+        "%s/plugins",
+        "%s/vlc/plugins"
     };
 
-    public WindowsNativeDiscoveryStrategy() {
+    public LinuxNativeDiscoveryStrategy() {
         super(FILENAME_PATTERNS, PLUGIN_PATH_FORMATS);
     }
 
     @Override
     public boolean supported() {
-        return Platform.isWindows();
+        return Platform.isLinux();
     }
 
     @Override
     protected boolean setPluginPath(String pluginPath) {
-        return LibC.INSTANCE._putenv(String.format("%s=%s", PLUGIN_ENV_NAME, pluginPath)) == 0;
+        return LibC.INSTANCE.setenv(PLUGIN_ENV_NAME, pluginPath, 1) == 0;
     }
 
 }

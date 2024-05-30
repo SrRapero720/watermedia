@@ -17,28 +17,31 @@
  * Copyright 2009-2019 Caprica Software Limited.
  */
 
-package uk.co.caprica.vlcj.factory.discovery.provider;
-
-import com.sun.jna.Platform;
+package uk.co.caprica.vlcj.discovery.provider;
 
 /**
- * Implementation of a directory provider that returns a list of well-known directory locations to search on OSX.
+ * Implementation of a directory provider that returns the current user home directory.
  */
-public class OsxWellKnownDirectoryProvider extends WellKnownDirectoryProvider {
+public class UserDirDirectoryProvider implements DiscoveryDirectoryProvider {
 
-    private static final String[] DIRECTORIES = {
-        "/Applications/VLC.app/Contents/Frameworks",
-        "/Applications/VLC.app/Contents/MacOS/lib"
-    };
+    @Override
+    public int priority() {
+        return DiscoveryProviderPriority.USER_DIR;
+    }
 
     @Override
     public String[] directories() {
-        return DIRECTORIES;
+        String path = System.getProperty("user.dir");
+        if (path != null) {
+            return new String[] {path};
+        } else {
+            return new String[0];
+        }
     }
 
     @Override
     public boolean supported() {
-        return Platform.isMac();
+        return true;
     }
 
 }

@@ -15,7 +15,7 @@ import org.apache.commons.lang3.ArrayUtils;
 import org.apache.logging.log4j.Marker;
 import org.apache.logging.log4j.MarkerManager;
 import uk.co.caprica.vlcj.factory.MediaPlayerFactory;
-import uk.co.caprica.vlcj.factory.discovery.NativeDiscovery;
+import uk.co.caprica.vlcj.discovery.NativeDiscovery;
 
 import java.io.File;
 import java.io.IOException;

@@ -123,8 +123,7 @@ public final class TaskExecutor {
                 executor.shutdownNow();
                 executor.awaitTermination(timeout, TimeUnit.MILLISECONDS);
             }
-        }
-        catch (InterruptedException e) {
+        } catch (InterruptedException e) {
             executor.shutdownNow();
         }
     }

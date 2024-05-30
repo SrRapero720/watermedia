@@ -17,7 +17,7 @@
  * Copyright 2009-2019 Caprica Software Limited.
  */
 
-package uk.co.caprica.vlcj.factory.discovery.strategy;
+package uk.co.caprica.vlcj.discovery.strategy;
 
 /**
  * Specification for a component that can locate the LibVLC native libraries at run-time.

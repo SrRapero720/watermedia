@@ -1,4 +1,4 @@
-package uk.co.caprica.vlcj.factory.discovery;
+package uk.co.caprica.vlcj.discovery;
 
 import com.sun.jna.NativeLibrary;
 import com.sun.jna.StringArray;
@@ -9,11 +9,11 @@ import org.apache.logging.log4j.MarkerManager;
 import uk.co.caprica.vlcj.VideoLan4J;
 import uk.co.caprica.vlcj.binding.internal.libvlc_instance_t;
 import uk.co.caprica.vlcj.binding.lib.LibVlc;
+import uk.co.caprica.vlcj.discovery.strategy.LinuxNativeDiscoveryStrategy;
+import uk.co.caprica.vlcj.discovery.strategy.NativeDiscoveryStrategy;
+import uk.co.caprica.vlcj.discovery.strategy.OsxNativeDiscoveryStrategy;
+import uk.co.caprica.vlcj.discovery.strategy.WindowsNativeDiscoveryStrategy;
 import uk.co.caprica.vlcj.factory.MediaPlayerFactory;
-import uk.co.caprica.vlcj.factory.discovery.strategy.LinuxNativeDiscoveryStrategy;
-import uk.co.caprica.vlcj.factory.discovery.strategy.NativeDiscoveryStrategy;
-import uk.co.caprica.vlcj.factory.discovery.strategy.OsxNativeDiscoveryStrategy;
-import uk.co.caprica.vlcj.factory.discovery.strategy.WindowsNativeDiscoveryStrategy;
 import uk.co.caprica.vlcj.support.version.LibVlcVersion;
 
 import java.lang.ref.Reference;

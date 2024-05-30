@@ -17,10 +17,10 @@
  * Copyright 2009-2019 Caprica Software Limited.
  */
 
-package uk.co.caprica.vlcj.factory.discovery.provider;
+package uk.co.caprica.vlcj.discovery.provider;
 
-import uk.co.caprica.vlcj.factory.discovery.strategy.BaseNativeDiscoveryStrategy;
-import uk.co.caprica.vlcj.factory.discovery.NativeDiscovery;
+import uk.co.caprica.vlcj.discovery.NativeDiscovery;
+import uk.co.caprica.vlcj.discovery.strategy.BaseNativeDiscoveryStrategy;
 
 import java.util.ArrayList;
 import java.util.Arrays;
