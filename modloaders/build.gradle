@@ -1,0 +1,9 @@
+plugins {
+    id 'java'
+}
+
+// COMPILE-ONLY STUBS OF THE LOADER CLASSES THE BOOTSTRAPS REFERENCE; EACH LOADER PROVIDES THE REAL ONES AT RUNTIME.
+tasks.named('compileJava', JavaCompile) {
+    options.encoding = providers.gradleProperty('systemProp.file.encoding').get()
+    options.release = Integer.parseInt(java_release)
+}

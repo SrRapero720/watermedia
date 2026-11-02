@@ -1,0 +1,7 @@
+#EXTM3U x-tvg-url="https://epg.example/epg.xml.gz"
+#EXTINF:-1 tvg-name="Channel One" tvg-logo="https://logo.example/one.png" tvg-id="One.us" tvg-country="US" group-title="USA",Channel One
+https://stream.example/one/playlist.m3u8
+#EXTINF:-1 tvg-name="Channel Two" tvg-logo="https://logo.example/two.png" tvg-id="Two.us" tvg-country="US" group-title="USA",Channel Two
+https://stream.example/two/playlist.m3u8
+#EXTINF:-1 tvg-name="Channel Three" tvg-logo="https://logo.example/three.png" tvg-id="Three.uk" tvg-country="UK" group-title="UK",Channel Three
+https://stream.example/three/playlist.m3u8

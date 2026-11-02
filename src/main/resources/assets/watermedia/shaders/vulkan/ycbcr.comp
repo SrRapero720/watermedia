@@ -1,0 +1,20 @@
+#version 450
+// THE IMMUTABLE YCBCR SAMPLER CONVERTS YUV TO RGB IN HARDWARE, SO THIS PASS ONLY SAMPLES ONCE PER PIXEL INTO THE MANAGED
+// RGBA IMAGE; textureLod IS THE ONLY LEGAL FETCH THROUGH A CONVERSION SAMPLER, THE SPEC FORBIDS texelFetch ON THEM.
+// THE OUTPUT COVERS THE IMAGE FROM origin ACROSS crop (FRACTIONS): THE WHOLE IMAGE FOR UPLOADS, THE PICTURE OF A DECODER'S PADDED IMAGE
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(binding = 0) uniform sampler2D srcYuv;
+layout(binding = 1, rgba8) uniform writeonly image2D outImg;
+layout(push_constant) uniform PC {
+    int width;
+    int height;
+    vec2 crop;
+    vec2 origin;
+} pc;
+
+void main() {
+    ivec2 gid = ivec2(gl_GlobalInvocationID.xy);
+    if (gid.x >= pc.width || gid.y >= pc.height) return;
+    vec2 uv = pc.origin + (vec2(gid) + 0.5) / vec2(float(pc.width), float(pc.height)) * pc.crop;
+    imageStore(outImg, gid, textureLod(srcYuv, uv, 0.0));
+}

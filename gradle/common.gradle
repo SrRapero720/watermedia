@@ -1,0 +1,142 @@
+import groovy.json.JsonOutput
+
+// SHARED BY WATERMEDIA AND BINARIES; EACH BUILD APPLIES IT LAST, AFTER DECLARING ITS OWN PLATFORMS AND RESOURCE VALUES.
+
+// ==== JAVA ====
+base { archivesName = id }
+java { sourceCompatibility = targetCompatibility = JavaVersion.toVersion(java_release) }
+
+// GRADLE RESTORES THE CLIENT'S FILE.ENCODING PROPERTY AFTER THE DAEMON STARTS.
+def encoding = providers.gradleProperty('systemProp.file.encoding').get()
+System.setProperty('file.encoding', encoding)
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = encoding
+    options.release = java_release as int
+}
+tasks.withType(JavaExec).configureEach { jvmArgs "-Dfile.encoding=$encoding" }
+test {
+    useJUnitPlatform()
+    jvmArgs "-Dfile.encoding=$encoding"
+}
+
+repositories {
+    mavenCentral()
+    maven { url = 'https://jitpack.io' }
+}
+
+dependencies {
+    testImplementation platform("org.junit:junit-bom:$junit_version")
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+// ==== LOADER RANGES ====
+// EVERY "<name>versions" PROPERTY LISTS, IN ASCENDING ORDER, THE MINIMUM VERSION OF EACH SUPPORTED LINE. A LINE STAYS
+// OPEN UP TO ITS CEILING, THE NEXT VALUE OF THE COMPONENTS THAT NAME IT: FORGE 40.3.10 NAMES LINE 40 AND CLOSES AT 41
+def list = { String key -> findProperty(key)?.toString()?.tokenize(',')*.trim() }
+def ceiling = { String version, int line ->
+    // A NEGATIVE LINE COUNTS FROM THE END: -1 KEEPS EVERY COMPONENT BUT THE BUILD
+    List<Integer> parts = version.tokenize('.')*.toInteger()
+    def kept = parts.take(line > 0 ? line : parts.size() + line)
+    (kept.init() + (kept.last() + 1)).join('.')
+}
+// INTERVALS ARE [low, high) PAIRS, OR [low, low] FOR AN EXACT MATCH
+def range = { List<String> versions, int line, boolean release = false ->
+    versions.inject([]) { List<List<String>> intervals, String low ->
+        def high = ceiling(low, line)
+        // X.Y.Z.W BETAS SORT ABOVE THEIR X.Y.Z RELEASE, SO THE RELEASE MATCHES EXACTLY AND ITS LINE RESUMES AT THE NEXT PATCH
+        if (release && low.count('.') == 2) {
+            intervals << [low, low]
+            low = ceiling(low, 3)
+        }
+        // A LINE STARTING WHERE THE PREVIOUS ONE CLOSES EXTENDS IT: [64,65) AND [65,66) BECOME [64,66)
+        if (intervals && intervals[-1][1] == low) intervals[-1][1] = high
+        else intervals << [low, high]
+        intervals
+    }
+}
+
+// THE MINECRAFT AND JAVA LISTS ALSO NAME THE PUBLISHED VERSIONS; javaReleases KEEPS CLEAR OF THE javaVersions OPTION
+def mcVersions = list('minecraftversions')
+def forgeVersions = list('forgeversions')
+def javaReleases = list('javaversions')
+def intervals = [
+        // EACH PUBLISHED MINECRAFT VERSION IS AN EXACT MATCH, SO ANY OTHER PATCH FAILS AS A VERSION MISMATCH
+        minecraft: mcVersions.collect { [it, it] },
+        forge: range(forgeVersions, 1),
+        // FORGE'S javafml LOADER VERSION IS THE FORGE MAJOR
+        forgefml: range(forgeVersions.collect { it.tokenize('.')[0] }, 1),
+        // NEOFORGE NAMES ITS MINECRAFT LINE WITH EVERY COMPONENT BEFORE THE BUILD: 21.1.X, 26.1.2.X
+        neo: range(list('neoversions'), -1),
+        neofml: range(list('neofmlversions'), 1),
+        fabric: range(list('fabricversions'), 1),
+        // JAVA KEEPS COMPATIBILITY BETWEEN RELEASES, SO ONE RANGE SPANS FROM THE OLDEST TO THE NEWEST LISTED MAJOR
+        java: [[javaReleases[0], ceiling(javaReleases[-1], 1)]]
+]
+// THE COMPANION MOD (BINARIES FOR WATERMEDIA, WATERMEDIA FOR BINARIES) CLOSES AT ITS NEXT MINOR
+['binaries', 'watermedia'].each { name ->
+    def versions = list(name + 'versions')
+    if (versions) intervals[name] = range(versions, 2, true)
+}
+
+// RESOURCES READ "<name>range" AS A MAVEN RANGE, AND "<name>depends" AND "<name>breaks" AS THE FABRIC PREDICATES THAT
+// MATCH THE INTERVALS AND THE GAPS AROUND THEM: BELOW THE FIRST, BETWEEN NEIGHBOURS AND ABOVE THE LAST
+Map<String, String> loaderValues = [:]
+intervals.each { String name, List<List<String>> spans ->
+    def above = spans.collect { low, high -> low == high ? ">$low" : ">=$high" }
+    def gaps = spans.withIndex().collect { List<String> span, Integer i -> (i ? above[i - 1] + ' ' : '') + '<' + span[0] } + above[-1]
+    loaderValues[name + 'range'] = spans.collect { low, high -> low == high ? "[$low]" : "[$low,$high)" }.join(',')
+    loaderValues[name + 'depends'] = JsonOutput.toJson(spans.collect { low, high -> low == high ? low : ">=$low <$high" })
+    loaderValues[name + 'breaks'] = JsonOutput.toJson(gaps)
+}
+
+// ==== RESOURCES ====
+// CAPTURE RESOURCE VALUES BEFORE TASK EXECUTION; A BUILD MAY ADD GENERATED ONES THROUGH ext.resourceValues.
+Map<String, ?> resourceProperties = providers.gradlePropertiesPrefixedBy('').get() + loaderValues + (findProperty('resourceValues') ?: [:])
+processResources {
+    inputs.properties(resourceProperties)
+    filesMatching(['META-INF/mods.toml', 'META-INF/neoforge.mods.toml', 'pack.mcmeta', 'fabric.mod.json']) {
+        expand(resourceProperties)
+    }
+}
+
+jar {
+    duplicatesStrategy = DuplicatesStrategy.WARN
+    manifest.attributes(id: id, version: version,
+            'Specification-Title': id, 'Specification-Vendor': authors, 'Specification-Version': version,
+            'Implementation-Title': id, 'Implementation-Version': version, 'Implementation-Vendor': authors)
+}
+
+// ==== PUBLISHING ====
+// RELEASES USE x.y.z AND PRE-RELEASES x.y.z.w, WHERE versiontype NAMES THE PRE-RELEASE KIND
+def publishVersion = project.version.toString()
+def releaseType = project.versiontype.toString()
+if (!(releaseType in ['ALPHA', 'BETA', 'RELEASE'])) throw new GradleException('versiontype must be ALPHA, BETA or RELEASE')
+if (!(publishVersion ==~ (releaseType == 'RELEASE' ? /\d+(\.\d+){2}/ : /\d+(\.\d+){3}/)))
+    throw new GradleException('RELEASE versions require three components; ALPHA and BETA require four')
+// THE CHANGELOG OF THIS VERSION ENDS AT THE FIRST BLANK LINE
+def changelogText = file('CHANGELOG.md').readLines('UTF-8').takeWhile { !it.isEmpty() }.join('\n')
+def javaTargets = javaReleases.collect { JavaVersion.toVersion(it) }
+def loaders = list('modloaders')
+
+// EACH BUILD REGISTERS ITS PLATFORMS BEFORE APPLYING SHARED OPTIONS.
+publishMods {
+    changelog = changelogText
+    type = ['ALPHA': ALPHA, 'BETA': BETA, 'RELEASE': STABLE][releaseType]
+    displayName = publishVersion
+    modLoaders.addAll(loaders)
+    maxRetries = publish_retries as int
+    curseforge {
+        accessToken = providers.environmentVariable('CURSEFORGE_TOKEN')
+        projectId = curseforgeid
+        minecraftVersions.addAll(mcVersions)
+        javaVersions.addAll(javaTargets)
+        clientRequired = true
+    }
+    modrinth {
+        accessToken = providers.environmentVariable('MODRINTH_TOKEN')
+        projectId = modrinthid
+        minecraftVersions.addAll(mcVersions)
+        projectDescription = providers.fileContents(layout.projectDirectory.file('README.md')).asText
+    }
+}

@@ -1,6 +1,6 @@
 {
     "pack": {
-        "description": "$brandname resources",
-        "pack_format": 6
+        "description": "$libname resources",
+        "pack_format": 1
     }
 }

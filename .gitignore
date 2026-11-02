@@ -1,30 +1,24 @@
-# eclipse
-bin
-*.launch
-.settings
-.metadata
-.classpath
-.project
+# Project exclude paths
+/PENDING.md
+/.gradle/
+/.claude
+/.mcp.json
+hs_err_pid*
+/*.jar
+*.log
+/build/
+/modloaders/build/
+/build/classes/java/main/
+/build/classes/java/test/
+/out/
+/config/
+/.idea/*
+!/.idea/icon.svg
+!/.idea/runConfigurations/
+*.mp4
+!/src/test/resources/mp4/*.mp4
 
-# idea
-out
-*.ipr
-*.iws
-*.iml
-bins
-
-# gradle
-build
-.gradle
-builtJars
-
-# other
-eclipse
-logs
-run
-lib-tools
-lib-binaries
-lib-ytdownloader
-
-# Files from Forge MDK
-forge*changelog.txt
+# STANDALONE APP RUNTIME DATA (DEV WORKING DIR = run/)
+/run/config/
+/run/logs/
+/run/watermedia/files/.server.lock

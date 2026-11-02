@@ -1,0 +1,60 @@
+name: Build for Release
+
+on:
+  push:
+    tags: ["*"]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    env:
+      ALSOFT_DRIVERS: 'null'
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [curseforge, modrinth]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          submodules: recursive
+
+      - name: Read build versions
+        id: versions
+        shell: pwsh
+        run: |
+          $gradleVersion = ((Get-Content gradle.properties | Select-String '^gradle_version=').Line -split '=', 2)[1]
+          Add-Content $env:GITHUB_OUTPUT "gradle=$gradleVersion"
+
+      - name: Set up patched Java
+        shell: pwsh
+        run: ./binaries/tools/SetupJava.ps1 -Platform linux-x86_64 -ProjectRoot .
+
+      - name: Install Linux media runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libpulse0 libxcb1 libxcb-shm0 libudev1 libasound2 libva2 libva-drm2 libdrm2
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb
+        with:
+          gradle-version: ${{ steps.versions.outputs.gradle }}
+
+      - name: Build and test
+        run: gradle build --warning-mode fail
+
+      - name: Publish to CurseForge
+        if: ${{ matrix.platform == 'curseforge' }}
+        run: gradle publishCurseforge --warning-mode fail
+        env:
+          CURSEFORGE_TOKEN: ${{ secrets.CURSEFORGE_TOKEN }}
+
+      - name: Publish to Modrinth
+        if: ${{ matrix.platform == 'modrinth' }}
+        run: gradle publishModrinth --warning-mode fail
+        env:
+          MODRINTH_TOKEN: ${{ secrets.MODRINTH_TOKEN }}

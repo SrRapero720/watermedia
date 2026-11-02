@@ -3,4 +3,15 @@ pluginManagement {
         mavenCentral()
         gradlePluginPortal()
     }
+    // PLUGIN VERSIONS LIVE IN gradle.properties, NOT INLINE IN build.gradle
+    plugins {
+        id 'com.google.osdetector' version providers.gradleProperty('osdetector_version').get()
+        id 'me.modmuss50.mod-publish-plugin' version providers.gradleProperty('publish_version').get()
+    }
 }
+
+rootProject.name = 'watermedia'
+include 'modloaders'
+
+// WATERMEDIA COMPILES THE SHARED SOURCES ONCE; EACH BUILD PACKAGES ITS OWN CLASSES.
+includeBuild('binaries')

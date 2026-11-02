@@ -1,204 +1,122 @@
-# 📦 UPDATE 2.1.37
-- 🛠️ Removed Youtube support (broken for months, time to say goodbye)
-  - Will be replaced with an addon
-  - Also deletes JYTD dependency and stops shading fastjson library
-- 🐛 Fixed Kick vods
-
-# 📦 UPDATE 2.1.36
-- 🛠️ Fixed wrong buffer alignment for VLC players (sometimes causes frame corruption)
-- 🛠️ Fixed MediaFire support (again)
-
-# 📦 UPDATE 2.1.35
-- ✨ Deprecate method `preRender` in VideoPlayer class
-  - Now it uses render thread executor to run preRender task such as upload the texture
-
-# 📦 UPDATE 2.1.34
-- 🐛 Fixed VLC doesn't load on Linux (under certain distros)
-
-# 📦 UPDATE 2.1.33
-- 🐛 Fixed the small freezes starting media (specially playing youtube videos)
-- 🛠️ Remove slaves support 
-
-# 📦 UPDATE 2.1.32
-- 🐛 Fixed crashes on NeoForge running developments 
-
-# 📦 UPDATE 2.1.30
-- 🐛 Fixed broken library bundling
-  - 🛠️ Somehow github actions managed to import old vlcj-natives version
-
-# 📦 UPDATE 2.1.29
-- 🐛 Fixed MediaFire support
-- 🐛 Fixed BasePlayer#startPaused() starting unpaused
-- 🐛 Remove language limit on PH url patcher
-- 🛠️ Robustified loggers for VLC discovery (diagnostic purposes)
-
-# 📦 UPDATE 2.1.28
-- 🛠️ Fixed path discovery for NixOS and support flatpak "workarrounds" made by users
-
-# 📦 UPDATE 2.1.27
-- 🛠️ Split VLC arguments for Windows and Linux
-  - This must fix watermedia "not load" on linux in general trying to apply codec optimizations... AGAIN
-
-# 📦 UPDATE 2.1.26
-- 🐛 Removed missing VLC command-line arguments on (Arch) Linux
-  - This must fix watermedia "not load" on linux in general
-
-# 📦 UPDATE 2.1.25
-- 🐛 Fixed MacOS and Linux VLC discovery not working
-- 🛠️ Added compatibility with NixOS (Linux) [[#144](https://github.com/WaterMediaTeam/watermedia/issues/144)]
-
-# 📦 UPDATE 2.1.24
-- 🛠️ JYTD now uses the most effective client as default when the first fetch fails
-- 🛠️ Removed debug loggers of VLCJ and JYTD
-- 🛠️ Tagged 1.21.5 as compatible (dropped support for 1.21.4)
-
-# 📦 UPDATE 2.1.23
-- 🛠️ Added a file check in `/config/watermedia/enable_optifine.txt` to skip optifine crash.
-- 🛠️ Delegate to VLC malformed URLs (usually not supported protocols).
-
-# 📦 UPDATE 2.1.22
-- ✨ Added support for "mediafire.com"
-- 🛠️ Removed OneDrive support
-- 🐛 Fixed Twitter (x) support
-- 🐛 Fixed [orange page] support
-
-# 📦 UPDATE 2.1.21
-- 🐛 Fixed crashes caused by bad imports 
-
-# 📦 UPDATE 2.1.20
-- 🛠️ Marked Optifine as incompatible (causes odd untrackable crashes)
-
-# 📦 UPDATE 2.1.19
-- 🛠️ Enhanced desynchronization logging and error handling about it
-- 🐛 Fixed lower FPS caused by higher FPS
-
-# 📦 UPDATE 2.1.18
-- 🛠️ Speed up Youtube first media loading time
-- 🛠️ Added isWaiting() method on ``BasePlayer``
-- 🐛 Fixed deadlocks removing or changing media (introduced in 2.1.14)
-- 🐛 Fixed IllegalMemoryAccess issues (introduced in 2.1.17)
-
-# 📦 UPDATE 2.1.17
-- 🛠️ Removed MemoryAlloc class (breaking change but doesn't affect any mod)
-- 🐛 Fixed fallback system for google drive doesn't get called
-- 🐛 Fixed a very VERY rare race condition
-
-# 📦 UPDATE 2.1.16
-- 🐛 Fixed imagefetch remains fetching forever
-
-# 📦 UPDATE 2.1.15
-- 🐛 Fixed crashes caused by wrong method call 
-
-# 📦 UPDATE 2.1.14
-- ✨ Added fallback method for failed patches
-- ✨ Enhanced Google Drive support and speed
-  - ✨ Added fallback method, fallback is slow but _works_
-- 🛠️ Bruteforce all Youtube clients before give up
-  - 🛠️ Will take A LOT (or not) the first time you load a YT video, once it gets loaded the rest loads faster
-- 🛠️ Added better synchronization on `MediaPlayer#start()` and `MediaPlayer#release()`
-- 🐛 Relocate properly fastjson (fixes crashes with other mods)
-- 🐛 Fixed custom_vlc_path.txt wasn't created on clean installations
-
-# 📦 UPDATE 2.1.13
-- 🐛 Added audio as a valid "video" source 
-
-# 📦 UPDATE 2.1.11
-- ✨ Re-created Google Drive support
-  - 🛠️ Must work 100%, please report issues of it
-
-# 📦 UPDATE 2.1.10
-- ✨ ImageAPI: added methods to get images from jars
-- ✨ BasePlayer: added state name getter
-
-# 📦 UPDATE 2.1.9
-- ✨ Added broken VLC installation detector
-- 🐛 Fixed crashes caused by 7z extractions
-  - 🛠️ This increases Jar size
-- 🛠️ Bumped vlc extraction version
-- 🛠️ Better logging messages
-- 🛠️ Loading WaterMedia on 32-bit systems throws an exception
-- 🛠️ Deprecated MemoryAlloc with no replacement
-- 🛠️ Deprecated BasePlayer#raw() method and field with no replacements
-- 🛠️ Cut changelog from CurseForge per release
-- 🛠️ Removed Herobrine
-
-# 📦 UPDATE 2.1.8
-- 🐛 Fixed broken apache import
-
-# 📦 UPDATE 2.1.7
-- 🐛 Fixed some streams urls causes rendering issues when it increases quality
-- 🐛 Use kick v2 api
-
-# 📦 UPDATE 2.1.6
-- ⚖️ Licensed WaterMedia under [Polyform Strict v1.0.0](https://github.com/WaterMediaTeam/watermedia/blob/2.1.x/LICENSE.md).
-- ⚖️ Licensed the shaded VLCJ and VLCJ-natives version under the [Commercial license for vlcj](https://www.capricasoftware.co.uk/docs/Caprica%20Software%20vlcj%20Commercial%20License%20Standard%20Offer.pdf)
-  donated by [Caprica Software Limited](https://www.capricasoftware.co.uk/)
-- ✨ Removed commons-io and its dependencies, replaced with `sevenzipjbinding`
-  - ✨ Reduced jar size
-
-# 📦 UPDATE 2.1.5
-- 🐛 Fixed NPE issues while loading VLC on some OS
-
-# 📦 UPDATE 2.1.4
-**NOTE: this contains breaking changes on WaterMedia internals
-if you're using the API you have nothing to worry about**
-- ✨ Added option to define custom VLC folder (`config/watermedia/custom_vlc_path.txt`)
-- ✨ Added back JVM argument `Dwatermedia.userDiscoveryPath=/path/` to define custom VLC folder
-- ✨ Detected `application/vnd.apple.mpegurl` and `application/x-mpegurl` as playable video mimetypes (suggested by rlishchyshyn)
-- 🛠️ Removed `Dwatermedia.disableMacOsWorkarrounds`
-- 🛠️ Discovery now search recursively on folders which contains "VLC" in the name
-- 🛠️ Discovery won't be searching after a completed-failed search
-- 🛠️ Discovery will continue searching using the current provider when it has more folders instead of skip to the next provider
-- 🛠️ Default folder providers are re-priorized from "high/highest" to "normal/low"
-- 🛠️ `PlayerAPI#registerFactory` is now synchronized
-- 🛠️ Disabled VLC key and mouse input handling
-
-# 📦 UPDATE 2.1.3
-- 🐛 Fixed MacOS workarrounds aren't applied when ``Dvideolan4j.disableMacOsWorkarrounds`` argument is not present
-- 🛠️ Added minimal VLC bindings for version and instance testing (no more dumb crashes when VLC 4 is installed)
-
-# 📦 UPDATE 2.1.2
-- 🐛 Added stub for server-side fabric because fabric still doesn't add sided dependencies but likes breaks things 
-
-# 📦 BREAKING UPDATE 2.1.1
-### IMPORTANT: THIS IS (YET AGAIN) A BREAKING UPDATE! DEPENDENT MODS WILL NOT WORK IF THEY DIDN'T RELEASE A COMPATIBILITY UPDATE
-**WHY ANOTHER BREAKING UPDATE?**
-Release 2.1.0 has some critical stuff to begin addressed, we do a internal breaking change as a critical update
-Sorry for all devs already working on v2.1.0, no much changes are done
-- 🛠️ Changed the return type of `MathAPI#tickToMs(float): long` to `MathAPI#tickToMs(float): int`
-- 🛠️ Removed deprecated variant `MathAPI#tickToMs(int): long`
-- 🛠️ Removed deprecated method `WaterMediaAPI#math_colorARGB()`
-- ✨ Added `ImageCache` instances for the default resources in `ImageAPI`
-- ✨ Added `-Dwatermedia.disableVLC=<true/false>` to prevent VLC begin loaded/extracted by WATERMeDIA
-  - Overhaul all other arguments, making `-Dwatermedia.slavist=<true/false>` overrideable
-- 🐛 Fixed critical `EXCEPTION_ACCESS_VIOLATION` looping media on VLC
-  - Removed VLCJ videosurface argument in replace of a _custom-made_ callback interface for pre-buffers release
-- 🐛 Fixed Kick.com support (again)
-
-# 📦 BREAKING UPDATE 2.1.0
-### IMPORTANT: THIS UPDATE IS A BREAKING UPDATE! DEPENDENT MODS WILL NOT WORK IF THEY DIDN'T RELEASE A COMPATIBILITY UPDATE
-**WHY UPDATE IS SMALL?**<br>
-This update is focused on fix critical problems on v2 which requires breaking changes, we didn't put much
-effort on this update to entirely focus on v3 development with way many and better features.<br>
-Consider get hyped, this update helps me a lot on how to enhance performance on v3 and how to do SoundPhysics (i made OpenAL works)
-- ✨ Fixed and enhanced URI handling
-  - All usages of `java.net.URL` has been replaced with `java.net.URI`
-  - `local://<path>` was replaced with `water://local/<path>`
-  - Uris created via `NetworkAPI#createURI()` has direct paths compatibility like `C:\Users\ME\Downloads` (no more `file:///`)
-  - Non-HTTP protocols (supported by Java) are now supported (back again)
-  - Fixed some URL's capable to be loaded in VLC aren't loaded by WATERMeDIA
-- ✨ General enhancing to media loading
-  - Rewritten ImageFetch utility
-  - Image loading is way faster
-  - Enhanced image loading stability and debugging (no more image loading deadlocks)
-- ✨ Reduced memory allocation rate while playing videos
-- ✨ Lock video buffers to prevent windows (or unix) sore memory on disk
-- ✨ Removed unnecessary loading.gif extraction (instead detects if its present to override default)
-- ✨ Updated default loading gif (now we use a square gif)
-- ✨ Enhanced VLC discovery to be more recursive
-- 🛠️ Relocated ``me.srrapero720`` package to `org.watermedia` (part of the v3 refactor)
-- 🛠️ Renamed `SyncMediaPlayer` to `MediaPlayer` and all its downclasses
-- 🛠️ Renamed `rendering.RenderAPI` to `render.RenderAPI`
-- 🛠️ Renamed methods similar to `getUrl()` to `getUri()`
-- 🛠️ Removed deprecated methods
-- 🛠️ Added JVM argument `-Dwatermedia.slavist=<true/false>` (enables HD videos from YT)
+# 📦 RELEASE 3.0.0
+### IMPORTANT: FULL REWRITE! MODS MADE FOR 2.x WON'T WORK UNTIL THEY RELEASE A COMPATIBILITY UPDATE
+_VLC_ is gone and no longer required: we now use _FFmpeg_ (included in the companion mod _WATERMeDIA: Binaries_) as the engine, plus our own Java decoders for pictures.
+## API
+- ⚙️ The _VLC_ players (`BasePlayer`, `VideoPlayer`, `MusicPlayer`) are replaced by `MRL` and `MediaPlayer` from the new `PlayerAPI`
+  - `PlayerAPI.mrl(uri)` resolves a link in the background into sources, qualities and metadata
+  - `PlayerAPI.player(mrl, video, audio)` plays pictures, animations, videos, music and live streams with the same controls
+  - `MediaPlayer.onStatus` stacks `StatusListener`s that get the player plus its previous and current status; they're dropped once playback stops, ends or fails
+  - `MediaPlayer.Status.allows` tells whether one status can move straight to another
+- ⚙️ Players draw and play through engines picked by the mod: `GLEngine` (OpenGL), `VKEngine` (Vulkan), `ALEngine` (OpenAL), `JSEngine` (Java Sound), plus `AWTEngine` and `JFXEngine` for desktop apps without OpenGL
+  - `MediaPlayer#texture()` returns a `long`: an OpenGL texture or a Vulkan image view
+  - `preRender` is gone: `GLEngine` uploads frames through the mod's render thread executor
+  - `PlayerAPI.jfxEngine` throws an `IllegalStateException` when JavaFX 13+ is missing; `PixelFormat.GBRA` is gone, nothing ever produced it
+  - `PixelFormat` sizes each frame plane with `planeWidth`, `planeHeight`, `texelBytes` and `frameBytes`
+  - `VKContext.deviceInfo()` describes the lent device (features, extensions and queues) so _FFmpeg_ decodes video on it; when it only enables the video and external memory extensions, a twin device on the same GPU decodes and the engine imports its frames
+  - `CodecsAPI.vulkanDecode()` tells whether the natives support Vulkan decoding
+  - _libplacebo_ converts the decoded frames when the lent device also enables `hostQueryReset`, `runtimeDescriptorArray`, `shaderStorageImageArrayNonUniformIndexing` and `maintenance4` and has a second queue in its render family; the twin device enables them on its own
+- ⚙️ Engines and players are created only through `PlayerAPI` (`player`, `serverPlayer`, `glEngine`, `vkEngine`, `alEngine`, `jsEngine`, `awtEngine`, `jfxEngine`, `headlessEngine`); constructors are internal
+  - Dedicated servers can only create `ServerMediaPlayer`
+  - Players drive their engines' frame uploads and controls; engines only expose state
+- ⚙️ `ImageAPI`, `ImageCache`, `ImageFetch` and `ImageRenderer` are gone: pictures play through `MediaPlayer`
+  - The built-in loading, black and _VLC_ failure pictures are gone
+- ⚙️ Added `CodecsAPI` to decode pictures and encode media. It's **experimental**: it may change or break in any update, so don't use it in your mods yet
+  - `CodecsAPI.decode` takes a `byte[]`, a `ByteBuffer` or an `InputStream`, and `sniff` a `ByteBuffer` or an `InputStream`
+  - `CodecsAPI.encoder` writes video frames and sound samples into a `Container`; `Container`, `VideoCodec` and `AudioCodec` list what each format carries
+  - `ImageReader.addFilter` applies `ReaderFilter`s such as `DownscaleFilter` to every decoded frame
+  - Readers honour a requested BGRA, RGBA or GRAY layout, reported by `ImageData.format()`; `repeat` counts total plays (0 loops forever)
+  - `next()` past the last frame throws `NoSuchElementException` and a closed reader throws `IllegalStateException`; `delay()` gives the latest frame's delay and `metadata()` returns frozen snapshots
+  - Valid but unsupported features (lossless or CMYK JPEG, unknown PNG critical chunks, unknown PAM tuples) throw `UnsupportedFormatException` instead of passing as broken files
+  - Picture metadata uses shared keys (`METAKEY_ICC_PROFILE`, `METAKEY_EXIF`, `METAKEY_XMP`, `METAKEY_ORIENTATION`, `METAKEY_LOOP_COUNT`) with plain Java values
+- ⚙️ `NetworkAPI.UploadStatus` (moved out of `NetworkServer`) gains `cancel()` and `uri()`, the `water://remote/<id>` address of the upload
+- ⚙️ Platforms replace URL patches (`AbstractPatch`, `NetworkAPI.patch`): implement `Platform` and add it with `PlatformAPI.register`
+- ⚙️ `RenderAPI` and `CacheAPI` are gone; `MathAPI` is now `MathUtil`, and easings moved to `MathEases` with more curves
+- ⚙️ `WaterMedia.logger(id)` replaces `LogTool`
+- ⚙️ Added `ServerMediaPlayer`, a server clock that keeps client players in step: send its `snapshot()` with your own packets and feed it to `MediaPlayer.sync()`
+- ⚙️ Added `PlatformAPI.search` for keyword searches across platforms; it returns a live result list and `searching(query)` tells when every platform answered
+  - A newer query cancels the one in flight, typing is debounced, and `search(query, true)` skips the cache
+  - `platforms.searchLimit` caps the results per platform, and each platform gets 5 seconds so a slow one never stalls the rest
+  - `PlatformAPI.searchHistory()` keeps recent queries, newest first
+- ⚙️ Added `SFXEngine.SpatialAudio` for positional audio, with an adapter for _Sound Physics Remastered_ effects
+  - Spatial `ALEngine`s play through sinks: `addSink(Mix)` adds another positional source playing the `LEFT`, `RIGHT` or `MONO` mix of the same decode, in step with the rest; `MediaPlayer.sinks()` and `addSink` reach them from the player
+- ⚙️ `MediaPlayer.audioTracks()` lists every audio a player can play, `audioTrack(track)` switches to one while playing, and `audioLanguage("es-MX")` sets the language to prefer
+- ⚙️ Added `NetRequest` and `HttpHeaders` for web requests
+  - `NetRequest` keeps the mod's User-Agent and Referer, returns error response bodies instead of failing, accepts any JSON content type and gives up on bodies that trickle in too slowly
+  - `query(URI)`, `httpsOnly()`, `maxBytes`, `deadline` and `download(Path, sha256)` cover query strings, HTTPS-only requests, size and time limits and checksum-verified downloads
+- ⚙️ Apps embedding WATERMeDIA start it once with `WaterMedia.start(...)`; `loading()`, `step()` and `steps()` feed a loading screen and `loaded()` tells when it's ready
+  - It loads once per process and never unloads; a failing module stops the start, but a failing _FFmpeg_ or file server only turns that feature off
+  - Platforms can be registered and used anytime, even before WATERMeDIA starts
+- ⚙️ Public methods use record-style names (no `get` prefix); engines are sealed and built-in classes are final
+- ⚙️ Only `org.watermedia` and the `codecs`, `network`, `platform`, `player` and `util` packages of `org.watermedia.api` are public API
+  - Engines, players and `MediaPlayer.PlayerState` live in `org.watermedia.api.player`; codecs, picture filters and _FFmpeg_ state in `org.watermedia.api.codecs`
+  - Codec readers and writers, player internals, built-in platforms, `org.watermedia.bootstrap` and `org.watermedia.tools` are internal
+- ⚙️ Added developer guides in English and Mexican Spanish
+## FEATURES
+- ✨ Videos and music play with _FFmpeg_ 9.0.2, bundled in _WATERMeDIA: Binaries_ for Windows (x64), Linux (x64, ARM64) and macOS (Intel, Apple Silicon)
+  - Odd-sized videos get clean edges and straight rows, and webcam captures no longer turn black on OpenGL
+- ✨ Hardware video decoding on NVIDIA, AMD, Intel and macOS, falling back to software when the GPU struggles
+  - Videos still stutter? Turn it off in the settings
+- ✨ On Vulkan, H.264, H.265 and AV1 videos decode and draw right on the GPU, never touching RAM (requires mod support)
+  - Mods only need to enable a few Vulkan extensions, no GPU queues required
+  - _libplacebo_ converts the frames on the GPU too, mapping HDR to regular screens and unlocking 4:2:2, 4:4:4 and 12-bit videos on cards that support them
+- ✨ 10, 12 and 16-bit videos are converted on the GPU
+- ✨ HDR videos look natural on regular screens with OpenGL and Vulkan, and every video keeps its real colors, from old SD clips to wide-color videos and phone or webcam recordings
+- ✨ Vulkan rendering next to OpenGL, ready for Minecraft 26.x (requires mod support)
+- ✨ Live streams (HLS and DASH) and IPTV playlists, which open as a channel list
+- ✨ Videos with a separate audio track play in sync, unlocking higher qualities on platforms like YouTube
+  - Dubbed videos play their original language, or the one your mod prefers, and you can switch languages while watching (requires mod support)
+- ✨ Pick the quality, change the speed, seek precisely, loop, and lower the resolution of distant screens to save VRAM (requires mod support)
+  - Seeking or pressing play on a finished video restarts it from that spot, and still pictures can get a display time
+- ✨ Positional audio that fades with distance, with _Sound Physics Remastered_ effects (requires mod support)
+  - Stereo screens can play each side from its own edge, and extra speakers can play a screen's sound anywhere without loading it twice
+- ✨ Synchronized playback: everyone on a server watches the same moment, following one server clock (requires mod support)
+- ✨ WATERMeDIA now loads on dedicated servers, where _WATERMeDIA: Binaries_ is optional
+  - An optional file server shares uploaded media with players through `water://remote/` links
+  - It's off by default and only accepts local connections; remote access needs an address and a custom password
+  - Long downloads on slow connections finish; only stalled requests get cut
+  - It handles back-to-back requests and crowds of players, and answers "busy" instead of dropping the connection when it's full
+- ✨ New platforms: Imgur, Medal, Bluesky, BiliBili, TikTok, Odysee (videos, music and livestreams), Newgrounds (movies, music and art), Sendvid, VidLii and D.Tube
+  - YouTube is back, along with SoundCloud, Facebook and Instagram, through _yt-dlp_ (requires _WATERMeDIA: Binaries_)
+  - BiliBili plays up to 1080p (8K with VIP) when you add your session cookie in the settings; without it, up to 480p
+  - Rewrote Twitch and Kick (live, VODs and clips), Streamable, Twitter (X), Lightshot, PornHub, Google Drive, Dropbox and MediaFire
+  - Media shows its title, author, duration and thumbnail when the platform has them
+  - Profile, folder and other unplayable links say so instead of failing with a confusing error
+  - With mature content off, age-restricted videos and adult posts are blocked cleanly instead of failing
+  - One broken picture no longer breaks a whole album
+  - `b23.tv` and TikTok short links, and regular TikTok links, open again
+- ✨ Search videos by keyword on YouTube, Twitch, Kick and Imgur (requires mod support)
+  - Twitch and Kick only show channels that are live right now
+- ✨ Our own pure-Java picture decoders: PNG, APNG, JPEG, GIF, WebP (animated too), SVG and Netpbm
+  - Animations use far less CPU and VRAM, and many can play at once without stuttering the game
+  - Animations shown smaller are shrunk while decoding, so big pictures no longer spike memory
+  - Broken or malicious pictures fail safely instead of crashing the game or eating its memory
+  - Phone photos (JPEG and WebP) follow their EXIF orientation instead of showing sideways
+  - Quirky files decode fine: APNGs with a preview frame, GIFs with stray bytes, WebPs with trailing bytes, lossy WebPs with filtered transparency, SVGs with alternative versions and pictures with broken metadata
+  - GIFs with zero or tiny frame delays play at browser speed
+- ✨ Record videos with sound to MP4, MOV, MKV, WebM and Ogg, and save pictures and animations as PNG, APNG and GIF without _FFmpeg_ (experimental, requires mod support)
+- ✨ Small videos are cached on disk like pictures, so they load faster next time
+- ✨ Opening the jar launches a full media player with search, IPTV channels and settings, rendering with Vulkan (OpenGL as fallback) and OpenAL sound
+  - Its engine, UI scale (`Auto` or `x1.0` to `x3.0`), CRT effect and click sound are saved in `config/app.properties`; an OpenGL fallback never overwrites the saved engine
+  - Launching it from a terminal no longer spams Java and _FFmpeg_ warnings
+## CHANGES
+- 🛠️ Requires Java 17 to 25 and supports Minecraft 1.18.2, 1.19.2, 1.20.1, 1.21.1, 1.21.11, 26.1.2 and 26.2 on Forge, NeoForge and Fabric
+  - Dropped Minecraft 1.16.5 and 1.21.5; unsupported game or loader versions show a version mismatch instead of loading
+- 🛠️ Minecraft clients require _WATERMeDIA: Binaries_, and both mods must be on 3.0
+- 🛠️ Settings moved to `config/watermedia.toml`; `custom_vlc_path.txt` and custom loading GIFs are no longer used
+  - _FFmpeg_ can be turned off or swapped for your own compatible build
+- 🛠️ Mature content is blocked by default; you can allow it in the settings
+- 🛠️ Relicensed under the _Defensive Public Source (Non-Commercial) License v1.0.1_
+  - _FFmpeg_ ships under the _LGPLv3_
+- 🛠️ Cleaner, safer logs: a repeating problem such as a broken frame is logged once instead of flooding the log, and tokens, passwords and login data are hidden while links stay readable
+- 🛠️ _TLauncher_ stays unsupported: the game stops at startup when it's detected, now also through its skin mod, files, Java options and launcher process
+  - Leftovers from an old _TLauncher_ install only leave a warning in the log
+- 🛠️ HTTPS media checks certificates on every playlist and segment, and login data never follows redirects to other sites
+  - Web links can only redirect to web links, and online playlists can't point to local files
+  - Private HTTPS servers need a certificate Java trusts
+- 🛠️ Dropped BMP and TIFF pictures and OneDrive links
+- 🛠️ Source code and issue reports moved to [github.com/SrRapero720/watermedia](https://github.com/SrRapero720/watermedia)
+- 🛠️ Video and app shaders ship as plain GLSL files in `assets/watermedia/shaders`, alongside the app's other assets
+## BUG FIXES
+- 🐛 No more missing videos, crashes or "VLC not found" errors from absent, broken, sandboxed or incompatible _VLC_ installs
+- 🐛 Fixed rendering glitches with _Sodium_ and similar mods while videos or pictures play
+- 🐛 Twitter (X) links ending in `/video/1` or `/photo/1`, Streamable embeds, `www.kick.com` and `mediafire.com` links work again

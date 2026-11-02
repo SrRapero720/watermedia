@@ -1,0 +1,105 @@
+name: Build Test
+
+on:
+  push:
+    branches: ["master", "3.0.x"]
+  pull_request:
+    branches: ["master", "3.0.x"]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    env:
+      ALSOFT_DRIVERS: 'null'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          submodules: recursive
+
+      - name: Read build versions
+        id: versions
+        shell: pwsh
+        run: |
+          $gradleVersion = ((Get-Content gradle.properties | Select-String '^gradle_version=').Line -split '=', 2)[1]
+          Add-Content $env:GITHUB_OUTPUT "gradle=$gradleVersion"
+
+      - name: Set up patched Java
+        shell: pwsh
+        run: ./binaries/tools/SetupJava.ps1 -Platform linux-x86_64 -ProjectRoot .
+
+      - name: Install Linux media runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libpulse0 libxcb1 libxcb-shm0 libudev1 libasound2 libva2 libva-drm2 libdrm2
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb
+        with:
+          gradle-version: ${{ steps.versions.outputs.gradle }}
+
+      - name: Build and test
+        run: gradle build --warning-mode fail
+
+  native:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-22.04
+            platform: linux-x86_64
+          - runner: ubuntu-22.04-arm
+            platform: linux-arm64
+          - runner: windows-2022
+            platform: windows-x86_64
+          - runner: macos-15-intel
+            platform: macosx-x86_64
+          - runner: macos-15
+            platform: macosx-arm64
+          - runner: windows-2022
+            platform: windows-x86_64
+            compatibility: true
+    runs-on: ${{ matrix.runner }}
+    env:
+      ALSOFT_DRIVERS: 'null'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          submodules: recursive
+
+      - name: Read build versions
+        id: versions
+        shell: pwsh
+        run: |
+          $gradleVersion = ((Get-Content gradle.properties | Select-String '^gradle_version=').Line -split '=', 2)[1]
+          Add-Content $env:GITHUB_OUTPUT "gradle=$gradleVersion"
+
+      - name: Set up patched Java
+        shell: pwsh
+        run: |
+          $javaProperty = if ('${{ matrix.compatibility }}' -eq 'true') { 'java_compat_version' } else { 'java_test_version' }
+          ./binaries/tools/SetupJava.ps1 -Platform '${{ matrix.platform }}' -ProjectRoot . -VersionProperty $javaProperty
+
+      - name: Install Linux media runtime
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libpulse0 libxcb1 libxcb-shm0 libudev1 libasound2 libva2 libva-drm2 libdrm2
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb
+        with:
+          gradle-version: ${{ steps.versions.outputs.gradle }}
+
+      - name: Require real FFmpeg loading
+        if: ${{ !matrix.compatibility }}
+        run: gradle test -Prequire_natives=true --tests 'org.watermedia.api.player.FF*Test' --tests 'org.watermedia.api.codecs.decoders.*' --tests 'org.watermedia.api.codecs.encoders.*' --warning-mode fail
+
+      - name: Verify Java 17 server, audio and network compatibility
+        if: ${{ matrix.compatibility }}
+        run: gradle test -Prequire_natives=true --tests 'org.watermedia.Bootstrap*Test' --tests 'org.watermedia.api.network.*' --tests 'org.watermedia.api.player.ALCapabilitiesTest' --tests 'org.watermedia.api.player.AWTEngineTest' --tests 'org.watermedia.api.player.SFXEngineTest' --tests 'org.watermedia.api.player.SpatialAudioTest' --tests 'org.watermedia.api.util.NetRequestTest' --warning-mode fail

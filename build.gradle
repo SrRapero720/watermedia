@@ -1,171 +1,261 @@
+import groovy.json.JsonOutput
+import me.modmuss50.mpp.platforms.curseforge.AdditionalFileOptions
+
+import java.security.MessageDigest
+import java.util.jar.JarEntry
+import java.util.jar.JarFile
+import java.util.jar.JarOutputStream
+import java.util.jar.Manifest
+
 plugins {
-    id 'java'
-    id 'idea'
-    id 'com.github.johnrengelman.shadow' version '8.1.+'
-    id 'com.google.osdetector' version '1.7.+'
-    id "me.modmuss50.mod-publish-plugin" version "0.8.3"
+    id 'java-library'
+    id 'com.google.osdetector'
+    id 'me.modmuss50.mod-publish-plugin'
 }
 
-def MT_TOKEN = System.getenv("MODRINTH_TOKEN")
-def CF_TOKEN = System.getenv("CURSEFORGE_TOKEN")
+// ==== SOURCES ====
+java { withSourcesJar() }
 
-base {
-    archivesName = id
-    libsDirectory = new File("builtJars/")
+// include IS MERGED INTO THE JAR, jarJar NESTS UNDER META-INF/jarjar AND launcher IS WHAT THE STANDALONE APP DOWNLOADS
+configurations {
+    include
+    jarJar { transitive = false }
+    launcher { transitive = false }
+    compileOnlyApi.extendsFrom(jarJar)
+    compileOnly.extendsFrom(include)
+    // LOCAL RUNS NEED HOST LIBRARIES WITHOUT EXPORTING THEM AS RUNTIME DEPENDENCIES.
+    runtimeClasspath.extendsFrom(compileOnlyApi, include)
+    testImplementation.extendsFrom(compileOnlyApi, include)
+}
+
+// THE BINARIES SOURCES COMPILE HERE; THEIR NATIVE RESOURCES COME FROM THE BINARIES BUILD
+def binariesResources = files(layout.projectDirectory.dir('binaries/build/resources/main')).builtBy(gradle.includedBuild('binaries').task(':processResources'))
+sourceSets {
+    main.java.srcDirs += 'binaries/src/main/java'
+    tools.java.srcDirs = ['src/test/tools']
+    main.runtimeClasspath += binariesResources
+    test.runtimeClasspath += binariesResources
+}
+
+// ==== DEPENDENCIES ====
+// TESTS LOAD THE NATIVES OF THIS HOST; THE STANDALONE LAUNCHER DOWNLOADS THOSE OF EVERY TARGET PLATFORM
+def lwjglPlatform = [windows: 'windows', linux: 'linux', osx: 'macos'][osdetector.os]
+def lwjglArch = [x86_64: '', aarch_64: '-arm64'][osdetector.arch]
+if (lwjglPlatform == null || lwjglArch == null) throw new GradleException("Unsupported LWJGL test platform: $osdetector.classifier")
+def lwjglHost = lwjglPlatform + lwjglArch
+def javafxHost = [windows: 'win', linux: 'linux', osx: 'mac'][osdetector.os]
+if (osdetector.arch == 'aarch_64' && osdetector.os != 'windows') javafxHost += '-aarch64'
+def lwjglTargets = lwjgl_platforms.tokenize(',')*.trim()
+
+// THE FFMPEG API JAR COMES FROM THE JAVACPP PRESETS FORK BINARIES REBUILDS ITS NATIVES FROM (hwcontext_vulkan BINDINGS),
+// SO IT SHIPS NEXT TO THEM INSTEAD OF MAVEN CENTRAL; JAVACPP ITSELF KEEPS THE VERSION THE PRESET SUFFIX NAMES
+def javacppVersion = ffmpeg_version.split('-', 2)[1]
+dependencies {
+    include files('binaries/libs/ffmpeg-' + ffmpeg_version + '.jar')
+    include "org.bytedeco:javacpp:$javacppVersion"
+    // NESTED LIBRARIES RESOLVE AN EXACT VERSION; THE RANGE LOADERS ACCEPT IS "<artifact>_range" IN gradle.properties.
+    // A RESOLVED RANGE WOULD READ EVERY NEWER RELEASE'S METADATA AND BREAK DEPENDENCY VERIFICATION ON EACH UPSTREAM PUBLISH
+    jarJar "com.github.SrRapero720:waterconfig:$waterconfig_version"
+
+    compileOnlyApi "org.tukaani:xz:$xz_version"
+    compileOnlyApi project(':modloaders')
+    ["com.google.code.gson:gson:$gson_version", "org.joml:joml:$joml_version",
+     "org.apache.logging.log4j:log4j-api:$log4j_version", "org.apache.logging.log4j:log4j-core:$log4j_version"].each { library ->
+        compileOnlyApi library
+        launcher library
+    }
+    ['lwjgl', 'lwjgl-opengl', 'lwjgl-glfw', 'lwjgl-stb', 'lwjgl-openal', 'lwjgl-vulkan', 'lwjgl-shaderc'].each { module ->
+        def library = "org.lwjgl:$module:$lwjgl_version"
+        compileOnlyApi library
+        launcher library
+        // VULKAN USES THE SYSTEM LOADER EXCEPT ON MACOS, WHICH SHIPS MOLTENVK.
+        def natives = { String platform -> module != 'lwjgl-vulkan' || platform.startsWith('macos') }
+        if (natives(lwjglHost)) testRuntimeOnly "$library:natives-$lwjglHost"
+        lwjglTargets.findAll(natives).each { platform -> launcher "$library:natives-$platform" }
+    }
+    ['base', 'graphics'].each { module -> compileOnlyApi "org.openjfx:javafx-$module:$javafx_version:$javafxHost" }
 }
 
 test {
-    useJUnitPlatform()
+    maxHeapSize = test_max_heap
+    // THE TESTS LOAD THE LWJGL AND FFMPEG NATIVES FROM THE CLASSPATH, AS THE APP DOES
+    jvmArgs "-XX:MaxDirectMemorySize=$test_max_direct_memory", '--enable-native-access=ALL-UNNAMED'
+    // LWJGL READS MEMORY THROUGH sun.misc.Unsafe, WHICH JAVA 24+ WARNS ABOUT; THE FLAG DOES NOT EXIST BEFORE JAVA 23
+    if (javaLauncher.get().metadata.languageVersion.asInt() >= 23) jvmArgs '--sun-misc-unsafe-memory-access=allow'
+    systemProperty 'watermedia.test.requireNatives', require_natives
+    systemProperty 'org.lwjgl.system.stackSize', test_lwjgl_stack
+    // ISOLATED JVM PROBES AND LAUNCHER PIN CHECKS READ THE TEST CLASSPATH FROM HERE
+    doFirst { Test task -> task.systemProperty('watermedia.test.classpath', task.classpath.asPath) }
+    testLogging { events 'passed', 'skipped', 'failed' }
 }
 
-java {
-    withSourcesJar()
-    sourceCompatibility = targetCompatibility = JavaVersion.VERSION_1_8
+// ==== GENERATED RESOURCES ====
+// EVERY jarJar LIBRARY NESTS UNDER META-INF/jarjar FOR ALL LOADERS AND THE STANDALONE LAUNCHER.
+def nestedLibraries = configurations.jarJar.dependencies.collect { library ->
+    [group: library.group, name: library.name, version: library.version, range: property(library.name + '_range').toString(),
+     file: library.name + '-' + library.version + '.jar']
 }
-
-sourcesJar {
-    exclude("videolan/**.zip")
-    exclude("videolan/**.7z")
-}
-
-println("Gradle Java: ${JavaVersion.current()}")
-println("Building project: ${properties.simplename}")
-println("Java: ${System.getProperty 'java.version'}, JVM: ${System.getProperty 'java.vm.version'} (${System.getProperty 'java.vendor'}), Arch: ${System.getProperty 'os.arch'}, Encoding: ${System.getProperty "file.encoding"}")
-
-repositories {
-    google()
-    mavenCentral()
-    maven { url 'https://jitpack.io' }
-    maven { url "https://repo.spongepowered.org/maven" }
-}
-
-configurations {
-    shadow.extendsFrom(implementation)
-    library
-}
-
-sourceSets {
-    // SHADOW
-    test.compileClasspath += configurations.shadow
-    test.runtimeClasspath += configurations.shadow
-
-    // LIBRARY
-    main.compileClasspath += configurations.library
-    test.compileClasspath += configurations.library
-    test.runtimeClasspath += configurations.library
-}
-
-dependencies {
-    // MODLOADERS
-    compileOnly "com.github.WaterMediaTeam:modloaders:$modloaders_version"
-    compileOnly "net.fabricmc:fabric-loader:$fabric_version"
-//    shadow fileTree(dir: 'libs', include: '*.jar')
-
-    // DEPENDENCIES
-    shadow "com.github.WaterMediaTeam:videolan-natives:$vlcj_natives_version"
-    shadow "com.github.WaterMediaTeam:vlcj-submodule:$vlcj_submodule_version";
-
-    // DEPENDENCIES INCLUDED IN MINECRAFT
-    library "net.java.dev.jna:jna:$jna_version"
-    library "net.java.dev.jna:platform:$jnaplatform_version"
-    library "org.apache.logging.log4j:log4j-api:$log4j_version"
-    library "org.apache.logging.log4j:log4j-core:$log4jcore_version"
-    library "com.google.code.gson:gson:$gson_version"
-    library "org.lwjgl:lwjgl-opengl:$opengl_version"
-    library "org.lwjgl:lwjgl-glfw:$opengl_version"
-    library "org.lwjgl:lwjgl-openal:$openal_version"
-
-    // TEST DEPENDENCIES
-    testImplementation 'org.junit.jupiter:junit-jupiter-api:5.8.1'
-    testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine:5.8.1'
-    testRuntimeOnly "org.lwjgl:lwjgl:$opengl_version:natives-$osdetector.os"
-    testRuntimeOnly "org.lwjgl:lwjgl-opengl:$opengl_version:natives-$osdetector.os"
-    testRuntimeOnly "org.lwjgl:lwjgl-glfw:$opengl_version:natives-$osdetector.os"
-}
-
-// Process target resources with mod info
-processResources {
-    outputs.upToDateWhen { false }
-    filesMatching(['META-INF/mods.toml', 'META-INF/neoforge.mods.toml', 'pack.mcmeta', 'fabric.mod.json', "watermedia/version.cfg"]) {
-        expand(project.properties)
-    }
-}
-
-// ShadowJar task (run this task to make a built JAR.
-shadowJar {
-    dependsOn jar
-    configurations = [project.configurations.shadow]
-
-    exclude "META-INF/versions/**"
-    exclude "META-INF/proguard/**"
-    exclude "META-INF/maven/**"
-    exclude "META-INF/LICENSE.*"
-    exclude "META-INF/LICENSE"
-    exclude "META-INF/NOTICE.**"
-    exclude "META-INF/NOTICE"
-
-    mergeServiceFiles()
-    archiveClassifier = ""
-}
-
-jar {
-    duplicatesStrategy = DuplicatesStrategy.WARN
-
-    manifest {
-        attributes "Specification-Title"        : id
-        attributes "Specification-Vendor"       : authors
-        attributes "Specification-Version"      : version
-        attributes "Implementation-Title"       : brandname
-        attributes "Implementation-Version"     : version
-        attributes "Implementation-Vendor"      : authors
-        attributes "Implementation-Timestamp"   : new Date().format("yyyy-MM-dd'T'HH:mm:ssZ")
-        attributes "Main-Class": "me.srrapero720.watermedia.Main"
-    }
-
-    finalizedBy shadowJar
-}
-
-publishMods {
-    file = shadowJar.archiveFile
-    changelog = getChangelogText()
-    type = STABLE
-    displayName = "WM/${project.properties.version}"
-    modLoaders.add("forge")
-    modLoaders.add("neoforge")
-    modLoaders.add("fabric")
-
-    additionalFiles.from(sourcesJar.archiveFile)
-    maxRetries = 2
-
-    dryRun = false
-
-    curseforge {
-        accessToken = CF_TOKEN
-        projectId = curseforgeid
-        minecraftVersions.addAll("1.16.5", "1.18.2", "1.19.2", "1.20.1", "1.21.1", "1.21.5")
-        javaVersions.addAll(JavaVersion.VERSION_21, JavaVersion.VERSION_17, JavaVersion.VERSION_11, JavaVersion.VERSION_1_8)
-        clientRequired = true
-        serverRequired = false
-        projectSlug = id
-        incompatible("fancyvideo-api")
-        additionalFile(sourcesJar) {
-            name = "WM-sources/${project.properties.version}"
+ext.resourceValues = [jars: JsonOutput.toJson(nestedLibraries.collect { [file: 'META-INF/jarjar/' + it.file] })]
+def nestedFiles = configurations.jarJar.incoming.artifacts.resolvedArtifacts
+def nestedJars = tasks.register('nestedJars') {
+    group = 'build'
+    description = 'Nests the jarJar libraries with FML library manifests, Fabric descriptors and the jarjar metadata'
+    def output = layout.buildDirectory.dir('jarjar')
+    inputs.property('libraries', nestedLibraries)
+    inputs.files(configurations.jarJar)
+    outputs.dir(output)
+    doLast {
+        def directory = output.get().asFile
+        directory.deleteDir()
+        directory.mkdirs()
+        // 1980-02-01 IN LOCAL TIME IS THE ENTRY TIME OF GRADLE'S REPRODUCIBLE ARCHIVES
+        def stamp = new GregorianCalendar(1980, Calendar.FEBRUARY, 1).timeInMillis
+        def stamped = { String name -> new JarEntry(name).tap { time = stamp } }
+        def sources = nestedFiles.get().collectEntries { [(it.id.componentIdentifier.moduleIdentifier.toString()): it.file] }
+        nestedLibraries.each { library ->
+            new JarFile(sources[library.group + ':' + library.name] as File).withCloseable { source ->
+                new JarOutputStream(new File(directory, library.file).newOutputStream()).withCloseable { jar ->
+                    // FML LOADS THE COPY AS A GAME LIBRARY, NAMED AS A MODULE WHEN THE ORIGINAL IS NOT
+                    def manifest = source.manifest ?: new Manifest()
+                    def attributes = manifest.mainAttributes
+                    attributes.putValue('Manifest-Version', '1.0')
+                    attributes.putValue('FMLModType', 'GAMELIBRARY')
+                    if (!attributes.getValue('Automatic-Module-Name')) attributes.putValue('Automatic-Module-Name', library.name)
+                    jar.putNextEntry(stamped(JarFile.MANIFEST_NAME))
+                    manifest.write(jar)
+                    source.entries().each { entry ->
+                        // SIGNATURES NO LONGER MATCH THE REWRITTEN MANIFEST
+                        if (entry.name ==~ /(?i)META-INF\/(MANIFEST\.MF|[^\/]+\.(SF|RSA|DSA|EC))/) return
+                        jar.putNextEntry(stamped(entry.name))
+                        source.getInputStream(entry).withCloseable { it.transferTo(jar) }
+                    }
+                    // FABRIC NESTS ONLY MODS, SO PLAIN LIBRARIES GET THE DESCRIPTOR LOOM WOULD GENERATE
+                    if (source.getEntry('fabric.mod.json') != null) return
+                    jar.putNextEntry(stamped('fabric.mod.json'))
+                    def id = (library.group + '_' + library.name).toLowerCase(Locale.ROOT).replaceAll(/[^a-z0-9_-]/, '_')
+                    jar.write(JsonOutput.toJson([schemaVersion: 1, id: id, version: library.version, name: library.name,
+                            custom: ['fabric-loom:generated': true]]).getBytes('UTF-8'))
+                }
+            }
         }
-    }
-
-    modrinth {
-        accessToken = MT_TOKEN
-        projectId = modrinthid
-        minecraftVersions.addAll("1.16.5", "1.18.2", "1.19.2", "1.20.1", "1.21.1", "1.21.5")
-        incompatible("vlcvideoapi-pol")
+        new File(directory, 'metadata.json').write(JsonOutput.prettyPrint(JsonOutput.toJson([jars: nestedLibraries.collect { library ->
+            [identifier: [group: library.group, artifact: library.name], version: [range: library.range, artifactVersion: library.version],
+             path: 'META-INF/jarjar/' + library.file, isObfuscated: false]
+        }])), 'UTF-8')
     }
 }
 
-def getChangelogText() {
-    def result = ""
-    for (String line: file('CHANGELOG.md').readLines('UTF-8')) {
-        if (line.isEmpty()) return result
-        result += line + '\n'
+// THE STANDALONE LAUNCHER READS ITS LIBRARY VERSIONS, NESTED JARS AND THE SHA-256 OF EVERY DOWNLOADABLE JAR HERE.
+def launcherFiles = configurations.launcher.incoming.files
+def launcherValues = [log4j_version: log4j_version, gson_version: gson_version, lwjgl_version: lwjgl_version,
+                      joml_version: joml_version, nested: nestedLibraries*.file.join(',')]
+def bootstrapProperties = tasks.register('bootstrapProperties') {
+    group = 'build'
+    description = 'Writes the standalone launcher catalog with versions, nested jars and SHA-256 pins'
+    def output = layout.buildDirectory.file('bootstrap/bootstrap.properties')
+    inputs.properties(launcherValues)
+    inputs.files(launcherFiles)
+    outputs.file(output)
+    doLast {
+        def lines = launcherValues.collect { key, value -> key + '=' + value }
+        launcherFiles.files.sort { it.name }.each { file ->
+            lines << file.name + '=' + HexFormat.of().formatHex(MessageDigest.getInstance('SHA-256').digest(file.bytes))
+        }
+        output.get().asFile.write(lines.join('\n') + '\n', 'UTF-8')
     }
-    return result
+}
+
+processResources {
+    from(nestedJars) { into 'META-INF/jarjar' }
+    from(bootstrapProperties)
+}
+
+// ==== PACKAGING ====
+// THE BINARIES CLASSES SHIP ONLY IN THE BINARIES JAR
+jar {
+    manifest.attributes 'Main-Class': mainclass
+    from { configurations.include.collect { zipTree(it) } }
+    // JAVACPP CHECKS THE FFMPEG PRESET VERSION AGAINST ITS OWN THROUGH THEIR pom.properties, SO ONLY THOSE STAY
+    exclude 'META-INF/versions/', 'META-INF/maven/**/*.xml', 'org/watermedia/binaries/**'
+    filesMatching('META-INF/*') { duplicatesStrategy = DuplicatesStrategy.INCLUDE }
+}
+sourcesJar { exclude 'org/watermedia/binaries/**' }
+
+// ==== PUBLISHING ====
+// INSIDE publishMods A BARE version IS THE EXTENSION'S PROPERTY, SO THE PROJECT VERSION IS READ OUT HERE
+def publishVersion = project.version.toString()
+publishMods {
+    file = jar.archiveFile
+    additionalFiles.from(sourcesJar.archiveFile)
+    curseforge {
+        serverRequired = true
+        projectSlug = id
+        additionalFile(sourcesJar) { AdditionalFileOptions file -> file.name = "$publishVersion-sources" }
+        requires('watermedia-binaries')
+    }
+    modrinth { requires('watermedia-binaries') }
+}
+
+apply from: 'gradle/common.gradle'
+
+// BUILD BOTH DISTRIBUTIONS; EACH BUILD ALSO COMPILES ITS MAINTENANCE TOOLS.
+tasks.named('build') { dependsOn gradle.includedBuild('binaries').task(':build') }
+check.dependsOn tasks.named('compileToolsJava')
+
+// ==== MAINTENANCE ====
+// LISTS PUBLIC METHODS WITHOUT JAVADOC IN THE PUBLIC API PACKAGES OF gradle.properties, SKIPPING OVERRIDES.
+def inventorySources = sourceSets.main.java
+def inventoryRoot = layout.projectDirectory.asFile.toPath()
+def inventoryPackages = public_packages.split(',')*.trim() as Set
+tasks.register('javadocInventory') {
+    group = 'documentation'
+    description = 'Lists public methods without local Javadoc in public API packages, excluding overrides'
+    doLast {
+        def declaration = ~/^\s*public\s+(?:(?:static|final|synchronized|abstract|native|default)\s+)*(?!class\b|interface\b|enum\b|record\b)[\w<>?,.\[\] ]+\s+(\w+)\s*\(/
+        def (included, excluded) = inventorySources.files.sort { it.path }.collect { [it, it.readLines('UTF-8')] }
+                .split { File file, List<String> lines -> lines.any { line -> inventoryPackages.any { line.startsWith("package $it;") } } }
+        int missing = 0
+        included.each { File file, List<String> lines ->
+            lines.eachWithIndex { line, i ->
+                def match = line =~ declaration
+                if (!match.find()) return
+                // CLIMB OVER BLANK LINES AND ANNOTATIONS TO THE TEXT ABOVE THE DECLARATION
+                int previous = i - 1
+                boolean override = false
+                while (previous >= 0 && (lines[previous].trim().isEmpty() || lines[previous].trim().startsWith('@'))) {
+                    override |= lines[previous--].trim().startsWith('@Override')
+                }
+                // A COMMENT ENDING THERE DOCUMENTS IT WHEN ITS OPENER IS /**; MIME PATTERNS INSIDE JAVADOC ARE ORDINARY TEXT.
+                boolean documented = previous >= 0 && lines[previous].trim().endsWith('*/') &&
+                        (previous..0).collect { lines[it].stripLeading() }.find { it.startsWith('/*') }?.startsWith('/**')
+                if (override || documented) return
+                logger.lifecycle(inventoryRoot.relativize(file.toPath()).toString().replace('\\', '/') + ":${i + 1}:${match.group(1)}")
+                missing++
+            }
+        }
+        logger.lifecycle("Javadoc inventory: $missing candidates; ${included.size()} included files; ${excluded.size()} excluded files.")
+    }
+}
+
+// NORMALIZE ENHANCED-FOR COLONS IN JAVA SOURCES.
+def javaSources = files(['src', 'binaries/src', 'binaries/tools'].collect { fileTree(dir: it, include: '**/*.java') })
+tasks.register('removeSemicolonSpace') {
+    group = 'formatting'
+    description = 'Removes the space before the enhanced-for colon in the WaterMedia and Binaries Java sources'
+    doLast {
+        // (?m) ANCHORS ^ PER LINE AND [^:;=\r\n] KEEPS EACH MATCH INSIDE ONE LINE; AN '=' OR ';' MEANS A COUNTED for,
+        // WHOSE COLONS BELONG TO TERNARIES
+        def regex = ~/(?m)(^[ \t]*for[ \t]*\([^:;=\r\n]*\w)[ \t]+:/
+        javaSources.each { file ->
+            def text = file.getText('UTF-8')
+            def updated = text.replaceAll(regex, '$1:')
+            if (updated == text) return
+            def after = updated.readLines()
+            text.readLines().eachWithIndex { line, i ->
+                if (after[i] != line) println "$file.path:${i + 1}\n  - ${line.stripLeading()}\n  + ${after[i].stripLeading()}"
+            }
+            file.write(updated, 'UTF-8')
+        }
+        println 'Done.'
+    }
 }

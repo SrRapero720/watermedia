@@ -1,0 +1,229 @@
+[
+  {
+    "name": "Platforms",
+    "uris": [
+      {
+        "name": "BILIBILI",
+        "uri": "https://www.bilibili.com/video/BV1Zt4y1C7s6/"
+      },
+      {
+        "name": "BLUESKY",
+        "uri": "https://bsky.app/profile/srrapero720.me/post/3mkszjwleq22l"
+      },
+      {
+        "name": "GOOGLE DRIVE",
+        "uri": "https://drive.google.com/file/d/174Y1eWncMb71r-J5NwUOFXFAirbTbxaM/view?usp=drive_link"
+      },
+      {
+        "name": "DROPBOX",
+        "uri": "https://www.dropbox.com/scl/fi/kptthw0j293znssoftfcc/Despedite-de-tu-cuenta-rufian.mp4?rlkey=azbd5svcv7lr0ibq6fs63y2pe&st=0mlfbq0p&dl=0"
+      },
+      {
+        "name": "D.TUBE",
+        "uri": "https://d.tube/watch/3vuWWVGYPSWKcxxFjygb8S"
+      },
+      {
+        "name": "IMGUR MULTISOURCE",
+        "uri": "https://imgur.com/gallery/images-that-i-use-to-test-watermedia-aWYiadd"
+      },
+      {
+        "name": "KICK STR (DESST)",
+        "uri": "https://kick.com/desst3"
+      },
+      {
+        "name": "KICK STR (RKKN)",
+        "uri": "https://kick.com/Rakkun"
+      },
+      {
+        "name": "LIGHTSHOT (PRNT.SC)",
+        "uri": "https://prnt.sc/N_wBi7XCMbmf"
+      },
+      {
+        "name": "MEDIAFIRE",
+        "uri": "https://www.mediafire.com/file/f23l3csbeeap9jo/TU_QLO.mp4/file"
+      },
+      {
+        "name": "ODYSEE",
+        "uri": "https://odysee.com/@IsaacElite10:8/2026-05-06-21-36-32:5"
+      },
+      {
+        "name": "PORNHUB",
+        "uri": "https://es.pornhub.com/view_video.php?viewkey=6674861627410"
+      },
+      {
+        "name": "PORNHUB #2",
+        "uri": "https://es.pornhub.com/view_video.php?viewkey=6a159015e4470"
+      },
+      {
+        "name": "SENDVID",
+        "uri": "https://sendvid.com/1l0utkwx"
+      },
+      {
+        "name": "STREAMABLE",
+        "uri": "https://streamable.com/jzqiek"
+      },
+      {
+        "name": "TWITTER VIDEO (x)",
+        "uri": "https://x.com/MatriFirst/status/2068433954416295944"
+      },
+      {
+        "name": "TWITTER GALLERY (x)",
+        "uri": "https://x.com/sketch_soft10/status/1969820419827143072"
+      },
+      {
+        "name": "TWITTER HARD (x)",
+        "uri": "https://x.com/SrRapero720/status/2048564552040681667"
+      },
+      {
+        "name": "TIKTOK",
+        "uri": "https://www.tiktok.com/@rosalem_escobar_gonzalez/video/7634264467034983701?is_from_webapp=1&sender_device=pc"
+      },
+      {
+        "name": "YOUTUBE",
+        "uri": "https://www.youtube.com/watch?v=rQ6G3WmJQCg"
+      },
+      {
+        "name": "YOUTUBE PLAYLIST",
+        "uri": "https://www.youtube.com/watch?v=LlNCDSz5BeE&list=PLeWMb2RfQyfRwSHkfGMLc6AyUfVxMkfOw"
+      },
+      {
+        "name": "VIDLII",
+        "uri": "https://www.vidlii.com/watch?v=fm-xl5NVSPt"
+      }
+    ]
+  },
+  {
+    "name": "WEBP",
+    "uris": [
+      {
+        "name": "TV LOSSLESS",
+        "uri": "https://files.catbox.moe/2ihp24.webp"
+      },
+      {
+        "name": "HEX - LOSSY",
+        "uri": "https://files.catbox.moe/797vqd.webp"
+      },
+      {
+        "name": "RGB - LOSSY",
+        "uri": "https://files.catbox.moe/z8efsa.webp"
+      },
+      {
+        "name": "TV TEST - LOSSY",
+        "uri": "https://files.catbox.moe/izh9qa.webp"
+      },
+      {
+        "name": "ANIMATED - LOSSY",
+        "uri": "https://mathiasbynens.be/demo/animated-webp-supported.webp"
+      },
+      {
+        "name": "WEBP #1 - LOSSY",
+        "uri": "https://www.gstatic.com/webp/gallery3/1_webp_a.webp"
+      },
+      {
+        "name": "WEBP #1 LOSSLESS",
+        "uri": "https://www.gstatic.com/webp/gallery3/1_webp_ll.webp"
+      },
+      {
+        "name": "WEBP #2 - LOSSY",
+        "uri": "https://www.gstatic.com/webp/gallery3/2_webp_a.webp"
+      },
+      {
+        "name": "WEBP #2 LOSSLESS",
+        "uri": "https://www.gstatic.com/webp/gallery3/2_webp_ll.webp"
+      },
+      {
+        "name": "WEBP #2 RE-ENCODED LOSSLESS",
+        "uri": "https://files.catbox.moe/vafr93.webp"
+      },
+      {
+        "name": "WEBP #3 - LOSSY",
+        "uri": "https://www.gstatic.com/webp/gallery3/3_webp_a.webp"
+      },
+      {
+        "name": "WEBP #3 LOSSLESS",
+        "uri": "https://www.gstatic.com/webp/gallery3/3_webp_ll.webp"
+      },
+      {
+        "name": "WEBP #4 - LOSSY",
+        "uri": "https://www.gstatic.com/webp/gallery3/4_webp_a.webp"
+      },
+
+      {
+        "name": "WEBP #4 - LOSSLESS",
+        "uri": "https://www.gstatic.com/webp/gallery3/4_webp_ll.webp"
+      },
+      {
+        "name": "WEBP #5 - LOSSY",
+        "uri": "https://www.gstatic.com/webp/gallery3/5_webp_a.webp"
+      },
+      {
+        "name": "WEBP #5 LOSSLESS",
+        "uri": "https://www.gstatic.com/webp/gallery3/5_webp_ll.webp"
+      }
+    ]
+  },
+  {
+    "name": "GIF format",
+    "uris": [
+      {
+        "name": "GIF #1",
+        "uri": "https://blog.phonehouse.es/wp-content/uploads/2018/01/giphy-1-1.gif"
+      },
+      {
+        "name": "GIF #2",
+        "uri": "https://media0.giphy.com/media/v1.Y2lkPTc5MGI3NjExNjdxeTBlZDl3Y2g0NXMwNjE2cGhxb3lsMXg0MHhvNGt5MTBjN2UwdCZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9cw/ymOQcf85Q5zrkBrhPM/giphy.gif"
+      },
+      {
+        "name": "GIF #3",
+        "uri": "https://preview.redd.it/brighter-hd-gif-stills-etc-v0-xe8qtjitd82g1.gif?width=1080&crop=smart&auto=webp&s=0449e8163d934b37cec717c4f164eb170872557b"
+      },
+      {
+        "name": "GIF #4",
+        "uri": "https://i.makeagif.com/media/2-09-2024/CaVBVZ.gif"
+      }
+    ]
+  },
+  {
+    "name": "PNG format",
+    "uris": [
+      {
+        "name": "APNG TEST",
+        "uri": "https://i.ibb.co/jyhTX5q/maya-megu-APNG.png"
+      }
+    ]
+  },
+  {
+    "name": "JPEG format",
+    "uris": [
+      {
+        "name": "#1 WHITE BUILDING",
+        "uri": "https://www.w3.org/MarkUp/Test/xhtml-print/20050519/tests/jpeg420exif.jpg"
+      },
+      {
+        "name": "#2 KID WITH PARROTS",
+        "uri": "https://www.w3.org/MarkUp/Test/xhtml-print/20050519/tests/jpeg422jfif.jpg"
+      },
+      {
+        "name": "#3 GRAYSCALE FLOWER",
+        "uri": "https://www.w3.org/MarkUp/Test/xhtml-print/20050519/tests/jpeg400jfif.jpg"
+      },
+      {
+        "name": "#5 GRADIENT",
+        "uri": "https://www.w3.org/MarkUp/Test/xhtml-print/20050519/tests/jpeg444.jpg"
+      }
+    ]
+  },
+  {
+    "name": "Video formats",
+    "uris": [
+      {
+        "name": "H.264 MP4 TEST (RAKKUN)",
+        "uri": "https://files.catbox.moe/1n0jn9.mp4"
+      },
+      {
+        "name": "H.265 MP4 TEST",
+        "uri": "https://lf-tk-sg.ibytedtos.com/obj/tcs-client-sg/resources/hevc_8k60P_bilibili_1.mp4"
+      }
+    ]
+  }
+]

@@ -1,0 +1,65 @@
+#version 450
+// ONE COMPUTE SHADER FOR EVERY NON-PASSTHROUGH FORMAT, MIRRORING THE OPENGL FRAGMENT SHADERS THROUGH colorimetry.glsl.
+// PLANES SAMPLE NORMALIZED (CHROMA AT colorimetry[2]'S SITED COORDS); PACKED YUV USES texelFetch TO KEEP PAIRS APART.
+// THE OUTPUT COVERS THE PLANES FROM origin ACROSS crop (FRACTIONS): THE WHOLE PLANE FOR UPLOADS, THE PICTURE OF A DECODER'S PADDED IMAGE
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(binding = 0) uniform sampler2D plane0;
+layout(binding = 1) uniform sampler2D plane1;
+layout(binding = 2) uniform sampler2D plane2;
+layout(binding = 3) uniform sampler2D plane3;
+layout(binding = 4, rgba8) uniform writeonly image2D outImg;
+layout(push_constant) uniform PC {
+    int mode;
+    float bitScale;
+    int width;
+    int height;
+    vec4 colorimetry[4];
+    vec2 crop;
+    vec2 origin;
+} pc;
+
+// MUST MATCH THE MODE_* CONSTANTS OF VKEngine
+const int MODE_GRAY = 0;
+const int MODE_NV12 = 1;
+const int MODE_NV21 = 2;
+const int MODE_YUV3 = 3;
+const int MODE_YUVA = 4;
+const int MODE_YUYV = 5;
+const int MODE_UYVY = 6;
+const int MODE_RGBA = 7;
+
+#include "colorimetry.glsl"
+
+void main() {
+    ivec2 gid = ivec2(gl_GlobalInvocationID.xy);
+    if (gid.x >= pc.width || gid.y >= pc.height) return;
+    vec2 uv = pc.origin + (vec2(gid) + 0.5) / vec2(float(pc.width), float(pc.height)) * pc.crop;
+    // A DECODED FRAME AN FFMPEG FILTER ALREADY TURNED INTO DISPLAY RGBA IS ONLY CROPPED AND SCALED
+    if (pc.mode == MODE_RGBA) {
+        imageStore(outImg, gid, textureLod(plane0, uv, 0.0));
+        return;
+    }
+    vec2 chroma = uv * pc.colorimetry[2].xy + pc.colorimetry[2].zw;
+    float bs = pc.bitScale;
+    float alpha = 1.0;
+    vec3 rgb;
+    // NO DERIVATIVES IN COMPUTE, SO IMPLICIT-LOD texture() IS ILLEGAL; ON SINGLE-MIP PLANES textureLod(..., 0.0)
+    // GIVES THE SAME BILINEAR RESULT AS THE FRAGMENT-STAGE texture() CALLS OF THE OPENGL SHADERS
+    if (pc.mode == MODE_GRAY) {
+        rgb = vec3(textureLod(plane0, uv, 0.0).r * bs * pc.colorimetry[0].x - pc.colorimetry[0].y);
+    } else if (pc.mode == MODE_NV12 || pc.mode == MODE_NV21) {
+        vec2 raw = textureLod(plane1, chroma, 0.0).rg * bs;
+        if (pc.mode == MODE_NV21) raw = raw.yx;
+        rgb = ycbcr(textureLod(plane0, uv, 0.0).r * bs, raw.x, raw.y, pc.colorimetry[0], pc.colorimetry[1]);
+    } else if (pc.mode == MODE_YUV3 || pc.mode == MODE_YUVA) {
+        rgb = ycbcr(textureLod(plane0, uv, 0.0).r * bs, textureLod(plane1, chroma, 0.0).r * bs,
+                textureLod(plane2, chroma, 0.0).r * bs, pc.colorimetry[0], pc.colorimetry[1]);
+        if (pc.mode == MODE_YUVA) alpha = textureLod(plane3, uv, 0.0).r * bs;
+    } else {
+        // PACKED YUV422 (8-BIT ONLY): ONE RGBA TEXEL COVERS A PIXEL PAIR, REORDERED TO [Y0, Cb, Y1, Cr]
+        vec4 p = texelFetch(plane0, ivec2(gid.x >> 1, gid.y), 0);
+        if (pc.mode == MODE_UYVY) p = p.grab;
+        rgb = ycbcr((gid.x & 1) == 0 ? p.r : p.b, p.g, p.a, pc.colorimetry[0], pc.colorimetry[1]);
+    }
+    imageStore(outImg, gid, vec4(display(rgb, pc.colorimetry[3]), alpha));
+}

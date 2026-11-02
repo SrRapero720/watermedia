@@ -1,5 +1,0 @@
-org.watermedia.api.player.PlayerAPI
-org.watermedia.api.cache.CacheAPI
-org.watermedia.api.image.ImageAPI
-org.watermedia.api.network.NetworkAPI
-org.watermedia.api.render.RenderAPI

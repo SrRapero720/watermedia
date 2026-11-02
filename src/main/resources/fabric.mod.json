@@ -2,31 +2,32 @@
   "schemaVersion": 1,
   "id": "$id",
   "version": "$version",
-  "name": "$simplename",
+  "name": "$libname",
   "description": "$description",
   "authors": $authors_list,
+  "contributors": $contributors_list,
   "contact": {
-    "homepage": "https://www.curseforge.com/minecraft/mc-mods/watermedia/",
-    "sources": "https://github.com/{github}",
-    "issues": "https://github.com/{github}/issues",
+    "homepage": "https://www.curseforge.com/minecraft/mc-mods/$id",
+    "sources": "https://github.com/$github",
+    "issues": "https://github.com/$github/issues",
     "email": "SrRapero720@hotmail.com"
   },
 
   "license": "$license",
   "icon": "pack.png",
   "environment": "*",
+  "jars": $jars,
   "entrypoints": {
-    "client": [
-      "org.watermedia.loaders.FavricMCLoader"
-    ],
     "main": [
-      "org.watermedia.loaders.FavricMCLoader"
+      "org.watermedia.bootstrap.FabricBootstrap"
     ]
   },
-  "breaks": {
-    "fancyvideo_api": "*"
-  },
   "depends": {
-    "java": "$javarange"
+    "minecraft": $minecraftdepends,
+    "fabricloader": $fabricdepends,
+    "java": $javadepends
+  },
+  "breaks": {
+    "watermedia_binaries": $binariesbreaks
   }
 }

@@ -1,1 +1,0 @@
-echo "No setup task was defined"
