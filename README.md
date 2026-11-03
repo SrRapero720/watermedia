@@ -2,7 +2,7 @@
 
 <p align="center" style="text-align: center;">
 <a href="https://www.curseforge.com/minecraft/mc-mods/watermedia"><img src="https://cf.way2muchnoise.eu/watermedia.svg?badge_style=for_the_badge" alt="CurseForge downloads"></a>
-<a href="https://www.curseforge.com/minecraft/mc-mods/watermedia/files"><img src="https://img.shields.io/curseforge/v/869524?style=for-the-badge&label=CURSEFORGE&labelColor=%232d2d2d&color=%23e04e14" alt="CurseForge"></a>
+<a href="https://www.curseforge.com/minecraft/mc-mods/watermedia/files"><img src="https://img.shields.io/curseforge/v/869524?style=for-the-badge&label=CURSEFORGE&labelColor=2d2d2d&color=e04e14" alt="CurseForge"></a>
 <a href="https://modrinth.com/mod/watermedia"><img src="https://img.shields.io/modrinth/v/watermedia?style=for-the-badge&logo=modrinth&label=MODRINTH&color=1bd96a" alt="Modrinth"></a>
 <br>
 <a href="https://jitpack.io/#SrRapero720/watermedia"><img src="https://img.shields.io/jitpack/version/com.github.SrRapero720/watermedia?style=for-the-badge&label=JITPACK&color=34495e" alt="JitPack"></a>
