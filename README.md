@@ -101,7 +101,7 @@ this repository under [`binaries/`](https://github.com/SrRapero720/watermedia/tr
   <tr><td>aarch64</td><td align="center">⛔</td><td align="center">✅</td><td align="center">✅</td><td align="center">⛔</td></tr>
 </table>
 
-<h1 style="color: #EB622B;"><strong>🎮 SUPPORT US AND GET A 15% DISCOUNT</strong></h1>
+<h1 style="color: #EB622B;"><strong>🎮 CREATE YOUR SERVER AT LOW PRICES</strong></h1>
 
 KineticHosting, our partners in hosting solutions, are great to make a server and start sharing multimedia with
 your friends with all the mods listed above.
