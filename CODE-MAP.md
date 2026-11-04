@@ -153,7 +153,7 @@ The generic version of these rules lives in AGENTS.md → "Code pattern"; this i
 | `docs/` | `en-us.md`, `es-mx.md` (API guide), `animated-picture-stream-spec.md` (APS example spec) |
 | `config/` | Gitignored runtime files of the app (`watermedia.toml`, `waterconfig.toml`, `app.properties`); the repo copy of `watermedia.toml` is stale (old key names), the Java spec is the authority |
 | `run/` | Working directory of the IntelliJ run configuration `WaterMedia App` (`run/config`, `run/logs` gitignored) |
-| Root files | `CODE-MAP.md`, `CHANGELOG.md`, `TODO.md`, `PENDING.md` (gitignored), `WATER.md` (`water://` spec), `README.md`, `LICENSE.md` (DPS NC v1.0.1), `jitpack.yml` (JDK 25) |
+| Root files | `CODE-MAP.md`, `CHANGELOG.md`, `TODO.md`, `PENDING.md` (gitignored), `WATER.md` (`water://` spec), `README.md`, `LICENSE.md` (DPS NC v1.0.1), `jitpack.yml` (JDK 25, custom `install`) |
 
 Package map (`src/main/java/org/watermedia`):
 - `api/codecs`: `CodecsAPI`, `ImageReader`, `ImageData`, `ImageMetadata`, `Encoder`, `Container`, `VideoCodec`,
@@ -207,6 +207,8 @@ Package map (`src/main/java/org/watermedia`):
 - `publishMods`: CurseForge (`curseforgeid`, `CURSEFORGE_TOKEN`, Minecraft + Java versions, client and server required,
   `requires('watermedia-binaries')`) and Modrinth (`modrinthid`, `MODRINTH_TOKEN`, README as description); type
   `ALPHA`/`BETA`/`STABLE` from `versiontype`; validation: `RELEASE` needs `x.y.z`, pre-releases `x.y.z.w`.
+- `maven-publish` publication `watermedia`: only `jar` + `sourcesJar`, no POM dependencies and no Gradle module
+  metadata (⚠ `components.java` would leak `:modloaders` stubs and host libs to mods). JitPack serves it (see CI).
 - `gradle.properties` groups: runtime (`org.gradle.*`), identity (`id`, `libname`, `group`, `version`, `versiontype`,
   `mainclass`, `github`, `modrinthid`, `curseforgeid`), loader ranges, info (`license`, `authors*`, `credits`,
   `description`), publishing (`modloaders`), plugin/toolchain pins (`osdetector_version`, `publish_version`,
@@ -216,11 +218,12 @@ Package map (`src/main/java/org/watermedia`):
   `require_natives`), launcher (`lwjgl_platforms`).
 
 ### Binaries build (`binaries/build.gradle`)
-- Plugins `java`, `com.gradleup.shadow`, mod-publish. `main.java.srcDirs = []` (the core compiles the sources);
+- Plugins `java`, `maven-publish`, `com.gradleup.shadow`, mod-publish. `main.java.srcDirs = []` (the core compiles the sources);
   `tools.java.srcDirs = ['tools']`; test classpath = `library` (`org.watermedia:watermedia`, substituted by the
   included build) + `../build/classes/java/main`.
 - `shadowJar` (the only distributed jar): the core's `org/watermedia/binaries/**` classes + `org.tukaani:xz` relocated to
   `org.watermedia.libs.xz`; `jar` disabled. `processResources` adds `tools/ffmpeg-manifest.properties` under `META-INF`.
+  Publication `binaries`: the `shadowJar` alone, artifactId `slug` (`watermedia-binaries`, the repository name).
 - `binaries/gradle.properties`: id `watermedia_binaries`, `watermediaversions`, FFmpeg provenance (`ffmpeg_version`
   `9.0.2-1.5.14`, `ffmpeg_variant=lgpl`, `ffmpeg_source_*` of the fork `SrRapero720/javacpp-presets` branch
   `ffmpeg-watermedia-custom`, SHA pins of FFmpeg, libxml2, OpenSSL, Vulkan headers, Maven, CMake, Meson, Microsoft JDK).
@@ -238,11 +241,18 @@ Package map (`src/main/java/org/watermedia`):
   `X-WaterMedia-Token` and a custom `Host` only to the original origin across redirects and nested HLS/DASH reads.
 
 ### CI (`.github/workflows`)
-- `build-test.yml` (push/PR on `main`, `3.0.x`): job `build` on ubuntu-22.04 (`gradle build --warning-mode fail`
+- `build-test.yml` (push/PR on `master`, `3.0.x`): job `build` on ubuntu-22.04 (`gradle build --warning-mode fail`
   after `SetupJava.ps1` and the Linux media runtime packages); job `native` matrix (linux x64/arm64, windows, macOS
   x64/arm64, plus a Java 17 "compatibility" leg) running `gradle test -Prequire_natives=true` with explicit `--tests`
   filters (FF players, decoders, encoders; the compat leg: bootstrap, network, AL/AWT/SFX/spatial, NetRequest).
 - `build-release.yml` (tags): build, then `publishCurseforge` / `publishModrinth`.
+- Binaries CI (`binaries/.github/workflows/building-*.yml`, push/PR on `master`, `3.0.x` and tags): checks out the
+  core `SrRapero720/watermedia@master` and the Binaries revision into its `binaries/` folder, then builds Binaries as root.
+- JitPack (`jitpack.yml` in each repository, JDK 25): ⚠ a custom `install` runs `publishToMavenLocal`, because the
+  default command passes `-Pversion=<branch>-<hash>-1` and the `versiontype` check rejects it; JitPack serves the
+  `org.watermedia` artifacts as `com.github.SrRapero720:<repository>:<ref>`. Binaries' `install` clones the core master
+  into `/tmp/watermedia`, copies itself into its `binaries/` folder and publishes from there (it never builds alone).
+  ⚠ A tag whose commit pins an unpushed Binaries gitlink fails as a JitPack `gitError`.
 - Loader metadata: `mods.toml` (Forge, `@Mod("watermedia")` scan), `neoforge.mods.toml`, `fabric.mod.json` (entry
   `org.watermedia.bootstrap.FabricBootstrap`, `jars` = nested libs, `breaks.watermedia_binaries`), `pack.mcmeta`; the
   Binaries jar carries twin files with mod id `watermedia_binaries` requiring `watermedia`; both jars mark the companion

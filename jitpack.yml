@@ -1,3 +1,6 @@
 # configuration file for building snapshots and releases with jitpack.io
 jdk:
   - openjdk25
+# A CUSTOM COMMAND KEEPS JITPACK FROM OVERRIDING THE VERSION, SO THE JAR DECLARES THE ONE OF gradle.properties
+install:
+  - ./gradlew publishToMavenLocal

@@ -9,6 +9,7 @@ import java.util.jar.Manifest
 
 plugins {
     id 'java-library'
+    id 'maven-publish'
     id 'com.google.osdetector'
     id 'me.modmuss50.mod-publish-plugin'
 }
@@ -182,6 +183,17 @@ jar {
 sourcesJar { exclude 'org/watermedia/binaries/**' }
 
 // ==== PUBLISHING ====
+// JITPACK SERVES THIS PUBLICATION; IT CARRIES NO DEPENDENCIES, SINCE MINECRAFT AND THE LOADERS PROVIDE EVERY LIBRARY
+// AND THE LOADER STUBS MUST NEVER REACH A MOD'S CLASSPATH
+publishing {
+    publications {
+        watermedia(MavenPublication) {
+            artifact jar
+            artifact sourcesJar
+        }
+    }
+}
+
 // INSIDE publishMods A BARE version IS THE EXTENSION'S PROPERTY, SO THE PROJECT VERSION IS READ OUT HERE
 def publishVersion = project.version.toString()
 publishMods {

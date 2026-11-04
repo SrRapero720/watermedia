@@ -176,4 +176,4 @@ contact us to use WATERMeDIA for commercial purposes.
 
 The third-party libraries both mods ship keep their own licenses; read them in the
 [WATERMeDIA](https://github.com/SrRapero720/watermedia) and
-[_WATERMeDIA: Binaries_](https://github.com/WaterMediaTeam/binaries) repositories before redistributing.
+[_WATERMeDIA: Binaries_](https://github.com/SrRapero720/watermedia-binaries) repositories before redistributing.
