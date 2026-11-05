@@ -225,6 +225,10 @@ Package map (`src/main/java/org/watermedia`):
 - `publishMods`: CurseForge (`curseforgeid`, `CURSEFORGE_TOKEN`, Minecraft + Java versions, client and server required,
   `requires('watermedia-binaries')`) and Modrinth (`modrinthid`, `MODRINTH_TOKEN`, README as description); type
   `ALPHA`/`BETA`/`STABLE` from `versiontype`; validation: `RELEASE` needs `x.y.z`, pre-releases `x.y.z.w`.
+  Modrinth's `projectDescription` (`gradle/common.gradle`) PATCHes the project body with `README.md` on every
+  `publishModrinth`, so the tag's README is the description; Binaries has no README, so its body is left alone.
+  ⚠ CurseForge has no description API (upload API only, mod-publish-plugin has no option): its description is
+  pasted by hand in Markdown mode.
 - `maven-publish` publication `watermedia`: only `jar` + `sourcesJar`, no POM dependencies and no Gradle module
   metadata (⚠ `components.java` would leak `:modloaders` stubs and host libs to mods). JitPack serves it (see CI).
 - `gradle.properties` groups: runtime (`org.gradle.*`), identity (`id`, `libname`, `group`, `version`, `versiontype`,
