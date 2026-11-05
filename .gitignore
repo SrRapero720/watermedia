@@ -12,6 +12,7 @@ hs_err_pid*
 /build/classes/java/test/
 /out/
 /config/
+/documentation/
 /.idea/*
 !/.idea/icon.svg
 !/.idea/runConfigurations/

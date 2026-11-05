@@ -148,9 +148,13 @@ if (mrl.status() == MRL.Status.LOADED) {
 - `CodecsAPI` (**experimental**, don't use it in your mods yet): our own picture and animation codecs, plus
   _FFmpeg_-backed audio and video
 
-The full API guide, including the Vulkan contract and the Minecraft 26.x bridge, is in
-[English](https://github.com/SrRapero720/watermedia/blob/master/docs/en-us.md) and
-[Español (México)](https://github.com/SrRapero720/watermedia/blob/master/docs/es-mx.md). Artifacts are on
+The full API guide lives on the [wiki](https://github.com/SrRapero720/watermedia/wiki) in
+[English](https://github.com/SrRapero720/watermedia/wiki/EN-US-Home),
+[Español (México)](https://github.com/SrRapero720/watermedia/wiki/ES-MX-Home),
+[Español (Argentina)](https://github.com/SrRapero720/watermedia/wiki/ES-AR-Home),
+[Português (Brasil)](https://github.com/SrRapero720/watermedia/wiki/PT-BR-Home),
+[Русский](https://github.com/SrRapero720/watermedia/wiki/RU-RU-Home) and
+[简体中文](https://github.com/SrRapero720/watermedia/wiki/ZH-CN-Home). Artifacts are on
 [JitPack](https://jitpack.io/#SrRapero720/watermedia).
 
 <h1 style="color: #EB622B;"><strong>💰 DONATIONS</strong></h1>

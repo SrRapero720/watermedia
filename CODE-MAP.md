@@ -64,7 +64,13 @@ Where to look (task → section → entry point):
   - Natives are reproducible artifacts: `binaries/libs/ffmpeg-<ffmpeg_version>.jar` (JavaCPP API jar of the fork),
     `binaries/src/main/resources/libs/ffmpeg-<platform>.zip` and `binaries/tools/ffmpeg-manifest.properties` are
     written only by `RepackFFmpeg.java` after the `FFmpeg Rebuild` workflow. Never edit them by hand.
-  - Documentation ships in two languages, `docs/en-us.md` and `docs/es-mx.md`; every doc change touches both.
+  - Documentation is `docs/DOCS-EN-US.md` (the source) plus `DOCS-ES-MX.md`, `DOCS-ES-AR.md`, `DOCS-PT-BR.md`,
+    `DOCS-RU-RU.md` and `DOCS-ZH-CN.md`, mirrored block for block; every doc change touches all six. ⚠ The GitHub
+    wiki is a copy of these files and never gets edited on its own: sync it in the same task (procedure in §18).
+  - Docs prose wraps at 120 columns (CJK characters count as two) so it reads in an editor: paragraphs, list items
+    (continuation indented to the item text) and quotes (continuation keeps `> `). Headings, table rows and code
+    blocks stay one line each; links and code spans never split. Chinese breaks at a space, or after full-width
+    punctuation (，。；：、) only when a line has no space to break at. Owner-wrapped lines keep their breaks.
   - The standalone app (`bootstrap/app`) is a debugging utility, not API; its UI draws only through `Canvas`.
   - Every logger comes from `WaterMedia.logger(id)` (the core uses the shared `WaterMedia.LOGGER`, Binaries its own
     `WaterMedia.logger("watermedia_binaries")`), so every message is redacted by `DataTool.redact`.
@@ -157,7 +163,7 @@ The generic version of these rules lives in AGENTS.md → "Code pattern"; this i
 | `binaries/` | Included build of "WaterMedia: Binaries": `src/main/java/org/watermedia/binaries` (module + provisioning), `src/main/resources/libs/ffmpeg-*.zip`, `libs/ffmpeg-<ver>.jar`, `tools/` (rebuild and verification scripts), own `gradle.properties`, `CHANGELOG.md`, `.github/workflows` |
 | `modloaders/` | Compile-only stubs of Forge/NeoForge/Fabric loader classes (bodies throw "Stub!"), never shipped |
 | `gradle/common.gradle` | Shared Java/JUnit setup, loader range math, `processResources` expansion, jar manifest, `publishMods` validation |
-| `docs/` | `en-us.md`, `es-mx.md` (API guide), `animated-picture-stream-spec.md` (APS example spec) |
+| `docs/` | `DOCS-EN-US.md` (API guide) and its five translations `DOCS-<LANG>.md` (see §18), `BLUEPRINTS.md` (the guide's outline), `animated-picture-stream-spec.md` (APS example spec) |
 | `config/` | Gitignored runtime files of the app (`watermedia.toml`, `waterconfig.toml`, `app.properties`); the repo copy of `watermedia.toml` is stale (old key names), the Java spec is the authority |
 | `run/` | Working directory of the IntelliJ run configuration `WaterMedia App` (`run/config`, `run/logs` gitignored) |
 | Root files | `CODE-MAP.md`, `CHANGELOG.md`, `TODO.md`, `PENDING.md` (gitignored), `WATER.md` (`water://` spec), `README.md`, `LICENSE.md` (DPS NC v1.0.1), `jitpack.yml` (JDK 25, custom `install`) |
@@ -1203,10 +1209,27 @@ System properties: `watermedia.engine`, `watermedia.app` (child JVM flag), `wate
   `--enable-native-access=ALL-UNNAMED`, alternative JRE path (GraalVM 25), shortened classpath.
 
 ## 18. Documentation map
-- `docs/en-us.md` / `docs/es-mx.md`: API guide (startup and ownership, runtime requirements and configuration table,
-  public/internal packages, MRL resolution, player creation and controls, HTTPS trust, engines, spatial audio + Sound
-  Physics adapter, images and DDS, encoding, synchronized playback + snapshot format, examples). ⚠ es-mx mirrors en-us
-  line for line (same sections, lists, tables and byte-identical code blocks); edit both together.
+- `docs/DOCS-EN-US.md` (2026-11-05): API guide on the `docs/BLUEPRINTS.md` outline (introduction, version schema,
+  use-case indexes incl. hard rules for AI agents, 0 setup with Gradle deps and a config overview, 1 startup +
+  restrictions + packages + diagnostics, 2 links, 3 playback and engines, 4 file server and `NetRequest`, 5 codecs).
+  Owner rules 2026-11-05: config fields aren't explained there; each area lists its fields in a `> [!NOTE]` pointing
+  at their `watermedia.toml` comments, hardware needs go in `> [!IMPORTANT]`, and under a heading the order is
+  warning, note, text. Translations: `DOCS-ES-MX.md`, `DOCS-ES-AR.md` (voseo + porteño idioms), `DOCS-PT-BR.md`,
+  `DOCS-RU-RU.md`, `DOCS-ZH-CN.md`, block for block with byte-identical code blocks and anchors rewritten to the
+  translated headings (GitHub rule: lowercase, keep letters, digits, `-` and `_`, spaces become `-`).
+- GitHub wiki (`SrRapero720/watermedia.wiki`, branch `master`, cloned at the gitignored `/documentation/`): root
+  `Home.md` language picker + `_Sidebar.md`, one folder per language (`en-US/`, `es-MX/`, `es-AR/`, `pt-BR/`,
+  `ru-RU/`, `zh-CN/`) with its own `_Sidebar.md` (section and subsection links) and seven pages `<LANG>-Home` (text
+  before `# 0`), `<LANG>-0-Setup`, `-1-Startup`, `-2-Managing-links`, `-3-Playing-media`,
+  `-4-Uploading-and-downloading-files`, `-5-Codecs`, one per `#` section. ⚠ Wiki sync (owner rule 2026-11-05): the
+  docs are the source, so any `DOCS-<LANG>.md` change ships to the wiki in the same task:
+  1. Clone the wiki into `/documentation/` when missing, otherwise `git pull` it.
+  2. Re-cut every changed language into its pages, keeping the doc's line breaks: same-page links stay `(#anchor)`,
+     links into another page become `(<LANG>-<page>#anchor)`. A renamed heading updates its sidebar entry; a new `#` section adds a page in every
+     language plus its sidebar entries.
+  3. Check that no link or anchor is broken and that each language's pages joined in order equal its `DOCS-<LANG>.md`
+     (link targets ignored).
+  4. Commit the wiki in the git format and push it right after the docs commit.
 - `README.md`: landing page (projects, donations, basic usage, engines, Vulkan contract incl. Minecraft 26.x,
   available APIs, Binaries, license). `WATER.md`: `water://` spec. `docs/animated-picture-stream-spec.md`: APS example
   (never implement). `binaries/tools/NATIVE_REBUILD.md`: native rebuild, repack, reviewed CVEs.

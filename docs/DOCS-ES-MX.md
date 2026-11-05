@@ -1,0 +1,1123 @@
+# 🦆 INTRODUCCIÓN
+WATERMeDIA es una biblioteca con una API multimedia para reproducir, decodificar, codificar y manejar video,
+audio e imágenes. Usarla es bastante sencillo si ya trabajaste con bibliotecas como ExoPlayer
+(en Android) o VLCJ, pero aquí todo está mucho más enfocado, automatizado y listo para usarse,
+así que nunca lidias con detalles muy avanzados y técnicos como la cantidad de búferes, los planos por cuadro,
+el orden de bytes o los strides de los datos.
+
+Resuelve enlaces multimedia (YouTube, Twitch, archivos directos y muchos más), los decodifica y entrega los
+cuadros a tu motor gráfico (OpenGL, Vulkan, AWT, JavaFX) y el sonido a tu motor de audio
+(OpenAL, Java Sound). Las imágenes y animaciones pasan por nuestros propios decodificadores en Java puro; el video y el
+audio pasan por _FFmpeg_, incluido en el mod complementario _WATERMeDIA: Binaries_. Necesita Java
+17 o posterior.
+
+Cada ejemplo de esta guía es un fragmento de integración: variables como `renderThread`,
+`renderExecutor` o `mrl` vienen de tu propio código.
+
+# 🪁 ESQUEMA DE VERSIONES
+> [!IMPORTANT]
+> Este esquema no aplica a las APIs experimentales ni al código interno
+
+Muchos devs usan el esquema base y la mayoría se queda un buen rato en 0.x.y, clasificando reescrituras como parches;
+aquí la regla está más clara que el agua. Este esquema te ayuda a identificar qué implica subir cada número
+
+**ESQUEMA DE INCREMENTOS**
+``X.Y.Z-<channel>.W``
+- ``X``: Reescritura total: todo lo que conoces de la biblioteca se desechó y se reconstruyó desde cero
+- ``Y``: Cambios incompatibles: refactorizaciones, renombres y eliminaciones de API que pueden romper (o romperán) tu
+  implementación
+- ``Z``: Hotfixes, mejoras, API nueva y anotaciones de deprecación, nada que rompa.
+- ``<channel>``: canales ALPHA o BETA, el canal release no usa este sufijo de versión
+  - Nota: en algunos de los peores casos, este sufijo podría omitirse a propósito, porque los modloaders no lo manejan
+    bien y suelen romper los rangos de versiones.
+- ``W``: entrega de la versión ALPHA o BETA, se omite en el canal release
+
+Esto es una GARANTÍA de que NUNCA SE SUBIRÁN CAMBIOS INCOMPATIBLES EN LOS INCREMENTOS DE ``Z``, así que puedes exigir
+watermedia con toda seguridad en un rango de ``[3.0.1,3.1)``
+
+# 🗺 ÍNDICE
+
+Elige el camino que corresponde a lo que estás construyendo; cada uno lista las secciones que necesita.
+
+## MINECRAFT: MODDERS QUE AGREGAN VIDEO
+
+1. [Configuración inicial](#0-configuración-inicial): agrega la dependencia y respeta el rango de versiones.
+2. [Restricciones de software](#11-restricciones-de-software): versiones de Minecraft y de loaders compatibles.
+3. [Manejo de enlaces](#2-manejo-de-enlaces): convierte un enlace en fuentes multimedia.
+4. [Crear y controlar un reproductor](#31-crear-y-controlar-un-reproductor).
+5. [Elegir motores](#33-elegir-motores): OpenGL, Vulkan y OpenAL sobre los propios contextos del juego.
+6. [Audio espacial](#34-audio-espacial): pantallas posicionales, pares estéreo y bocinas.
+7. [Reproducción sincronizada](#35-reproducción-sincronizada): todos los reproductores ven el mismo momento.
+8. [Subir y descargar archivos](#4-subir-y-descargar-archivos): comparte archivos con el servidor de archivos.
+
+## APLICACIONES DE ESCRITORIO
+
+1. [Configuración inicial](#0-configuración-inicial): dependencias de Gradle, bibliotecas de ejecución y
+   [configuración](#02-configuración).
+2. [Arranque](#1-arranque): arranca WATERMeDIA una vez y muestra una pantalla de carga.
+3. [Manejo de enlaces](#2-manejo-de-enlaces) y [búsqueda](#23-búsqueda).
+4. [Crear y controlar un reproductor](#31-crear-y-controlar-un-reproductor) y
+   [pistas de audio](#32-pistas-de-audio-e-idiomas).
+5. [Elegir motores](#33-elegir-motores): AWT, JavaFX, OpenGL o Vulkan, más OpenAL o Java Sound.
+6. [Diagnóstico y ejemplos](#13-diagnóstico-y-ejemplos).
+
+## HERRAMIENTAS DE CÓDIGO
+
+Herramientas de línea de comandos, bots, convertidores y servicios que funcionan sin ventana.
+
+1. [Configuración inicial](#0-configuración-inicial) y [arranque](#1-arranque): qué necesita arrancar y qué no.
+2. [Plataformas](#22-plataformas) y [búsqueda](#23-búsqueda): resuelve y busca enlaces con `PlatformAPI`, sin necesidad
+   de arranque.
+3. [Descargas](#42-descargas): `NetRequest` con descargas acotadas y verificadas.
+4. [Decodificadores](#51-decodificadores) y [codificadores](#52-codificadores): imágenes, animaciones y archivos de
+   video.
+5. [Motor headless](#33-elegir-motores): captura cuadros decodificados sin un contexto gráfico.
+6. [Reproducción sincronizada](#35-reproducción-sincronizada): `ServerMediaPlayer` también corre en servidores.
+
+## AGENTES DE IA
+
+Lee [arranque](#1-arranque), [paquetes públicos e internos](#12-paquetes-públicos-e-internos),
+[manejo de enlaces](#2-manejo-de-enlaces), [crear y controlar un reproductor](#31-crear-y-controlar-un-reproductor) y
+[elegir motores](#33-elegir-motores) antes de escribir código de integración. Estas reglas son requisitos estrictos:
+
+- Usa sólo los paquetes públicos (`org.watermedia`, `api.codecs`, `api.network`, `api.platform`, `api.player`,
+  `api.util`, sin sus subpaquetes). Los reproductores y los motores salen sólo de `PlayerAPI`; las clases de los motores
+  son selladas.
+- Dentro de Minecraft nunca llames a `WaterMedia.start`: el loader lo hace. En cualquier otro lugar llámalo una vez por
+  proceso, nunca desde un callback o un hilo de trabajo de WATERMeDIA. No existe un stop.
+- Revisa `WaterMedia.loaded()` y la capacidad que necesitas (como `CodecsAPI.ffmpegLoaded()`) en lugar de darlas por
+  hecho.
+- La resolución es asíncrona: consulta `mrl.status()` desde un tick y nunca llames a `mrl.await(...)` en el hilo del
+  juego o de render.
+- `PlayerAPI.player(...)` puede devolver null. Libera el reproductor cuando `start()` lance una excepción o el host
+  quite la superficie.
+- Pasa los motores como proveedores, nunca compartas uno entre reproductores y deja que el reproductor sea su dueño.
+- Lee `player.texture()` de nuevo en cada dibujado, en el hilo de render; 0 significa que no hay nada que dibujar.
+- Nunca llames a `release()` desde un listener de estado o un hilo de reproducción, y libera cada reproductor antes de
+  destruir el contexto OpenGL, Vulkan u OpenAL que usa.
+- El ejecutor de OpenGL corre en el hilo de GL y se procesa en cada cuadro, y una vez más después de `release()`. OpenAL
+  necesita su contexto activo en cada hilo que maneja audio. En Vulkan, toma `queueLock()` alrededor de tus propios
+  submits y presents, y nunca llames a `vkDeviceWaitIdle` mientras existan reproductores.
+- La transición a `STOPPED`, `ENDED` o `ERROR` consume los listeners de estado; vuelve a registrarlos desde el callback
+  para seguir escuchando.
+- Los controles booleanos devuelven `true` cuando la llamada tuvo efecto y `false` cuando se rechazó; revisa el
+  resultado en lugar de suponerlo.
+- Los tiempos van en milisegundos (los timestamps del codificador en microsegundos), el volumen va de 0 a 100 y la
+  velocidad desde poco más de 0 hasta 4.
+- `ImageReader.next()` reutiliza su búfer: cópialo antes de la siguiente llamada. Las llamadas decode, reader, sniff y
+  encoder de `CodecsAPI` son experimentales: no las uses en mods; sus consultas de estado son seguras.
+- Los servidores dedicados tienen `ServerMediaPlayer`, `PlatformAPI`, las subidas de `NetworkAPI`, el servidor de
+  archivos y los códecs de imagen en Java puro; los reproductores y los motores lanzan excepciones ahí.
+
+# 0. CONFIGURACIÓN INICIAL
+
+En entornos de Minecraft nada de esto es obligatorio, salvo seguir el rango de versiones del jar: agrega WATERMeDIA como
+dependencia de compilación, decláralo como dependencia obligatoria de tu mod dentro de los rangos de
+[restricciones de software](#11-restricciones-de-software), y el loader lo proporciona en tiempo de ejecución. Los
+clientes también necesitan _WATERMeDIA: Binaries_ instalado (mira [Binaries y FFmpeg](#01-binaries-y-ffmpeg)).
+
+```gradle
+repositories {
+    maven { url "https://jitpack.io" }
+}
+
+dependencies {
+    compileOnly "com.github.SrRapero720:watermedia:$watermedia_version" // A RELEASE TAG, SUCH AS 3.0.0
+}
+```
+
+En aplicaciones Java personalizadas o juegos hechos en Java, el entorno debe proporcionar:
+
+```gradle
+repositories {
+    mavenCentral()
+    maven { url "https://jitpack.io" }
+}
+
+dependencies {
+    implementation "com.github.SrRapero720:watermedia:$watermedia_version"
+    implementation "com.github.SrRapero720:watermedia-binaries:$binaries_version" // FFMPEG, YT-DLP AND BOTGUARD, OPTIONAL
+    implementation "com.github.SrRapero720:waterconfig:1.0.0.1" // MIN WATERCONFIG VERSION
+    implementation "com.google.code.gson:gson:2.10" // MIN GSON VERSION
+    implementation "org.apache.logging.log4j:log4j-api:2.26.1" // MIN LOG4J VERSION, PLUS THE BACKEND YOUR APP LOGS WITH
+    implementation "org.joml:joml:1.10.8" // MIN JOML VERSION
+    // LWJGL 3.3.6 MODULES, ONLY FOR THE ENGINES YOU USE (SEE THE TABLE BELOW)
+}
+```
+
+| Motor | Bibliotecas de ejecución extra |
+| --- | --- |
+| `GLEngine` | _LWJGL_ `lwjgl` y `lwjgl-opengl`, con sus nativos |
+| `VKEngine` | _LWJGL_ `lwjgl`, `lwjgl-vulkan` y `lwjgl-shaderc` (los shaders se compilan en tiempo de ejecución), con sus nativos (`lwjgl-vulkan` sólo tiene nativos en macOS; Windows y Linux usan el Vulkan del sistema) |
+| `ALEngine` | _LWJGL_ `lwjgl` y `lwjgl-openal`, con sus nativos |
+| `JFXEngine` | Un runtime de JavaFX 13+ |
+| `AWTEngine`, `JSEngine`, `HeadlessGFXEngine` | Nada extra: el JDK los cubre |
+
+- En Forge, NeoForge y Fabric, WATERMeDIA incluye _WATERCoNFIG_ como un JAR anidado, y el juego ya trae las demás
+  bibliotecas.
+- El launcher independiente extrae ese JAR a un archivo temporal, lo agrega al classpath de la JVM relanzada y descarga
+  las demás bibliotecas de ejecución de su lista cuando hacen falta; una biblioteca en caché o descargada sólo entra al
+  classpath si coincide con el SHA-256 fijado al compilar.
+- Una app que lo integra trae su propio classpath. Las dependencias de Gradle de desarrollo no demuestran que una
+  instalación de Minecraft traiga las demás bibliotecas.
+- El JAR de Binaries incluye y reubica su dependencia _XZ_, y el JAR de WATERMeDIA trae sus bindings de _JavaCPP_ y
+  _FFmpeg_.
+
+Los nativos de _FFmpeg_ cubren estas plataformas; las imágenes se decodifican en cualquier lugar donde corra Java.
+
+| Arquitectura | Windows | Linux | macOS | Android |
+| --- | --- | --- | --- | --- |
+| x86_64 | ✅ | ✅ | ✅ | ⛔ |
+| aarch64 | ⛔ | ✅ | ✅ | ⛔ |
+
+> [!WARNING]
+> No hay nativos de _FFmpeg_ para Windows en ARM64 ni para Android: ahí las imágenes se siguen decodificando, pero el
+> video y el audio no se reproducen, y un Binaries instalado hace fallar el arranque salvo que `codecs.ffmpeg.disable`
+> esté activado.
+
+## 0.1 BINARIES Y FFMPEG
+
+> [!IMPORTANT]
+> La decodificación de video por hardware necesita una GPU y un controlador que decodifiquen ese códec: NVIDIA (CUDA),
+> Intel (QSV), AMD (AMF), Direct3D 11 o 12 en Windows, VideoToolbox en macOS, VAAPI, VDPAU o DRM en Linux, o
+> [Vulkan](#decodificación-con-vulkan). Cualquier otra cosa, o una GPU que no se da abasto, decodifica por software, y
+> `codecs.ffmpeg.hardwareAccel = false` siempre lo hace.
+
+> [!NOTE]
+> Configurable: `codecs.ffmpeg.disable`, `customPath`, `hardwareAccel`, `analyzeDuration`, `probeSize`,
+> `trackPacketReads`, `cache` y `cacheMaxResponse`. Mira sus comentarios en `config/watermedia.toml`.
+
+_WATERMeDIA: Binaries_ necesita WATERMeDIA y carga con él, preparando los nativos justo después de la configuración y
+antes de los módulos de red, códecs y reproductor.
+
+- Los clientes de Minecraft lo requieren; los servidores dedicados pueden omitirlo, ya que ahí no prepara nada.
+- Las apps que integran la API Java también pueden omitirlo y conservar la decodificación de imágenes y los resolvedores
+  de plataformas que no usan nativos; pierden la decodificación de video y las plataformas que dependen de _yt-dlp_.
+- Desactivar _FFmpeg_ (`codecs.ffmpeg.disable`) omite la extracción.
+- Las rutas nativas quedan publicadas durante toda la vida del proceso, y no hay una API aparte para iniciar o apagar
+  Binaries.
+- _yt-dlp_ y _BotGuard_ se descargan la primera vez que se usan y se verifican antes de correr. Las propiedades del
+  sistema `watermedia.ytdlp.binary` y `watermedia.botguard.binary` apuntan a tus propios ejecutables en su lugar.
+
+Las compilaciones personalizadas de _FFmpeg_ van en `codecs.ffmpeg.customPath`: una carpeta con las bibliotecas nativas,
+no un programa `ffmpeg.exe`. Pueden usar GPL, LGPL o cualquier otra licencia y versión declaradas: el cargador revisa
+las capacidades nativas requeridas, no una lista permitida de versiones o licencias, y sólo verifica la integridad de
+los nativos incluidos. Aun así necesitan bindings JNI compatibles con la API Java que usa WATERMeDIA, más el soporte TLS
+de la compilación incluida (mira [Confianza HTTPS y credenciales](#25-confianza-https-y-credenciales)).
+
+## 0.2 CONFIGURACIÓN
+
+> [!NOTE]
+> Cada campo es configurable y se describe a sí mismo: su comentario en `config/watermedia.toml` es la documentación de
+> cómo funciona, y los valores son decisión tuya. Cada sección de esta guía lista los campos que la afectan.
+
+WATERMeDIA escribe sus ajustes en `config/watermedia.toml` dentro del directorio de trabajo, con un comentario encima de
+cada campo. Los valores predeterminados funcionan de fábrica, los campos que se leen al arrancar aplican en el siguiente
+inicio, y cuando un backend parece no estar disponible, este archivo es el primer lugar que debes revisar.
+
+- `codecs.*`: _FFmpeg_, la decodificación por hardware y los decodificadores de imágenes.
+- `player.*`: la calidad predeterminada y las cachés.
+- `platforms.*`: el contenido maduro, la búsqueda y las cuentas de plataformas.
+- `network.*`: el servidor de archivos y las solicitudes web.
+
+# 1. ARRANQUE
+
+En los modloaders populares con soporte nativo, como Forge, NeoForge y Fabric, el loader arranca WATERMeDIA por ti: no
+necesitas seguir esta sección.
+
+**EJEMPLO:**
+```java
+import org.watermedia.WaterMedia;
+
+WaterMedia.start("My application", temporaryDirectory, workingDirectory, true);
+boolean ready = WaterMedia.loaded(); // true ONCE EVERY MODULE FINISHED; CHECK THE CAPABILITY YOU NEED TOO
+String module = WaterMedia.loading(); // MODULE CURRENTLY LOADING
+int step = WaterMedia.step(); // CURRENT LOADING STEP
+int steps = WaterMedia.steps(); // TOTAL LOADING STEPS
+```
+
+Carga, en este orden:
+- Configuración (`watermedia.toml`)
+- Binaries (sólo cuando su JAR está presente)
+- `NetworkAPI`
+- `CodecsAPI`
+- `PlayerAPI`
+
+Así que `steps()` es 5 con Binaries y 4 sin él, y `loading()`, `step()` y `steps()` se pueden consultar con seguridad
+desde cualquier hilo para una pantalla de carga.
+
+- `start` carga cada módulo una sola vez en toda la vida del proceso. Nada se descarga de la memoria: no existe un stop,
+  un segundo `start` lanza una excepción, y un arranque fallido no se puede reintentar en el mismo proceso.
+- Un directorio temporal null se vuelve `<java.io.tmpdir>/watermedia`, y un directorio de trabajo null, el actual. El
+  último argumento elige el entorno de cliente; los módulos sólo de cliente (Binaries, códecs, reproductor) se saltan su
+  arranque en un servidor dedicado.
+- Las partes opcionales (el servidor de archivos, _FFmpeg_) registran su falla en el log y se quedan apagadas mientras
+  la carga termina, así que revisa la capacidad que necesitas, como `CodecsAPI.ffmpegLoaded()`.
+- Cualquier otra falla (la configuración, un módulo de Binaries instalado) hace que `start` lance
+  `IllegalStateException` con esa falla como causa, y `loaded()` se queda en falso.
+- `start` se niega a correr desde un hilo de trabajo de WATERMeDIA, así que nunca lo llames desde uno de sus callbacks.
+
+Cada API sabe por sí misma si su módulo ya cargó:
+
+- `PlayerAPI.mrl` y los reproductores de `PlayerAPI.player` lanzan `IllegalStateException` hasta que arranca el módulo
+  del reproductor, y siempre lo hacen en servidores dedicados.
+- `NetworkAPI.upload` lanza una excepción hasta que arranca el módulo de red. Además rechaza de entrada lo que no sea un
+  archivo existente; en cambio, un servidor remoto inalcanzable o mal configurado hace fallar el estado devuelto.
+- `PlatformAPI` no necesita arranque: su registro es estático y `register`, `fetch` y `search` funcionan en cualquier
+  momento. Los handlers que necesitan Binaries (YouTube, _yt-dlp_) fallan con su propia `PlatformException` hasta que
+  carga, y siempre en servidores dedicados; sin el JAR de Binaries no existen, así que `fetch` devuelve null para sus
+  enlaces.
+- La decodificación de imágenes en Java puro con `CodecsAPI`, `ServerMediaPlayer`, `MathUtil` y `MathEases` no necesitan
+  ningún arranque.
+
+Un reproductor es dueño de los motores que crean los proveedores que le pasas a `PlayerAPI.player`. Crea los motores de
+forma diferida con proveedores, para que una fuente no disponible no deje fugas de recursos nativos reservados de
+antemano. Tu app es dueña de sus contextos OpenGL, Vulkan y OpenAL: libera cada reproductor en el contexto del host que
+le corresponde antes de destruir esos contextos, y crea motores nuevos después de recargar un dispositivo o contexto.
+Las bibliotecas nativas nunca se descargan de la memoria ni pueden cambiar de versión dentro de una JVM en ejecución.
+
+## 1.1 RESTRICCIONES DE SOFTWARE
+
+### Launchers bloqueados
+
+Los bootstraps de Minecraft se niegan a iniciar cuando _TLauncher_ lanzó el juego. Lo detectan por su mod de skins
+inyectado, sus clases, sus archivos en el classpath, sus opciones de JVM, sus hilos y sus procesos padre, y fallan
+nombrando la evidencia; los restos de una instalación vieja en la carpeta del juego o en el perfil del usuario sólo
+dejan una advertencia en el log. Las apps que lo integran se saltan esta comprobación.
+
+### Versiones compatibles
+
+Forge, NeoForge y Fabric cargan WATERMeDIA en clientes y servidores dedicados, y rechazan las versiones de Minecraft
+fuera de esta lista:
+
+| Minecraft | Forge | NeoForge | Fabric Loader |
+| --- | --- | --- | --- |
+| 1.18.2 | 40.3.10 o un 40.x más nuevo | ⛔ | 0.14 o un 0.x más nuevo |
+| 1.19.2 | 43.5.0 o un 43.x más nuevo | ⛔ | 0.14 o un 0.x más nuevo |
+| 1.20.1 | 47.4.2 o un 47.x más nuevo | ⛔ | 0.14 o un 0.x más nuevo |
+| 1.21.1 | 52.1.1 o un 52.x más nuevo | 21.1.0 o un 21.1.x más nuevo | 0.14 o un 0.x más nuevo |
+| 1.21.11 | 61.0.5 o un 61.x más nuevo | 21.11.0 o un 21.11.x más nuevo | 0.14 o un 0.x más nuevo |
+| 26.1.2 | 64.x | 26.1.2.x | 0.14 o un 0.x más nuevo |
+| 26.2 | 65.x | 26.2.0.x | 0.14 o un 0.x más nuevo |
+
+- En Minecraft se acepta desde Java 17 hasta Java 25.
+- WATERMeDIA y Binaries se aceptan entre sí desde 3.0.0 hasta 3.1.0 (sin incluirla); las compilaciones BETA anteriores
+  de 3.0.0 se rechazan.
+- Fabric no puede limitar una dependencia a los clientes, así que su bootstrap exige Binaries en clientes y su
+  manifiesto rechaza versiones incompatibles de Binaries.
+
+## 1.2 PAQUETES PÚBLICOS E INTERNOS
+
+La API pública son los paquetes `org.watermedia`, `api.codecs`, `api.network`, `api.platform`, `api.player` y
+`api.util`, sin sus subpaquetes. Todo lo demás es interno: los lectores, codificadores y estructuras de chunks de los
+códecs, las colas y cachés de los reproductores, las plataformas integradas, el bootstrap, `org.watermedia.tools` y los
+bindings de _FFmpeg_ incluidos. Binaries también usa `org.watermedia.tools` para sus utilerías de digestos, archivos y
+JSON.
+
+El JAR no declara un módulo de Java, así que ningún loader bloquea los paquetes internos; aun así, trata esa frontera
+como el contrato y usa los puntos de entrada públicos, como `PlayerAPI.player` y `PlatformAPI.fetch`, en lugar de las
+clases internas que hay detrás. Quienes contribuyen pueden ejecutar `gradle javadocInventory` desde la raíz del proyecto
+para listar la documentación faltante de métodos públicos con nombre de archivo y número de línea; sólo reporta, y sólo
+revisa los paquetes públicos listados en `public_packages` de `gradle.properties`.
+
+> [!WARNING]
+> `CodecsAPI` es experimental: `decode`, `reader`, `sniff` y `encoder`, junto con los `ImageReader`, `Encoder` y filtros
+> que entregan, pueden cambiar o romperse en cualquier actualización sin seguir el esquema de versiones, así que no los
+> uses en tus mods todavía. Los reproductores multimedia ya usan los códecs por ti, y las consultas de estado
+> (`ffmpegLoaded()`, `ffmpegError()`, `vulkanDecode()`) se pueden llamar con seguridad.
+
+## 1.3 DIAGNÓSTICO Y EJEMPLOS
+
+Los loggers del proyecto son `watermedia` y `watermedia_binaries`; ponlos en DEBUG para diagnóstico.
+
+- Los mensajes de log del proyecto muestran los enlaces multimedia completos, así las rutas y los IDs siguen sirviendo
+  para depurar. Enmascaran las contraseñas de los enlaces (`user:password@`), los tokens JWT sueltos, los valores de
+  `Authorization` y `Cookie`, los argumentos de sesión de Minecraft y los pares `key=value` con pinta de secreto (las
+  subidas de logs de la app pasan por el mismo filtro). Las trazas de excepciones que llevan algún secreto conservan su
+  tipo, pila, causas y fallas suprimidas como texto saneado.
+- Nada se acumula por ventana de tiempo: una anomalía que puede repetirse (un búfer de cuadro corto, una disposición
+  rechazada, un callback que falla, una subida rechazada) se registra la primera vez que ocurre en cada motor,
+  reproductor, servidor o caché y después calla, y las iteraciones lentas de reproducción se cuentan y se reportan una
+  vez al terminar la ejecución.
+- _FFmpeg_ todavía escribe sus propias líneas de log nativas en la salida de error del proceso, fuera de los loggers del
+  proyecto y de su censura; enrutarlas por el logger del proyecto ya está listo, pero desactivado hasta validarlo en
+  macOS y Linux.
+- `-Dwatermedia.glchecks=true` activa las comprobaciones de errores de OpenGL en la ruta de subida del motor.
+
+`src/test/java/org/watermedia/ApiGuideExample.java` compila el uso de las fábricas de cada motor gráfico y de audio, y
+los dos lados de la reproducción sincronizada: el reloj y un seguidor. Su ejemplo de decodificación de imágenes, que
+filtra cada cuadro con un `DownscaleFilter`, corre en `ApiGuideExampleTest`; el comportamiento de interfaz gráfica,
+dispositivos de audio y Minecraft necesita la integración del host correspondiente. Las suites normales de pruebas de
+reproducción y audio espacial cubren por separado el comportamiento real de _FFmpeg_ y OpenAL. Las ejecuciones de
+pruebas iniciadas con `-Prequire_natives=true` (los jobs nativos de CI) fallan en lugar de omitirse cuando faltan los
+nativos de _FFmpeg_.
+
+# 2. MANEJO DE ENLACES
+
+> [!NOTE]
+> Configurable: `platforms.allowMatureContent`, `searchLimit`, `searchCleanupInterval`, `biliBiliCookie` y
+> `player.mrlCleanupInterval`. Mira sus comentarios en `config/watermedia.toml`.
+
+Un MRL (Multimedia Resource Location) convierte cualquier enlace en el contenido que guarda: una o más fuentes, cada una
+con sus calidades, pistas de audio y metadatos. Se resuelve en segundo plano y se queda en caché.
+
+## 2.1 RESOLVER ENLACES
+
+```java
+MRL mrl = PlayerAPI.mrl("https://example.com/movie.mp4");    // A WEB LINK, A FILE UNDER THE WORKING DIRECTORY OR A water:// LINK
+MRL[] queue = PlayerAPI.preload(firstUri, secondUri);        // START RESOLVING SEVERAL AT ONCE
+
+// FROM A GAME TICK OR A UI TIMER
+switch (mrl.status()) {
+    case FETCHING -> { }                                     // STILL RESOLVING
+    case LOADED -> play(mrl);                                // READY TO PLAY
+    case BLOCKED -> showMatureWarning();                     // MATURE CONTENT WHILE IT'S NOT ALLOWED
+    case ERROR -> showError(mrl.exception());                // WHY IT FAILED; A MALFORMED LINK STARTS HERE
+    case EXPIRED, FORGOTTEN -> mrl = mrl.reload();           // STALE OR EVICTED: KEEP THE HANDLE reload() RETURNS
+}
+
+mrl.subscribe(done -> refreshUi());                          // OR GET CALLED ONCE WHEN IT FINISHES OR FAILS
+boolean finished = mrl.await(5_000);                         // OR WAIT, BUT NEVER ON THE GAME OR RENDER THREAD
+```
+
+```java
+// ONE LINK CAN HOLD SEVERAL SOURCES, SUCH AS A GALLERY WITH AN IMAGE AT 0 AND A VIDEO AT 1
+MRL.Source first = mrl.source(0);                            // null FOR A WRONG INDEX
+MRL.Source video = mrl.sourceByType(MediaType.VIDEO);        // THE FIRST VIDEO, OR null
+List<MRL.Source> all = mrl.sources();
+
+MediaType type = video.type();                               // IMAGE, VIDEO, AUDIO...
+Metadata info = video.metadata();                            // TITLE, DESCRIPTION, AUTHOR, DURATION...
+URI thumbnail = video.thumbnail();
+URI link = video.uri(MediaQuality.HIGH);                     // THE CLOSEST QUALITY AVAILABLE
+List<Track> dubs = video.audioTracks();                      // SEPARATE AUDIO TRACKS, THE ORIGINAL FIRST
+
+MediaPlayer player = PlayerAPI.player(mrl, 1, gfx, sfx);     // PLAY THE SOURCE AT INDEX 1 (SEE PLAYING MEDIA)
+```
+
+Un enlace directo falla cuando el servidor responde con un estado de error, una página web o un script; las listas de
+reproducción HLS se abren como un solo video y las de IPTV como una fuente por canal.
+
+## 2.2 PLATAFORMAS
+
+Los enlaces de estas plataformas se resuelven de fábrica:
+
+- 📺 YouTube, Twitch, Kick, BiliBili, Odysee, D.tube, VidLii
+- 🐦 Twitter (X), Bluesky, TikTok, Facebook, Instagram
+- 🎵 SoundCloud, Newgrounds (películas, música y arte)
+- 🖼️ Imgur, Lightshot, Medal, Streamable, Sendvid
+- 📁 Google Drive, Dropbox, MediaFire
+- 🔞 PornHub (sólo con `platforms.allowMatureContent` activado)
+- 🔗 Enlaces directos a cualquier video, música, imagen o lista de reproducción, archivos locales y
+  [enlaces `water://`](#24-el-protocolo-water)
+
+YouTube, SoundCloud, Facebook e Instagram se reproducen con _yt-dlp_, que requiere Binaries. BiliBili se reproduce hasta
+480p, o hasta 1080p (8K con VIP) con tu cookie de sesión en `platforms.biliBiliCookie`.
+
+```java
+Platform.Resolution resolved = PlatformAPI.fetch(uri);       // THE RESOLUTION WITHOUT AN MRL, FOR TOOLS; null WHEN NO PLATFORM HANDLES THE LINK
+
+// YOUR OWN SITE: CHECKED BEFORE THE BUILT-IN PLATFORMS, AND IT NEEDS NO STARTUP
+PlatformAPI.register(new Platform() {
+    @Override
+    public String name() { return "MySite"; }
+
+    @Override
+    public Platform.Resolution resolve(final URI uri) throws PlatformException {
+        if (!"mysite.com".equals(uri.getHost())) return null;            // NOT YOURS: THE NEXT PLATFORM TRIES
+        if (isProfile(uri)) throw PlatformException.unsupported(this.name(), uri); // YOURS BUT NOTHING TO PLAY: MRL GOES ERROR
+        if (isMature(uri)) throw new MatureContentException(this.name(), "Mature video"); // MRL GOES BLOCKED
+
+        final Platform.Quality quality = new Platform.Quality(findVideo(uri), 1920, 1080); // REAL SIZE, 0 WHEN UNKNOWN
+        final Platform.Source source = new Platform.Source(MediaType.VIDEO, null, null, null, List.of(quality), null, null);
+        return new Platform.Resolution(null, source);                    // null EXPIRY: THE LINKS NEVER EXPIRE
+    }
+});
+```
+
+Cualquier otra falla de tu plataforma también es una `PlatformException`, y un álbum o una lista de reproducción salta
+un elemento malo en lugar de fallar completo.
+
+## 2.3 BÚSQUEDA
+
+YouTube (con Binaries), Twitch, Kick e Imgur buscan por palabra clave, y tu plataforma se une a ellas sobrescribiendo
+`search(query, limit)`.
+
+```java
+List<PlatformResult> results = PlatformAPI.search("lofi");   // RETURNS AT ONCE; THE LIST FILLS AS PLATFORMS ANSWER
+boolean searching = PlatformAPI.searching("lofi");           // false ONCE EVERY PLATFORM ANSWERED; POLL BOTH FROM THE UI
+for (final PlatformResult hit: results) {
+    show(hit.title(), hit.thumbnail(), hit.platform().name()); // WHEN PICKED, PlayerAPI.mrl(hit.uri()) OPENS IT LIKE ANY LINK
+}
+List<PlatformResult> fresh = PlatformAPI.search("lofi", true); // ASK THE PLATFORMS AGAIN INSTEAD OF THE CACHE
+```
+
+Una búsqueda nueva reemplaza a la que está en curso, y una búsqueda que parece la anterior todavía a medio escribir
+espera un momento a la siguiente tecla. Twitch y Kick sólo listan canales que están en vivo en ese momento.
+
+## 2.4 EL PROTOCOLO WATER
+
+```java
+PlayerAPI.mrl("water://local/config/song.mp3");              // ./config/song.mp3, RESOLVED AGAINST THE WORKING DIRECTORY
+PlayerAPI.mrl("water://remote/xyz12345");                    // A FILE ON YOUR FILE SERVER (SEE UPLOADING AND DOWNLOADING FILES)
+PlayerAPI.mrl("water://global/abcd6789");                    // A FILE ON OUR GLOBAL SERVER
+```
+
+Los enlaces remotos y globales llevan el ID de archivo que dio el servidor, no la ruta de una carpeta.
+
+## 2.5 CONFIANZA HTTPS Y CREDENCIALES
+
+HTTPS funciona de fábrica con cualquier certificado en el que Java ya confía. La reproducción revisa cada certificado
+contra el truststore de la JVM que WATERMeDIA lee al arrancar, y esa revisión nunca se apaga.
+
+Para usar un certificado autofirmado o tu propia autoridad certificadora, impórtalo en un truststore y apunta Java hacia
+él antes de que arranque WATERMeDIA (dentro de Minecraft, agrega las mismas opciones `-D` a los argumentos de JVM del
+launcher):
+
+```shell
+keytool -importcert -alias my-server -file my-server.crt -keystore my-truststore.jks -storepass changeit -noprompt
+java -Djavax.net.ssl.trustStore=my-truststore.jks -Djavax.net.ssl.trustStorePassword=changeit -jar my-app.jar
+```
+
+- Un truststore vacío o dañado impide que _FFmpeg_ arranque, así que el video se queda apagado hasta que lo arregles.
+- Una compilación personalizada de _FFmpeg_ necesita el mismo soporte TLS que la incluida.
+- Los encabezados y cookies de inicio de sesión (`Authorization`, `Cookie`, `X-WaterMedia-Token`) sólo llegan al
+  servidor de la primera solicitud, nunca a una redirección hacia otro, y las redirecciones sólo pueden apuntar a
+  enlaces http o https.
+
+# 3. REPRODUCCIÓN MULTIMEDIA
+
+> [!NOTE]
+> Configurable: `player.defaultQuality`, `player.cacheBudget`, `player.watertx.cache` y `player.watertx.texturesBudget`.
+> Mira sus comentarios en `config/watermedia.toml`.
+
+## 3.1 CREAR Y CONTROLAR UN REPRODUCTOR
+
+```java
+MediaPlayer player = PlayerAPI.player(mrl, 0,
+        () -> PlayerAPI.glEngine(renderThread, renderExecutor),
+        PlayerAPI::jsEngine);
+if (player == null) {
+    throw new IllegalStateException("Source is unavailable or its backend failed");
+}
+try {
+    if (!player.start()) throw new IllegalStateException("Player refused to start");
+} catch (RuntimeException | Error failure) {
+    player.release();
+    throw failure;
+}
+```
+
+`player` devuelve null cuando la fuente sigue resolviéndose, el índice es inválido, el backend necesario no está
+disponible o la construcción lanza una `Exception`; un `Error` se propaga. Revisa el estado del MRL antes de decidir si
+reintentas.
+
+- Los proveedores sólo corren cuando hacen falta, y las imágenes nunca llaman al proveedor de audio.
+- Un proveedor que devuelve null omite esa salida, como `() -> null` de motor gráfico para reproducir sólo audio.
+- Nunca compartas un motor entre reproductores.
+
+`TxMediaPlayer` reproduce imágenes y animaciones compatibles, `FFMediaPlayer` reproduce audio y video con _FFmpeg_, y
+`ServerMediaPlayer` es un reloj de sincronización sin decodificación ni motores nativos.
+
+Los tres reproductores comparten los mismos controles. Los controles de reproducción devuelven `true` cuando la llamada
+tuvo efecto y `false` cuando se rechazó: imposible en ese momento, después de `release()` o con una velocidad fuera de
+rango; los ajustes de salida no devuelven nada.
+
+```java
+// PLAY, PAUSE AND STOP
+boolean started = player.start();                 // PLAYS FROM THE BEGINNING; ALSO RESTARTS AN ENDED, STOPPED OR FAILED PLAYER
+boolean startedPaused = player.startPaused();     // THE SAME, BUT LANDS PAUSED (SAFER THAN start() FOLLOWED BY pause())
+boolean paused = player.pause();                  // false WHEN ALREADY PAUSED, ENDED, STOPPED OR FAILED; WHILE LOADING IT WAITS FOR THE PIPELINE
+boolean resumed = player.resume();                // false UNLESS PAUSED
+boolean pauseChanged = player.pause(wantPaused);  // pause() OR resume() FROM A FLAG, SUCH AS A CHECKBOX
+boolean toggled = player.togglePlay();            // PAUSES, RESUMES, OR STARTS AN ENDED OR STOPPED PLAYER AGAIN
+boolean stopped = player.stop();                  // STOPPED WITH time() AT 0; false WHEN ALREADY STOPPED OR NEVER STARTED
+
+// MOVE THROUGH THE MEDIA (MILLISECONDS, CLAMPED TO THE DURATION)
+boolean sought = player.seek(15_000);             // PRECISE; ON AN ENDED OR STOPPED PLAYER IT RESTARTS PAUSED AT THE TARGET
+boolean soughtQuick = player.seekQuick(15_000);   // FASTER, LESS PRECISE ON VIDEO; THE SAME AS seek() ON IMAGES
+boolean skipped = player.skipTime(-10_000);       // RELATIVE TO time(); NEGATIVE GOES BACK
+boolean forwarded = player.forward();             // 5 SECONDS AHEAD (1 SECOND ON ANIMATIONS)
+boolean rewound = player.rewind();                // 5 SECONDS BACK (1 SECOND ON ANIMATIONS)
+boolean stepped = player.nextFrame();             // ONLY WHILE PAUSED AND NOT FOLLOWING A CLOCK
+boolean steppedBack = player.previousFrame();     // ONLY WHILE PAUSED AND NOT FOLLOWING A CLOCK
+
+// PLAYBACK OPTIONS
+boolean speedChanged = player.speed(1.25f);       // (0, 4]; false ON LIVE STREAMS, JAVA SOUND OR A RATE THE AUDIO ENGINE REFUSES
+boolean repeatChanged = player.repeat(true);      // false ONLY AFTER release()
+boolean trackChanged = player.audioTrack(track);  // SEE AUDIO TRACKS AND LANGUAGES
+boolean placed = player.spatialAudio(position);   // SEE SPATIAL AUDIO; false WITHOUT A SPATIAL OPENAL ENGINE
+
+// OUTPUT SETTINGS: ALWAYS TAKEN, SO THEY RETURN NOTHING
+player.volume(50);                                // 0 TO 100, CLAMPED; MUTE NEVER CHANGES IT
+player.mute(true);
+player.quality(MediaQuality.HIGH);                // THE CLOSEST AVAILABLE; HOT SWITCH ON VIDEO, NEXT START ON IMAGES
+player.scale(1280, 720);                          // UPLOAD SIZE CAP PER AXIS, 0 FOR NO CAP
+player.lod(MediaPlayer.LodLevel.FAR);             // UPLOAD SIZE BY DISTANCE: MAX 100%, CLOSE 75%, NEAR 50%, FAR 25%, FAR_AWAY 10%
+player.displayTime(10_000);                       // A STILL IMAGE ENDS AFTER THIS AND NEVER LOOPS; 0 KEEPS IT UNTIL STOPPED
+player.audioLanguage("es-MX");                    // PREFERRED AUDIO LANGUAGE FROM THE NEXT START
+
+// WHAT THE MEDIA ALLOWS: ASK BEFORE SHOWING A CONTROL
+boolean playable = player.canPlay();              // FROM THE FIRST SUCCESSFUL LOAD (FROM CREATION ON A CLOCK) UNTIL IT FAILS OR IS RELEASED
+boolean seekable = player.canSeek();              // false UNTIL THE SOURCE OPENS, ON LIVE STREAMS AND ON STILL IMAGES
+boolean speedable = player.canSpeed();            // A PURE QUERY, SAFE FROM ANY THREAD ON EVERY FRAME
+boolean live = player.live();                     // false UNTIL THE SOURCE OPENS
+boolean positional = player.spatial();            // POSITIONAL AUDIO IS AVAILABLE
+
+// WHERE IT IS
+MediaPlayer.Status status = player.status();      // ALSO playing(), paused(), buffering(), ended(), error()...
+long time = player.time();                        // 0 BEFORE THE FIRST FRAME, THE DURATION ONCE ENDED
+long duration = player.duration();                // 0 WHEN UNKNOWN OR LIVE
+int buffered = player.buffered();                 // 0 TO 100: REAL PROGRESS WHILE A VIDEO LOADS OR BUFFERS; IMAGES AND CLOCKS REPORT 100 OR 0
+float fps = player.fps();                         // 0 UNTIL KNOWN
+Throwable failure = player.exception();           // WHY IT LANDED IN ERROR
+int width = player.width();                       // UPLOADED SIZE; sourceWidth() AND sourceHeight() GIVE THE NATIVE ONE
+int height = player.height();
+
+// DRAW: ON THE RENDER THREAD, READ FRESH ON EVERY FRAME
+long texture = player.texture();                  // OPENGL TEXTURE NAME OR VULKAN VkImageView HANDLE; 0 MEANS NOTHING TO DRAW
+
+// CLEAN UP WHEN THE HOST DROPS THE SURFACE, FAILED PLAYBACK INCLUDED
+player.release();                                 // IDEMPOTENT, LEAVES status() AT STOPPED; NEVER FROM A LISTENER OR PLAYBACK THREAD
+```
+
+Llama a `speed(...)` donde el contexto de audio esté activo: el reloj del reproductor sólo sigue una velocidad que el
+motor de audio aceptó. El escalado y el nivel de detalle funcionan en las disposiciones de píxeles compatibles, y los
+motores gráficos integrados todavía no aceptan texturas BC comprimidas.
+
+```java
+final MediaPlayer.StatusListener playlist = new MediaPlayer.StatusListener() {
+    @Override
+    public void onStatus(final MediaPlayer source, final MediaPlayer.Status previous, final MediaPlayer.Status current) {
+        // EVERY REAL TRANSITION, ONE AT A TIME AND IN ORDER; KEEP IT SHORT AND NEVER BLOCK
+        if (current != MediaPlayer.Status.ENDED) return;
+        source.onStatus(this); // ENDED, STOPPED AND ERROR CONSUME THE LISTENERS: REGISTER AGAIN TO KEEP HEARING
+        source.start();        // RESTARTING HERE IS FINE; source.release() NEVER IS
+    }
+};
+player.onStatus(playlist); // ADDING IT TWICE KEEPS IT ONCE
+```
+
+- Un listener corre en el hilo que causó el cambio: un hilo de reproducción, el ticker compartido de sincronización, o
+  quien llama a `status()`, `time()` o `texture()` en reproductores de imagen cuyo reloj resuelve el final de forma
+  diferida.
+- Nunca corre mientras el reproductor tiene tomado uno de sus candados, ni en un hilo de reproducción al que `release()`
+  está esperando. `release()` entrega su `STOPPED` cuando termina y los motores ya están liberados, así que cuando corre
+  ese callback ya no queda nada pendiente del reproductor.
+
+| Estado del reproductor | Significado |
+| --- | --- |
+| `WAITING` | Creado y esperando las condiciones para arrancar. |
+| `LOADING` | Cargando o preparando el contenido. |
+| `BUFFERING` | Esperando suficientes datos para continuar. |
+| `PLAYING` | Reproduciendo el contenido. |
+| `PAUSED` | En pausa y listo para reanudar. |
+| `STOPPED` | Detenido y listo para empezar desde el principio. |
+| `ENDED` | Llegó al final del contenido. |
+| `ERROR` | La reproducción tuvo una falla. |
+
+`Status.allows(next)` dice si una pausa, reanudación, almacenamiento en búfer, final, detención o falla puede llevar un
+estado directo a `next`. Arrancar, hacer seek y reiniciar van por su propio camino: un reproductor sale de `LOADING`
+sólo cuando abre su tubería (o se detiene o falla), un seek en `ENDED` o `STOPPED` lo reinicia, y `STOPPED` no permite
+ningún movimiento directo.
+
+## 3.2 PISTAS DE AUDIO E IDIOMAS
+
+Los videos doblados y los archivos con varios streams de audio reproducen su audio original (o el predeterminado) a
+menos que pidas otro. Las plataformas listan las pistas de audio separadas de una fuente con la original primero, y
+dentro de un archivo o un stream HLS gana el stream marcado como predeterminado.
+
+```java
+player.audioLanguage("es-MX"); // PREFERRED FROM THE NEXT START; null CLEARS IT
+for (final MediaPlayer.AudioTrack track: player.audioTracks()) {
+    if ("es".equals(track.lang())) player.audioTrack(track); // SWITCHES RIGHT AWAY ON A RUNNING PLAYER
+}
+```
+
+- El orden de elección es: tu elección con `audioTrack(...)`, luego `audioLanguage(...)`, luego el original (la primera
+  pista separada) o, si no hay pistas separadas, el stream predeterminado del archivo, y al final el primero. Una
+  etiqueta de idioma coincide primero con la misma etiqueta y luego con el mismo idioma, así que `es-MX` toma `es-419`,
+  `es` o el `spa` que trae un archivo. No hay idioma automático: sin `audioLanguage(...)` suena el original, nunca un
+  doblaje automático.
+- `audioTracks()` lista un `AudioTrack(track, stream, name, lang)` por cada stream de audio: primero los de la entrada
+  principal y luego los de cada pista separada de `source().audioTracks()`. `track` es `AudioTrack.MAIN` o el índice de
+  la pista separada, y `stream` es el índice del stream de _FFmpeg_ dentro de ella.
+- Una pista separada que todavía no ha sonado aparece como una sola entrada `provisional()` (`stream` vale -1) armada
+  con el nombre y el idioma de la plataforma, así que listar nunca abre todos los doblajes por adelantado. Cuando suena,
+  sus streams reales toman su lugar. La lista es una instantánea inmutable que cualquier hilo puede leer.
+- `audioTrack(track)` devuelve `true` cuando la elección cambió. Un reproductor que corre reconstruye su tubería en el
+  tiempo actual (una transmisión en vivo se reinicia en su borde en vivo), y la elección sobrevive a los cambios de
+  calidad y a los reinicios. `audioTrack()` devuelve lo que suena ahora. Los reproductores de imágenes y de servidor, y
+  los que no tienen motor de audio, no listan nada.
+
+## 3.3 ELEGIR MOTORES
+
+El desarrollo de Vulkan va primero; OpenGL sigue soportado como backend secundario. Las decisiones de backend pertenecen
+a tu capa de renderizado.
+
+| Fábrica | Obligación del host |
+| --- | --- |
+| `PlayerAPI.glEngine(renderThread, executor)` | El ejecutor corre tareas en el hilo dueño del contexto OpenGL y se sigue procesando en cada cuadro mientras la reproducción o la liberación puedan esperarlo, y una vez más después de `release()`. Con ambos argumentos en null, el hilo que llama debe ser dueño del contexto. Nunca muevas un motor entre contextos. |
+| `PlayerAPI.vkEngine(context)` | Proporciona un `VKContext` cuyos objetos Vulkan y mecanismo de retiro sobrevivan al motor: toma `queueLock()` alrededor de tus propios submits y presents, y corre los callbacks de `retire(...)` cuando terminen tus cuadros en curso (todos cuando el dispositivo desaparece). Para decodificar video en la GPU, mira [Decodificación con Vulkan](#decodificación-con-vulkan). |
+| `PlayerAPI.awtEngine(onFrame)` | Dibuja la imagen publicada desde la interfaz AWT/Swing; pasa el callback opcional al hilo de interfaz cuando haga falta. |
+| `PlayerAPI.jfxEngine(onFrame)` | Necesita un runtime de JavaFX 13+; enlaza la imagen del motor con tu interfaz. Sin él, la fábrica lanza `IllegalStateException` en lugar de un error de enlace. |
+| `PlayerAPI.headlessEngine()` / `headlessEngine(preload)` | Captura los cuadros subidos sin contexto gráfico, útil para pruebas y procesamiento de imágenes. Como todo motor y reproductor multimedia, sólo existe en un cliente; un servidor dedicado sólo puede crear relojes `ServerMediaPlayer`. |
+| `PlayerAPI.alEngine()` | El contexto OpenAL ya está activo y sigue válido en los hilos que hacen trabajo de audio. |
+| `PlayerAPI.alEngine(true)` | El mismo contrato de OpenAL, reproduciendo con sinks mono posicionales (pares estéreo y bocinas extra). |
+| `PlayerAPI.jsEngine()` | Hay un dispositivo y una línea de Java Sound disponibles; sin audio posicional. |
+
+> [!IMPORTANT]
+> **OpenGL:** convertir video YUV y en escala de grises en la GPU necesita OpenGL 3.2 core (GLSL 150); sin él, los
+> cuadros se convierten a BGRA en la CPU. Subir directo desde el hilo de decodificación necesita OpenGL 4.4 o
+> `ARB_buffer_storage`; los controladores más viejos suben en el hilo de render con dos búferes de píxeles.
+
+> [!IMPORTANT]
+> **Vulkan:** `queue()` debe aceptar trabajo de cómputo y de transferencia.
+> - **Copia cero:** los planos decodificados llegan a la GPU sin una copia en la CPU cuando el dispositivo activa
+>   `VK_EXT_external_memory_host` (`hostImportSupported()` devuelve true) y el búfer del plano está alineado a
+>   `minImportedHostPointerAlignment()`; si no, el plano se copia con un búfer de staging.
+> - **Conversión YUV por hardware:** los cuadros SDR de 8 bits en NV12 y YUV 4:2:0, 4:2:2 y 4:4:4 con tamaños pares y
+>   sin primarios BT.2020 se convierten en el hardware del sampler cuando el dispositivo activa `samplerYcbcrConversion`
+>   (Vulkan 1.1, `ycbcrSampler()` devuelve true); cualquier otra disposición usa una pasada de cómputo.
+> - **Disposiciones:** además de BGRA, RGBA, YUYV y UYVY de 8 bits, una disposición necesita formatos de plano que
+>   soporten muestreo, filtrado lineal y escrituras de transferencia, o cae a BGRA. RGB siempre cae a BGRA.
+> - **Decodificación en la GPU:** mira [Decodificación con Vulkan](#decodificación-con-vulkan).
+
+Las clases base de los motores son selladas: tu integración aporta contextos y ejecutores del host, no implementaciones
+propias de motores. Los motores administran sus propios recursos de reproducción, incluidas texturas, fuentes de audio y
+búferes.
+
+Todo motor sigue el mismo ciclo de vida:
+
+- `release()` es idempotente, nunca debe correr al mismo tiempo que el reproductor que alimenta al motor, y lo deja
+  inerte: `released()` es verdadero y `texture()` devuelve 0.
+- El reproductor revisa `supports(format, bits)` antes de subir y cae a BGRA de 8 bits cuando el motor rechaza una
+  disposición.
+- Las subidas nunca lanzan excepciones: una falla del controlador descarta el cuadro con un solo error en el log, y el
+  último cuadro se queda en pantalla.
+- Los motores de software y headless exponen un centinela distinto de cero en lugar de un identificador de GPU, así que
+  compara el identificador sólo contra 0.
+- `PixelFormat.planeWidth`, `planeHeight`, `texelBytes` y `frameBytes` dan el tamaño de cada plano del `format()`,
+  `width()`, `height()` y `bits()` de un motor, por ejemplo para presupuestar su memoria. Los planos submuestreados
+  redondean hacia arriba como _FFmpeg_, así que los tamaños impares conservan su última columna y fila de croma.
+
+Manejo del color:
+
+- Los motores OpenGL y Vulkan convierten el YUV con la matriz (BT.601, BT.709 o BT.2020), el rango y la posición del
+  croma que declara cada video. Cuando no declara nada, lo deducen como _mpv_: BT.601 para cuadros SD (de menos de 1280
+  píxeles de ancho y hasta 576 líneas de alto), BT.709 en los demás.
+- El HDR en PQ y HLG se muestra como SDR, con los colores de BT.2020 llevados a BT.709 y las luces altas comprimidas
+  para que un pico de 1000 nits llegue al blanco.
+- Los motores de un mismo contexto OpenGL o dispositivo Vulkan construyen esa conversión una vez y la comparten.
+  Desaparece con el trabajo de liberación del último motor (la tarea que `release()` encola en el ejecutor de render de
+  OpenGL, o los callbacks de `VKContext.retire`), así que libera todos los motores y deja correr ese trabajo antes de
+  destruir el contexto o el dispositivo.
+- Los motores de software reciben BGRA que _FFmpeg_ convierte con la matriz y el rango declarados, sin mapeo de tonos
+  HDR.
+
+OpenAL necesita su contexto original activo en cada hilo que opera el reproductor, incluido el ticker de sincronización.
+El motor de Java Sound serializa sus propias llamadas, así que no necesita candados extra, y reabre una línea más ancha
+cuando un bloque de audio supera el búfer de la línea, descartando lo que la línea vieja aún tenía.
+
+> [!IMPORTANT]
+> **OpenAL:** el audio de 4, 6, 7 y 8 canales necesita `AL_EXT_MCFORMATS` en un motor normal (los motores espaciales
+> llevan todo a estéreo), las muestras float y double en mono y estéreo necesitan `AL_EXT_FLOAT32` y `AL_EXT_DOUBLE` (el
+> float envolvente viene con `AL_EXT_MCFORMATS`), y un reloj que tome en cuenta la latencia de salida del dispositivo
+> necesita `AL_SOFT_source_latency`; sin ellas, el audio se convierte a lo que el dispositivo reproduce. Los
+> [procesadores de entorno](#procesadores-de-entorno) que usan EFX necesitan `ALC_EXT_EFX`.
+
+La app independiente (al abrir el JAR de WATERMeDIA) dibuja con Vulkan salvo que el usuario elija OpenGL; cuando Vulkan
+no está disponible, ese inicio corre en OpenGL y se conserva la elección guardada. `-Dwatermedia.engine=opengl` o
+`-Dwatermedia.engine=vulkan` cambia el motor para un solo inicio sin guardarlo. La app guarda su motor, la escala de la
+interfaz (`0` sigue al monitor; si no, un factor de 1 a 3 en pasos de 0.25, que Settings muestra como `Auto`, `x1.0`,
+`x1.25` y así sucesivamente), el efecto CRT y el sonido de clic en `config/app.properties` dentro de su directorio de
+trabajo.
+
+### Decodificación con Vulkan
+
+Por defecto, `VKContext.deviceInfo()` devuelve null y los videos se decodifican en otro lado y luego se suben desde la
+RAM. Sobrescríbelo con la forma en que se creó tu dispositivo (la cadena de features que le diste a `vkCreateDevice`,
+que debe seguir reservada y sin cambios mientras viva el dispositivo, más las extensiones de instancia y de dispositivo
+activadas y las colas creadas por familia) y _FFmpeg_ decodifica H.264, H.265 y AV1 con Vulkan Video, mientras el motor
+muestrea las imágenes decodificadas sin pasar por la RAM.
+
+> [!IMPORTANT]
+> La decodificación con Vulkan necesita:
+> - Una instancia y un dispositivo Vulkan 1.3 con `timelineSemaphore` y `synchronization2` activados.
+> - `VK_KHR_video_queue`, `VK_KHR_video_decode_queue` y la extensión de decodificación de cada códec que quieras
+>   acelerar: `VK_KHR_video_decode_h264`, `VK_KHR_video_decode_h265` o `VK_KHR_video_decode_av1`.
+> - Colas de sobra en tu dispositivo, o las extensiones de memoria y semáforos externos para un gemelo; ambas opciones
+>   se describen abajo.
+> - Nativos con Vulkan Video (`CodecsAPI.vulkanDecode()` devuelve true) y `codecs.ffmpeg.hardwareAccel` activado.
+
+Entonces _FFmpeg_ decodifica en uno de dos lugares:
+
+- **Tu dispositivo**, cuando también tiene colas que _FFmpeg_ puede tomar como propias: una cola con capacidad de
+  cómputo (que también acepta transferencias) distinta de `queue()`, más una cola de decodificación de video, con
+  `queue()` creada al final en `queueFamily()`. Todas las demás colas de todas las familias son para _FFmpeg_, que les
+  envía trabajo desde sus propios hilos, así que mientras existan reproductores nunca toques esas colas ni llames a
+  `vkDeviceWaitIdle`; mejor espera a tu propia cola (`vkQueueWaitIdle` bajo `queueLock()`).
+- **Un gemelo**, cuando tu dispositivo no tiene esas colas pero activa `VK_KHR_external_memory_win32` y
+  `VK_KHR_external_semaphore_win32` en Windows, o `VK_KHR_external_memory_fd` y `VK_KHR_external_semaphore_fd` en los
+  demás. El motor crea un segundo dispositivo en la misma GPU con tu cadena de features y tus extensiones, _FFmpeg_
+  decodifica ahí, y el motor importa cada imagen decodificada a tu dispositivo. Tus colas siguen siendo sólo tuyas.
+
+De cualquier forma, libera todos los reproductores antes de destruir el dispositivo o su instancia: _FFmpeg_ los usa,
+gemelo incluido, hasta que desaparece su último decodificador.
+
+> [!IMPORTANT]
+> Los videos 4:2:2, 4:4:4 y de 12 bits sólo se decodifican en la GPU con _libplacebo_, que convierte cualquier
+> disposición decodificada a RGBA en SDR (con mapeo de tonos del HDR). Necesita `hostQueryReset`,
+> `runtimeDescriptorArray`, `shaderStorageImageArrayNonUniformIndexing` y `maintenance4` en el dispositivo que
+> decodifica y, en tu propio dispositivo, una segunda cola en `queueFamily()`; un gemelo activa esas features por su
+> cuenta cuando la GPU las tiene. Sin _libplacebo_, sólo los streams 4:2:0 (de 8 y 10 bits) se decodifican en la GPU, y
+> el motor los convierte con sus propios shaders.
+
+## 3.4 AUDIO ESPACIAL
+
+Crea un motor OpenAL con `PlayerAPI.alEngine(true)` antes de construir el reproductor. El modo espacial queda fijo
+durante toda la vida del motor: _FFmpeg_ lleva las fuentes estéreo y envolventes a estéreo (el canal central llega a
+ambos lados y las fuentes mono siguen en mono) y el motor las reproduce con sinks, que son fuentes mono posicionales. La
+fábrica `alEngine()` normal reproduce todos los canales en una sola fuente seca y relativa al oyente, aunque las
+disposiciones que el dispositivo no puede reproducir aún pueden convertirse a la cantidad de canales más cercana. Java
+Sound devuelve `false` en las actualizaciones espaciales y no expone una fuente nativa.
+
+El motor arranca con un solo sink, el primario, que reproduce audio `Mix.MONO` seco y relativo al oyente. Pasa un estado
+`SpatialAudio` para ubicarlo en el mundo, o `null` para volver a la reproducción seca y relativa al oyente. El volumen,
+el silenciado, la velocidad, la pausa y el seguimiento del reloj (`sync`) no dependen de la configuración espacial y
+llegan a todos los sinks.
+
+```java
+import org.watermedia.api.player.SFXEngine.SpatialAudio;
+
+final ALEngine audio = PlayerAPI.alEngine(true);
+final SpatialAudio position = new SpatialAudio(
+        blockX + 0.5, blockY + 0.5, blockZ + 0.5,
+        8.0f, 64.0f, 1.0f, false, null);
+audio.spatialAudio(position);
+```
+
+Crea el motor, actualízalo y libéralo en el ejecutor de sonido del host, con el contexto OpenAL original activo. El host
+es dueño del dispositivo, el contexto y el oyente, y éstos deben sobrevivir a todos los reproductores que los usan.
+
+- `FFMediaPlayer` usa hilos de reproducción privados y, como la reproducción ordinaria con `ALEngine`, actualmente
+  necesita que el contexto de la fuente sea el contexto activo del proceso en esos hilos. No se admiten hosts que
+  expongan su contexto de audio sólo mediante una vinculación local al hilo: vincularlo sólo en el hilo de sonido de
+  quien llama no basta.
+- Las operaciones nativas del motor rechazan un contexto distinto o ausente; nunca cambian ni recrean el contexto del
+  host.
+- Libera los reproductores antes de recargar el dispositivo y luego crea motores nuevos en el contexto nuevo.
+- `FFMediaPlayer.release()` interrumpe y espera a su tubería de reproducción antes de borrar la fuente de audio; córrelo
+  antes de destruir el contexto, nunca como callback de esa tubería.
+
+`SpatialAudio` valida posiciones finitas que quepan en un float de OpenAL, `0 < referenceDistance < maxDistance` y un
+rolloff finito y no negativo; un rolloff de cero apaga la atenuación por distancia. El modelo de distancia del host
+decide cómo atenúan el audio estos parámetros, y la API nunca toca el modelo global de distancia, el oyente ni la
+velocidad de la fuente, así que `maxDistance` no es un radio de silencio universal en todos los modelos de OpenAL.
+
+### Sinks: pares estéreo y bocinas extra
+
+Una sola decodificación alimenta todos los sinks de un motor espacial, así que una imagen estéreo o una bocina puesta en
+otro lugar no cuesta una segunda descarga ni decodificación. Cada sink reproduce una `ALEngine.Mix` del audio
+decodificado: `LEFT`, `RIGHT` o `MONO` (el promedio de ambos). Una fuente mono reproduce las mismas muestras en todas
+las mezclas, así que un par estéreo nunca se queda callado con contenido mono.
+
+```java
+// A STEREO PICTURE: THE PRIMARY TURNS INTO THE LEFT EDGE AND A NEW SINK PLAYS THE RIGHT ONE
+final ALEngine.Sink left = player.sinks().get(0);
+left.mix(ALEngine.Mix.LEFT);
+final ALEngine.Sink right = player.addSink(ALEngine.Mix.RIGHT);
+left.spatialAudio(new SpatialAudio(leftX, y, z, 8.0f, 64.0f, 1.0f, false, environment));
+right.spatialAudio(new SpatialAudio(rightX, y, z, 8.0f, 64.0f, 1.0f, false, environment));
+
+// A SPEAKER BLOCK: ONE MORE SINK AT ITS OWN POSITION, RELEASED WHEN THE BLOCK GOES AWAY
+final ALEngine.Sink speaker = player.addSink(ALEngine.Mix.MONO);
+speaker.spatialAudio(new SpatialAudio(speakerX, speakerY, speakerZ, 8.0f, 64.0f, 1.0f, false, environment));
+speaker.release();
+```
+
+- El sink primario es dueño de `player.audioSource()`. Lleva el reloj del contenido y vive lo mismo que el motor; su
+  `release()` devuelve `false`. `player.sinks()` lista primero al primario, y tanto `sinks()` como `addSink(...)` dan
+  una lista vacía o `null` sin un motor OpenAL espacial.
+- Todos los sinks encolan las mismas muestras, y reproducir, pausar, vaciar, la velocidad y el volumen corren en un solo
+  lote sobre todos, así que un par estéreo queda alineado muestra por muestra. Agregar un sink durante la reproducción,
+  o cambiar una mezcla en contenido estéreo, reconstruye todas las colas sobre la muestra del primario, lo que pausa los
+  sinks por cerca de una actualización del mezclador.
+- Cada sink tiene su propio `spatialAudio(...)`: el adaptador de entorno recibe la fuente de ese sink en `process` y
+  `reset`, y `sink.release()` lo reinicia antes de borrar la fuente. Liberar el reproductor libera todos los sinks.
+- Agrega, cambia y libera sinks en el ejecutor de sonido del host con el contexto del motor activo, como cualquier otra
+  actualización espacial. Sus consultas (`source()`, `mix()`, `spatialAudio()`, `released()`) no necesitan contexto.
+- Un host puede adoptar la fuente de un sink en su propio sistema de sonido y escribir su ganancia, tono y posición,
+  pero nunca debe reproducir, encolar, desencolar ni borrar esa fuente: el motor es dueño de su transporte y sus
+  búferes. Un sink nuevo arranca con la ganancia y el tono actuales del motor.
+
+### Procesadores de entorno
+
+El último argumento de `SpatialAudio` es un `SpatialAudio.Environment` opcional que aplica tus propios efectos, como
+oclusión o reverberación, a cada fuente OpenAL. Es la puerta para los mods de sonido espacial: escribe un adaptador
+pequeño en tu mod que les pase cada fuente, y cárgalo sólo cuando ese mod esté presente.
+
+```java
+final SpatialAudio.Environment environment = new SpatialAudio.Environment() {
+    @Override
+    public void process(final int source, final SpatialAudio audio) {
+        // EVERY spatialAudio(...) UPDATE: APPLY YOUR WHOLE ENVIRONMENT (EFX FILTERS AND SENDS) TO source
+    }
+
+    @Override
+    public void reset(final int source) {
+        // THE PROCESSOR IS REPLACED, REMOVED OR THE SINK IS RELEASED: REMOVE YOUR EFFECTS FROM source
+    }
+};
+player.spatialAudio(new SpatialAudio(x, y, z, 8.0f, 64.0f, 1.0f, false, environment));
+```
+
+- Conserva una sola instancia estable del procesador entre actualizaciones, y llama a `spatialAudio(...)` desde el
+  ejecutor de sonido del host con el contexto activo.
+- Cada actualización restaura la posición original en el mundo y limpia los filtros y envíos auxiliares anteriores de la
+  fuente antes de llamar a `process`, así que un procesador puede mover `AL_POSITION` y debe aplicar su entorno completo
+  en cada llamada.
+- Limita la frecuencia de las actualizaciones en el host en lugar de salir antes dentro del procesador, y reparte muchos
+  reproductores entre varios ticks.
+- El motor borra sólo su propia fuente y sus búferes, nunca los filtros ni las ranuras de efectos del procesador.
+- Si `process` o `reset` lanzan una excepción, los efectos de la fuente se limpian y la excepción se propaga; un `reset`
+  que falla no puede impedir que se borre la fuente durante la liberación.
+- `auxOnly = true` le pide al procesador una salida sólo de reflexiones; por sí solo no silencia la ruta directa, así
+  que silencia el reproductor cuando necesites silencio estricto.
+- El procesador sólo corre durante tus actualizaciones explícitas, nunca desde el bucle de decodificación o reproducción
+  de _FFmpeg_. El posicionamiento básico funciona sin EFX; un procesador que use EFX necesita un dispositivo que lo
+  exponga.
+
+### Verificación
+
+`SpatialAudioTest` cubre el rechazo de argumentos inválidos, las coordenadas y la atenuación de una fuente OpenAL real,
+la restauración del origen en el callback, la limpieza de efectos, el manejo de excepciones, los contextos que no
+coinciden y las llamadas tardías después de la liberación. También genera un WAV estéreo y lo reproduce con
+`FFMediaPlayer`, revisando que la decodificación estéreo llegue a cada sink como PCM mono en búferes reales de OpenAL.
+`ALSinkTest` cubre el conjunto de sinks, las mezclas en cada tipo de muestra, los controles en lote, la contrapresión,
+los sinks que se unen sobre la muestra del primario y la recuperación tras un vaciado de búfer. Las pruebas de
+dispositivo necesitan un dispositivo de salida OpenAL, y los casos de decodificación también necesitan los nativos de
+_FFmpeg_.
+
+## 3.5 REPRODUCCIÓN SINCRONIZADA
+
+`PlayerAPI.serverPlayer()` construye un `ServerMediaPlayer`, un reloj sin contenido ni motores que corre en cualquiera
+de los dos lados. Es dueño de las cuentas del tiempo: el arranque, la pausa, el seek, la velocidad, la repetición y la
+vuelta del ciclo o la transición a `ENDED` corren sobre el reloj del sistema, y cada cambio exitoso incrementa
+`revision()`. El host es dueño de todo lo demás: quién puede manejar el reloj, cómo llegan sus instantáneas a los
+clientes y dónde se guarda su posición. Los motores y reproductores no tienen constructores públicos: toda instancia
+sale de `PlayerAPI`.
+
+```java
+ServerMediaPlayer clock = PlayerAPI.serverPlayer();
+clock.syncDuration(durationMs);
+clock.start();
+// ON EVERY SERVER TICK: SEND clock.snapshot() WITH YOUR OWN PACKET WHEN clock.revision() MOVED
+MediaPlayer player = PlayerAPI.player(mrl, gfxSupplier, sfxSupplier);
+player.sync(snapshot); // ON THE CLIENT, FOR EVERY SNAPSHOT RECEIVED
+```
+
+Un reproductor al que le pasas una instantánea con `sync(PlayerState)` (o `sync(ByteBuffer)` para la forma codificada)
+sigue al reloj desde entonces. Cada 50 ms:
+
+- Refleja el estado de la instantánea: arranque, pausa y detención. Una instantánea en `BUFFERING`, que sólo trae una
+  construida a mano, se mantiene como una pausa.
+- Adopta su repetición y su velocidad.
+- Regresa la reproducción con un `seekQuick` limitado en frecuencia cuando `drift()` supera `tolerance(ms)` (un segundo
+  por defecto).
+
+La última instantánea recibida siempre gana, así que envíalas en el orden en que el reloj las produjo. `authority()`
+devuelve esa instantánea, `authorityTime()` extrapola dónde va el reloj ahora y `following()` dice si un reproductor
+sigue a uno. La corrección nunca recorta la velocidad de reproducción; se omite mientras el reproductor carga o almacena
+en búfer, y toma el camino corto alrededor de la frontera del ciclo en contenido que se repite.
+
+Un control llamado sobre un reproductor que sigue al reloj se aplica de inmediato y lo deshace el siguiente tick que no
+esté de acuerdo, así que manda los controles del usuario al reloj con tus propios paquetes y deja que la instantánea
+traiga el resultado. El avance por cuadros se rechaza mientras sigue al reloj, y el volumen, el silenciado, el escalado
+y el audio espacial siempre se quedan locales.
+
+El reloj mantiene su posición (cero después de `start()`) hasta que `syncDuration(ms)` o `live(true)` le dicen sobre qué
+línea de tiempo corre. Reporta la duración una vez desde un cliente que abrió la fuente (el primer valor positivo gana
+por toda la vida del reloj y los valores distintos posteriores se ignoran), y restaura una posición guardada con
+`syncTime(ms)` después de arrancar el reloj, porque `start()` reinicia desde cero. `canSeek()` es falso y `seek(...)`
+devuelve `false` hasta conocer una duración, y siempre en una sesión en vivo. `release()` congela la posición y deja el
+reloj en `STOPPED` con una revisión nueva, así que guarda y envía esa última instantánea antes de soltarlo, o los
+reproductores seguirán extrapolando la anterior. Libera cada reproductor cuando termine su sesión del host.
+
+### Formato de la instantánea
+
+`MediaPlayer.PlayerState` es un record fijo de 27 bytes en big-endian (versión, revisión, estado, tiempo, duración,
+velocidad, banderas). `PlayerState.read(ByteBuffer)` consume sólo esos bytes y deja los datos posteriores para tu
+transporte; el orden de bytes del propio búfer no importa, y un payload rechazado deja la posición intacta. Revisa en tu
+transporte quién envió una instantánea: la biblioteca nunca identifica a los participantes.
+
+# 4. SUBIR Y DESCARGAR ARCHIVOS
+
+> [!WARNING]
+> El servidor habla HTTP plano: ponlo detrás de tu propio proxy HTTPS cuando quede expuesto a internet. Se niega a
+> escuchar más allá de `127.0.0.1` con el token predeterminado, y cambiar el token en cada actualización del servidor
+> evita que extraños suban archivos.
+
+> [!NOTE]
+> Configurable: `network.server`, `serverBindAddress`, `serverPort`, `remoteUrl`, `token`, `maxServerRequests`,
+> `serverTimeout`, `maxUploadSize` y `maxStorageSize`. Mira sus comentarios en `config/watermedia.toml`.
+
+El servidor de archivos opcional guarda los archivos que suben tus jugadores y los comparte con todos mediante enlaces
+`water://remote/<id>`. Para usarlo:
+
+1. Actívalo con `network.server`: `DEDICATED` lo corre en servidores dedicados, `ALWAYS` también en los clientes.
+2. Abre su puerto hacia el exterior: el servidor no lo hace por sí solo.
+3. Apunta `network.remoteUrl` a la dirección pública y el puerto del servidor, en el servidor y en cada cliente.
+4. Dale al servidor y a cada cliente el mismo `network.token` personalizado.
+
+Los archivos subidos quedan en `watermedia/files` dentro del directorio de trabajo del servidor; bórralos ahí para
+liberar espacio.
+
+## 4.1 SUBIDAS
+
+```java
+NetworkAPI.UploadStatus status = NetworkAPI.upload(new File("clip.mp4"));
+// LATER, FROM A TICK OR A UI TIMER
+if (status.completed()) {
+    URI link = status.uri(); // water://remote/<id>, READY FOR PlayerAPI.mrl
+} else if (status.failed()) {
+    String reason = status.error();
+}
+```
+
+`NetworkAPI.upload` sube en segundo plano y devuelve un `UploadStatus` por archivo: `percentage()` y `displaySpeed()`
+siguen la transferencia, `cancel()` la detiene y `error()` dice por qué falló una.
+
+## 4.2 DESCARGAS
+
+> [!NOTE]
+> Configurable: `network.timeout`, `maxRedirects` y `maxTextBytes`. Mira sus comentarios en `config/watermedia.toml`.
+
+Reproduce los archivos remotos como cualquier otro enlace: `PlayerAPI.mrl("water://remote/<id>")`. Para trabajo HTTP
+simple, `NetRequest` (en `org.watermedia.api.util`) envía una solicitud con las mismas reglas de seguridad que la
+reproducción:
+
+```java
+try (NetRequest request = new NetRequest("https://example.com/pack.zip").httpsOnly().maxBytes(64L * 1024 * 1024)) {
+    request.send();
+    request.download(Path.of("pack.zip"), expectedSha256); // THE DIGEST IS MANDATORY
+}
+```
+
+- `download(path, sha256)` escribe un archivo nuevo, lo verifica y lo borra cuando algo falla.
+- Cada solicitud se envía una sola vez: configúrala, haz `send()` y lee su respuesta en un mismo hilo.
+- `text()` e `inputStream()` devuelven el cuerpo de un estado de error en lugar de lanzar una excepción, y `json(type)`
+  lo convierte cuando es JSON (null para cualquier otro tipo); revisa `statusCode()`.
+
+# 5. CÓDECS
+
+> [!WARNING]
+> Experimental: `decode`, `reader`, `sniff` y `encoder` pueden cambiar en cualquier actualización, así que no los uses
+> en tus mods todavía (mira [paquetes públicos e internos](#12-paquetes-públicos-e-internos)).
+
+> [!NOTE]
+> Configurable: `codecs.maxImageSourceSize`, `codecs.png.failOnCorruptedData`, `codecs.png.useBKGDChunk`,
+> `codecs.svg.maxSize` y `codecs.vp8.brokenTokens`. Mira sus comentarios en `config/watermedia.toml`.
+
+`CodecsAPI` entrega un decodificador (`ImageReader`) y un codificador (`Encoder`). Las imágenes, fijas o animadas, usan
+nuestros propios códecs en Java puro y no necesitan arranque ni _FFmpeg_; el video pasa por _FFmpeg_.
+
+## 5.1 DECODIFICADORES
+
+### Imágenes fijas
+
+PNG, JPEG, WebP, SVG y Netpbm.
+
+```java
+ImageData image = CodecsAPI.decode(bytes);                   // A byte[], A ByteBuffer OR AN InputStream
+ByteBuffer pixels = image.frames()[0];                       // TIGHTLY PACKED; JPEG AND WEBP COME ROTATED TO THEIR EXIF ORIENTATION
+PixelFormat format = image.format();                         // BGRA (GRAY FOR GRAYSCALE JPEGS)
+int width = image.width();
+int height = image.height();
+
+ImageData rgba = CodecsAPI.decode(bytes, PixelFormat.RGBA);  // ASK FOR BGRA, RGBA OR GRAY AND IT CONVERTS
+```
+
+### Imágenes animadas
+
+GIF, APNG y WebP animado. Un lector recorre los cuadros uno por uno en lugar de tenerlos todos en memoria.
+
+```java
+try (ImageReader reader = CodecsAPI.reader(buffer)) {        // DON'T CHANGE buffer UNTIL THE READER CLOSES
+    int frames = reader.frameCount();
+    boolean forever = reader.repeat() == ImageData.REPEAT_FOREVER;
+    reader.addFilter(new DownscaleFilter(0.5f));             // OPTIONAL: SHRINKS EVERY FRAME, NEVER ENLARGES
+
+    while (reader.hasNext()) {
+        ByteBuffer frame = reader.next();                    // REUSED ON THE NEXT CALL: COPY IT TO KEEP IT
+        long delayMs = reader.delay();                       // HOW LONG THIS FRAME STAYS ON SCREEN
+    }
+    boolean rewound = reader.reset();                        // BACK TO THE FIRST FRAME; false WHEN IT CAN'T
+    ImageData all = reader.readAll();                        // OR EVERY FRAME LEFT AT ONCE, AS COPIES
+}
+```
+
+### Cualquier imagen
+
+```java
+MediaType type = CodecsAPI.sniff(buffer);                    // IMAGE, VIDEO, AUDIO... FROM THE FIRST BYTES
+ImageMetadata info = reader.metadata();                      // ON AN OPEN READER: title(), authors()... AND value(CodecsAPI.METAKEY_EXIF)
+
+try {
+    ImageData image = CodecsAPI.decode(bytes);
+} catch (UnsupportedFormatException unsupported) {
+    // A VALID FILE USING A FEATURE THE DECODER LACKS: FALL BACK TO ANOTHER DECODER
+} catch (CodecException broken) {
+    // A BROKEN OR OVERSIZED FILE
+}
+```
+
+Algunos formatos que `sniff` reconoce como imágenes (BMP, TIFF, AVIF...) todavía no tienen decodificador. Para tus
+propios motores, `new BcReader(buffer)` lee los bloques comprimidos BC1, BC3 y BC7 de una textura DDS; los motores
+integrados todavía no los dibujan.
+
+### Video
+
+El video y el audio se decodifican dentro de los reproductores: crea uno con `PlayerAPI.player` (mira
+[reproducción multimedia](#3-reproducción-multimedia)).
+
+## 5.2 CODIFICADORES
+
+```java
+Set<VideoCodec> videoCodecs = Container.MP4.video();         // WHAT EACH CONTAINER ACCEPTS; A TRACK THAT
+Set<AudioCodec> audioCodecs = Container.MP4.audio();         // DOESN'T FIT IS REFUSED BEFORE THE FILE IS TOUCHED
+```
+
+Cada codificador recibe un cuadro por llamada, en el formato de `Encoder.Video`, con timestamps en microsegundos que
+siempre van en aumento; cada cuadro dura hasta el siguiente. Alimenta cada codificador desde un solo hilo.
+
+### Imágenes fijas y animadas
+
+PNG (escrito como APNG cuando recibe más de un cuadro) y GIF, sin _FFmpeg_. Aceptan cuadros RGBA, BGRA, RGB o GRAY.
+
+```java
+// STATIC: ONE FRAME AND NO AUDIO TRACK
+Encoder.Video png = new Encoder.Video(VideoCodec.PNG, 512, 512, PixelFormat.RGBA, 1);
+try (Encoder encoder = CodecsAPI.encoder(Container.PNG, Path.of("logo.png"), png, null)) {
+    encoder.video(pixels, 0);
+}
+
+// ANIMATED: MORE FRAMES; THE FULL CONSTRUCTOR ADDS QUALITY (0 TO 100, 50 BY DEFAULT) AND PLAYS (0 LOOPS FOREVER)
+Encoder.Video gif = new Encoder.Video(VideoCodec.GIF, 320, 240, PixelFormat.BGRA, 30, 80, 0);
+try (Encoder encoder = CodecsAPI.encoder(Container.GIF, Path.of("clip.gif"), gif, null)) {
+    for (int i = 0; i < frames.length; i++) encoder.video(frames[i], i * 33_333L);
+}
+```
+
+### Archivos de video
+
+MP4, MOV, MKV y WebM con _FFmpeg_, más Ogg sólo para audio. Aceptan cualquier `PixelFormat` sin comprimir.
+
+```java
+Encoder.Video video = new Encoder.Video(VideoCodec.H264, 1280, 720, PixelFormat.BGRA, 60); // THE FULL CONSTRUCTOR SETS QUALITY, LIKE ON IMAGES
+Encoder.Audio audio = new Encoder.Audio(AudioCodec.AAC, 48_000, 2, SampleType.S16);
+try (Encoder encoder = CodecsAPI.encoder(Container.MP4, Path.of("clip.mp4"), video, audio)) { // IOException WITHOUT FFMPEG
+    encoder.video(frame, ptsUs);                             // EXACTLY video.frameBytes() BYTES
+    encoder.audio(pcm);                                      // INTERLEAVED SAMPLES FROM TIME ZERO: PAD A LATE START WITH SILENCE
+}                                                            // close() FINISHES THE FILE, WRITTEN AS <file>.part UNTIL THEN
+```
