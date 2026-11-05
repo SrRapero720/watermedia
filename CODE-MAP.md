@@ -70,7 +70,11 @@ Where to look (task → section → entry point):
   - Docs prose wraps at 120 columns (CJK characters count as two) so it reads in an editor: paragraphs, list items
     (continuation indented to the item text) and quotes (continuation keeps `> `). Headings, table rows and code
     blocks stay one line each; links and code spans never split. Chinese breaks at a space, or after full-width
-    punctuation (，。；：、) only when a line has no space to break at. Owner-wrapped lines keep their breaks.
+    punctuation (，。；：、) only when a line has no space to break at. `check-translations.ps1` warns about longer
+    lines; `scripts/ai/wrap-docs.ps1 -Out <scratch> [-Wiki]` reflows every paragraph holding one into the scratch
+    folder (copy the results with Write), and leaves paragraphs that already fit alone. ⚠ The owner's hand-wrapped
+    paragraph under `0.2 CONFIGURATION` in `DOCS-EN-US.md` (121 and 124 columns) stays as written (owner 2026-11-05):
+    its warning is expected, and a wrap-docs reflow of it is never copied.
   - The standalone app (`bootstrap/app`) is a debugging utility, not API; its UI draws only through `Canvas`.
   - Every logger comes from `WaterMedia.logger(id)` (the core uses the shared `WaterMedia.LOGGER`, Binaries its own
     `WaterMedia.logger("watermedia_binaries")`), so every message is redacted by `DataTool.redact`.
@@ -165,7 +169,7 @@ The generic version of these rules lives in AGENTS.md → "Code pattern"; this i
 | `modloaders/` | Compile-only stubs of Forge/NeoForge/Fabric loader classes (bodies throw "Stub!"), never shipped |
 | `gradle/common.gradle` | Shared Java/JUnit setup, loader range math, `processResources` expansion, jar manifest, `publishMods` validation |
 | `docs/` | `DOCS-EN-US.md` (API guide) and its five translations `DOCS-<LANG>.md` (see §18), `BLUEPRINTS.md` (the guide's outline), `animated-picture-stream-spec.md` (APS example spec) |
-| `scripts/ai/` | Agent check scripts (PowerShell 7, exit code 1 on failure): `check-translations.ps1` (every `DOCS-<LANG>.md` against `DOCS-EN-US.md`), `check-wiki.ps1` (the `/documentation/` wiki clone against the docs), see §18 |
+| `scripts/ai/` | Agent check scripts (PowerShell 7, exit code 1 on failure): `check-translations.ps1` (every `DOCS-<LANG>.md` against `DOCS-EN-US.md`), `check-wiki.ps1` (the `/documentation/` wiki clone against the docs), `wrap-docs.ps1` (reflows docs prose at 120 columns into a scratch folder, `-Wiki` gives the pages the same breaks), see §0 and §18 |
 | `config/` | Gitignored runtime files of the app (`watermedia.toml`, `waterconfig.toml`, `app.properties`); the repo copy of `watermedia.toml` is stale (old key names), the Java spec is the authority |
 | `run/` | Working directory of the IntelliJ run configuration `WaterMedia App` (`run/config`, `run/logs` gitignored) |
 | Root files | `CODE-MAP.md`, `CHANGELOG.md`, `TODO.md`, `PENDING.md` (gitignored), `WATER.md` (`water://` spec), `README.md`, `LICENSE.md` (DPS NC v1.0.1), `jitpack.yml` (JDK 25, custom `install`) |
