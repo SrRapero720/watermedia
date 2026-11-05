@@ -1,5 +1,10 @@
 import groovy.json.JsonOutput
 
+import java.net.http.HttpClient
+import java.net.http.HttpRequest
+import java.net.http.HttpResponse
+import java.time.Duration
+
 // SHARED BY WATERMEDIA AND BINARIES; EACH BUILD APPLIES IT LAST, AFTER DECLARING ITS OWN PLATFORMS AND RESOURCE VALUES.
 
 // ==== JAVA ====
@@ -118,8 +123,10 @@ if (!(publishVersion ==~ (releaseType == 'RELEASE' ? /\d+(\.\d+){2}/ : /\d+(\.\d
 def changelogText = file('CHANGELOG.md').readLines('UTF-8').takeWhile { !it.isEmpty() }.join('\n')
 def javaTargets = javaReleases.collect { JavaVersion.toVersion(it) }
 def loaders = list('modloaders')
+def githubRepository = github.toString()
 
-// EACH BUILD REGISTERS ITS PLATFORMS BEFORE APPLYING SHARED OPTIONS.
+// EACH BUILD REGISTERS ITS PLATFORMS BEFORE APPLYING SHARED OPTIONS. THE RELEASE WORKFLOW RUNS EACH PLATFORM AS ITS OWN
+// JOB OVER ONE BUILD: publishGithub, THEN publishCurseforge AND publishModrinth, THEN THE DESCRIPTION SYNC OF EACH STORE
 publishMods {
     changelog = changelogText
     type = ['ALPHA': ALPHA, 'BETA': BETA, 'RELEASE': STABLE][releaseType]
@@ -137,6 +144,48 @@ publishMods {
         accessToken = providers.environmentVariable('MODRINTH_TOKEN')
         projectId = modrinthid
         minecraftVersions.addAll(mcVersions)
-        projectDescription = providers.fileContents(layout.projectDirectory.file('README.md')).asText
+    }
+    // THE RELEASE WORKFLOW CHECKS THAT THE PUSHED TAG IS THE VERSION
+    github {
+        accessToken = providers.environmentVariable('GITHUB_TOKEN')
+        repository = githubRepository
+        commitish = providers.environmentVariable('GITHUB_SHA')
+        tagName = publishVersion
+    }
+}
+
+// ==== STORE DESCRIPTIONS ====
+// README.md IS THE STORE PAGE. MODRINTH TAKES IT THROUGH ITS API; CURSEFORGE HAS NO PUBLIC ONE, SO IT GOES THROUGH THE
+// AUTHORS SITE EDITOR'S OWN CALL, SIGNED IN WITH THE CobaltSession COOKIE, WHERE DESCRIPTION TYPE 5 IS MARKDOWN
+def readme = providers.fileContents(layout.projectDirectory.file('README.md')).asText
+def userAgent = "$githubRepository/$publishVersion"
+[
+        [store: 'Modrinth', method: 'PATCH', uri: "https://api.modrinth.com/v2/project/$modrinthid",
+         secret: 'MODRINTH_TOKEN', header: 'Authorization', prefix: '', fields: { String text -> [body: text] }],
+        [store: 'Curseforge', method: 'PUT', uri: "https://authors.curseforge.com/_api/projects/description/$curseforgeid",
+         secret: 'CURSEFORGE_SESSION', header: 'Cookie', prefix: 'CobaltSession=',
+         fields: { String text -> [description: text, descriptionType: 5] }]
+].each { Map page ->
+    def secret = providers.environmentVariable(page.secret)
+    tasks.register("sync${page.store}Description") {
+        group = 'publishing'
+        description = "Replaces the $page.store project description with README.md"
+        doLast {
+            if (!secret.present) throw new GradleException("$page.secret is not set")
+            def body = JsonOutput.toJson(page.fields.call(readme.get().replace('\r\n', '\n')))
+            def request = HttpRequest.newBuilder(URI.create(page.uri))
+                    .header(page.header, page.prefix + secret.get())
+                    .header('Content-Type', 'application/json')
+                    .header('User-Agent', userAgent)
+                    .timeout(Duration.ofMinutes(1))
+                    .method(page.method, HttpRequest.BodyPublishers.ofString(body))
+                    .build()
+            def response = HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofString())
+            int status = response.statusCode()
+            // AN EXPIRED SESSION OR A TOKEN WITHOUT WRITE ACCESS ANSWERS 401 OR 403
+            def reason = status in [401, 403] ? "; renew $page.secret" : ''
+            if (status >= 300) throw new GradleException("$page.store refused the description with $status$reason: ${response.body().take(500)}")
+            logger.lifecycle("$page.store description replaced with README.md")
+        }
     }
 }

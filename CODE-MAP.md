@@ -167,7 +167,7 @@ The generic version of these rules lives in AGENTS.md → "Code pattern"; this i
 | `src/test/java/org/watermedia/` | Tests mirroring the main packages, child-JVM probes (`*Probe.java` + `*ProcessTest`), `test/support` helpers; `src/test/resources` fixtures (`pentest/` hostile corpus); `src/test/tools/GeneratePngReference.java` |
 | `binaries/` | Included build of "WaterMedia: Binaries": `src/main/java/org/watermedia/binaries` (module + provisioning), `src/main/resources/libs/ffmpeg-*.zip`, `libs/ffmpeg-<ver>.jar`, `tools/` (rebuild and verification scripts), own `gradle.properties`, `CHANGELOG.md`, `.github/workflows` |
 | `modloaders/` | Compile-only stubs of Forge/NeoForge/Fabric loader classes (bodies throw "Stub!"), never shipped |
-| `gradle/common.gradle` | Shared Java/JUnit setup, loader range math, `processResources` expansion, jar manifest, `publishMods` validation |
+| `gradle/common.gradle` | Shared Java/JUnit setup, loader range math, `processResources` expansion, jar manifest, `publishMods` validation, store description sync |
 | `docs/` | `DOCS-EN-US.md` (API guide) and its five translations `DOCS-<LANG>.md` (see §18), `BLUEPRINTS.md` (the guide's outline), `animated-picture-stream-spec.md` (APS example spec) |
 | `scripts/ai/` | Agent check scripts (PowerShell 7, exit code 1 on failure): `check-translations.ps1` (every `DOCS-<LANG>.md` against `DOCS-EN-US.md`), `check-wiki.ps1` (the `/documentation/` wiki clone against the docs), `wrap-docs.ps1` (reflows docs prose at 120 columns into a scratch folder, `-Wiki` gives the pages the same breaks), see §0 and §18 |
 | `config/` | Gitignored runtime files of the app (`watermedia.toml`, `waterconfig.toml`, `app.properties`); the repo copy of `watermedia.toml` is stale (old key names), the Java spec is the authority |
@@ -223,12 +223,17 @@ Package map (`src/main/java/org/watermedia`):
   `neorange=[21.1.0,21.2),...`, `javarange=[17,26)`, `minecraftrange=[1.18.2],[1.19.2],...` (exact),
   `binariesrange=[3.0.0],[3.0.1,3.1)`. The Binaries build computes `watermediarange` the same way.
 - `publishMods`: CurseForge (`curseforgeid`, `CURSEFORGE_TOKEN`, Minecraft + Java versions, client and server required,
-  `requires('watermedia-binaries')`) and Modrinth (`modrinthid`, `MODRINTH_TOKEN`, README as description); type
-  `ALPHA`/`BETA`/`STABLE` from `versiontype`; validation: `RELEASE` needs `x.y.z`, pre-releases `x.y.z.w`.
-  Modrinth's `projectDescription` (`gradle/common.gradle`) PATCHes the project body with `README.md` on every
-  `publishModrinth`, so the tag's README is the description; Binaries does the same with `binaries/README.md`.
-  ⚠ CurseForge has no description API (upload API only, mod-publish-plugin has no option): its description is
-  pasted by hand in Markdown mode.
+  `requires('watermedia-binaries')`), Modrinth (`modrinthid`, `MODRINTH_TOKEN`) and GitHub (`publishGithub`: release of
+  tag `version` in the `github` repository, `GITHUB_TOKEN`, `GITHUB_SHA` as commitish, the jar plus the sources jar,
+  pre-release unless `RELEASE`); type `ALPHA`/`BETA`/`STABLE` from `versiontype`; validation: `RELEASE` needs `x.y.z`,
+  pre-releases `x.y.z.w`.
+- Store descriptions (`gradle/common.gradle`, group `publishing`): `syncModrinthDescription` PATCHes
+  `/v2/project/<modrinthid>` with `{body}`; `syncCurseforgeDescription` PUTs `{description, descriptionType: 5}` (5 is
+  Markdown, 1 HTML) to `authors.curseforge.com/_api/projects/description/<curseforgeid>` with
+  `Cookie: CobaltSession=<CURSEFORGE_SESSION>`. Both send `README.md` (CRLF to LF) and fail on any answer from 300 up;
+  401/403 names the secret to renew. Binaries runs the same tasks over `binaries/README.md`.
+  ⚠ CurseForge has no public description API: that call is the authors site editor's own (unofficial, may change),
+  the upload token gets 401 there, and the session cookie expires and opens the whole account.
 - `maven-publish` publication `watermedia`: only `jar` + `sourcesJar`, no POM dependencies and no Gradle module
   metadata (⚠ `components.java` would leak `:modloaders` stubs and host libs to mods). JitPack serves it (see CI).
 - `gradle.properties` groups: runtime (`org.gradle.*`), identity (`id`, `libname`, `group`, `version`, `versiontype`,
@@ -267,9 +272,17 @@ Package map (`src/main/java/org/watermedia`):
   after `SetupJava.ps1` and the Linux media runtime packages); job `native` matrix (linux x64/arm64, windows, macOS
   x64/arm64, plus a Java 17 "compatibility" leg) running `gradle test -Prequire_natives=true` with explicit `--tests`
   filters (FF players, decoders, encoders; the compat leg: bootstrap, network, AL/AWT/SFX/spatial, NetRequest).
-- `build-release.yml` (tags): build, then `publishCurseforge` / `publishModrinth`.
+- `build-release.yml` (tags), one job per step over a single build: `build` (fails unless the tag is `version`,
+  `gradle build`, keeps `build/libs` as artifact `libs`) → `release` (`publishGithub`) → `curseforge` and `modrinth`
+  (`publish<Store>` over the artifact, `-x jar -x sourcesJar`) → `<store>-description` after its own store's upload.
+  A store that fails never holds the other back, and re-running a red description job never uploads again.
+  `workflow_dispatch` (input `store`: `all`, `curseforge`, `modrinth`) skips the build and uploads and only syncs the
+  descriptions from the README of the selected ref. Jobs share `.github/actions/setup-build` (Gradle version,
+  `SetupJava.ps1`, setup-gradle). Secrets: `CURSEFORGE_TOKEN`, `MODRINTH_TOKEN` (needs "Write projects"),
+  `CURSEFORGE_SESSION`.
 - Binaries CI (`binaries/.github/workflows/building-*.yml`, push/PR on `master`, `3.0.x` and tags): checks out the
   core `SrRapero720/watermedia@master` and the Binaries revision into its `binaries/` folder, then builds Binaries as root.
+  `building-release.yml` mirrors the core release jobs (`-x shadowJar`, its own `setup-build` under `watermedia/binaries`).
 - JitPack (`jitpack.yml` in each repository, JDK 25): ⚠ a custom `install` runs `publishToMavenLocal`, because the
   default command passes `-Pversion=<branch>-<hash>-1` and the `versiontype` check rejects it; JitPack serves the
   `org.watermedia` artifacts as `com.github.SrRapero720:<repository>:<ref>`. Binaries' `install` clones the core master

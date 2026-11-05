@@ -1,0 +1,21 @@
+name: Set up the build
+description: Sets up the pinned Microsoft JDK and the Gradle version of gradle.properties
+
+runs:
+  using: composite
+  steps:
+    - name: Read build versions
+      id: versions
+      shell: pwsh
+      run: |
+        $gradleVersion = ((Get-Content gradle.properties | Select-String '^gradle_version=').Line -split '=', 2)[1]
+        Add-Content $env:GITHUB_OUTPUT "gradle=$gradleVersion"
+
+    - name: Set up patched Java
+      shell: pwsh
+      run: ./binaries/tools/SetupJava.ps1 -Platform linux-x86_64 -ProjectRoot .
+
+    - name: Set up Gradle
+      uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb
+      with:
+        gradle-version: ${{ steps.versions.outputs.gradle }}
