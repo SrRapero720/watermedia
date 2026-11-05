@@ -36,7 +36,7 @@ public final class FrameQueue {
     }
 
     // ==========================================================================
-    // PUBLIC API: WRITER SIDE (DECODE THREAD)
+    // WRITER SIDE (DECODE THREAD)
     // ==========================================================================
     /**
      * Returns the next writable slot, blocking while the queue is full (intentional backpressure), or null when the
@@ -70,7 +70,7 @@ public final class FrameQueue {
     }
 
     // ==========================================================================
-    // PUBLIC API: READER SIDE (RENDER OR CALLER THREAD)
+    // READER SIDE (RENDER OR CALLER THREAD)
     // ==========================================================================
     /** Returns the oldest frame without consuming it, or null at once when the queue is empty or aborted. */
     public Slot peek() {
@@ -99,7 +99,7 @@ public final class FrameQueue {
     }
 
     // ==========================================================================
-    // PUBLIC API: CONTROL
+    // CONTROL
     // ==========================================================================
     /** Frames available for reading. */
     public int remaining() {

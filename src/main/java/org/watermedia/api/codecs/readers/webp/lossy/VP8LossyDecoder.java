@@ -26,9 +26,6 @@ public final class VP8LossyDecoder {
 
     private VP8LossyDecoder() {}
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
     /** Converts an opaque VP8 key frame into a new direct BGRA buffer; {@code warned} latches the repair notice. */
     public static ByteBuffer decodeToBgra(final ByteBuffer data, final int expW, final int expH, final boolean[] warned) throws CodecException {
         return DataTool.bgraToBuffer(decode(data, expW, expH, warned));

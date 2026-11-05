@@ -4,9 +4,6 @@ package org.watermedia.api.codecs.readers.webp.lossless;
 final class ColorTransform {
     private ColorTransform() {}
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
     // RESTORES RED AND BLUE IN AN ARGB IMAGE FROM ONE TRANSFORM PIXEL PER BLOCK
     public static void inverse(final int[] pixels, final int width, final int height, final int[] transforms, final int blockBits) {
         if (width == 0 || height == 0) return;

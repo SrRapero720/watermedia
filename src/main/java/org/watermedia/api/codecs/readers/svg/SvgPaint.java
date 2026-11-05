@@ -8,9 +8,6 @@ import java.util.Arrays;
  * bounds (which {@code objectBoundingBox} gradients need).
  */
 sealed interface SvgPaint permits SvgPaint.Solid, SvgPaint.Linear {
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
     Sampler sampler(Affine ctm, double minX, double minY, double maxX, double maxY);
 
     static SvgPaint solid(final int argb) {

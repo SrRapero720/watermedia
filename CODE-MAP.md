@@ -112,14 +112,15 @@ The generic version of these rules lives in AGENTS.md → "Code pattern"; this i
     (under ~80 lines) is split by visibility in this order: header without a box (`IT`, constants, static state, fields,
     constructors), `PUBLIC API`, `INTERNAL API` (protected and package-private), `HELPERS` (private), `UTILITY`
     (static helpers), `NESTED TYPES` (always last). Long classes keep topic boxes (`DEMUX THREAD`, `MODE 1: STATIC
-    IMAGE`, `PUBLIC API: CONTROL`) ordered inside that sequence instead of a `HELPERS` box. No one-line
+    IMAGE`, `PUBLIC API: FFMPEG`) ordered inside that sequence instead of a `HELPERS` box. No one-line
     `// ==== X ====` banners and no plain `// UTILITY` comments remain. ⚠ No em or en dashes anywhere in the sources,
     comments and log messages included (0 left on 2026-11-01).
-    ⚠ `PUBLIC API` boxes belong only to public API (owner rule, 2026-11-05): the `public_packages` plus the `api.codecs`
-    subpackages, which stay experimental public API whose breaking changes skip the version schema. Internal code
-    (`tools`, `bootstrap/**`, `api.platform.web`, Binaries) and tests drop the plain box, so public members follow the
-    header directly; topic boxes keep only the topic (`PIXELS`, `NATIVE TLS`, `MODAL INPUT`), and a private section
-    repeating a public topic becomes `HELPERS: X` (`OpenGLRenderBackend`, `VulkanRenderBackend`).
+    ⚠ `PUBLIC API` boxes belong only to the `public_packages` (owner rule, 2026-11-05). `api.codecs` is experimental
+    public API (breaking changes skip the version schema) through `CodecsAPI`, `ImageReader` (the decoder) and `Encoder`
+    (the encoder); its subpackages are internal. Internal code (`tools`, `bootstrap/**`, `api.platform.web`,
+    `api.codecs.*`, Binaries) and tests drop the plain box, so public members follow the header directly; topic boxes
+    keep only the topic (`PIXELS`, `NATIVE TLS`, `WRITER SIDE (DECODE THREAD)`), and a private section repeating a
+    public topic becomes `HELPERS: X` (`OpenGLRenderBackend`, `VulkanRenderBackend`).
   - A marker is shared across a package only for decoder families: `VP8LosslessDecoder.IT` (used by
     `HuffmanDecoder`) and `VP8LossyDecoder.IT` (used by `VP8BoolDecoder`).
   - Modules are the classes themselves: `WaterMediaConfig`, `WaterMediaBinaries`, `NetworkAPI`, `CodecsAPI` and

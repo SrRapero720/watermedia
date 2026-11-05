@@ -205,7 +205,7 @@ public final class FFDecoder {
     }
 
     // ==========================================================================
-    // PUBLIC API: CONTROL
+    // CONTROL
     // ==========================================================================
     /** Spawns the demux thread, which opens the input, reports it to the host, starts the clock and the decoders. */
     public void start() {
@@ -255,7 +255,7 @@ public final class FFDecoder {
     }
 
     // ==========================================================================
-    // PUBLIC API: STATE
+    // STATE
     // ==========================================================================
     /** Returns the queue of decoded video frames, read by one consumer thread. */
     public FrameQueue videoFrames() { return this.videoFrameQueue; }

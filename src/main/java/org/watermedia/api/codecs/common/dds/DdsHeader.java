@@ -54,9 +54,6 @@ public final class DdsHeader {
 
     private DdsHeader() {}
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
     /**
      * Parses and validates the prefix of a BC-in-DDS file from {@code src.position()}, leaving the
      * position unchanged.

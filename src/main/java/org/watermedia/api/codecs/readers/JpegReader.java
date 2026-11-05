@@ -170,9 +170,6 @@ public final class JpegReader extends ImageReader {
         this.buildFrame();
     }
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
     @Override public int width() { return this.width; }
     @Override public int height() { return this.height; }
     @Override public ImageData.Scan scan() { return ImageData.Scan.EMPTY; }

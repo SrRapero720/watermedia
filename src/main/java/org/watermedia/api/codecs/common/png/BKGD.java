@@ -24,9 +24,6 @@ public record BKGD(int gray, int red, int green, int blue, int paletteIndex) imp
         this(-1, red, green, blue, -1);
     }
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
     /** Creates bKGD for an indexed-color image (color type 3). */
     public static BKGD forPalette(final int paletteIndex) {
         return new BKGD(-1, -1, -1, -1, paletteIndex);

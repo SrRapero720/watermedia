@@ -31,9 +31,6 @@ public record TRNS(int gray, int red, int green, int blue, byte[] alphaPerPalett
         this(-1, -1, -1, -1, alphaPerPalette);
     }
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
     /** Reads a complete tRNS chunk (length, type, data and CRC) for the color type from the buffer. */
     public static TRNS read(final ByteBuffer buffer, final int colorType) throws IOException {
         return convert(PngChunk.read(buffer, SIGNATURE), colorType);

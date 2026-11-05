@@ -59,9 +59,6 @@ public final class NetpbmReader extends ImageReader {
         this.rasterStart = this.data.position();
     }
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
     @Override public int width() { return this.header.width(); }
     @Override public int height() { return this.header.height(); }
     @Override public ImageData.Scan scan() { return ImageData.Scan.EMPTY; }

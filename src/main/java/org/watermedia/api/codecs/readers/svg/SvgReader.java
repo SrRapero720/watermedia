@@ -41,9 +41,6 @@ public final class SvgReader extends ImageReader {
         this.h = Math.max(1, (int) Math.round(ih * s));
     }
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
     @Override public int width() { return this.w; }
     @Override public int height() { return this.h; }
     @Override public ImageData.Scan scan() { return ImageData.Scan.EMPTY; }

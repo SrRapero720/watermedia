@@ -124,9 +124,6 @@ public final class GifReader extends ImageReader {
         this.directOutInts = this.directOut.asIntBuffer();
     }
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
     @Override public int width() { return this.lsd.width(); }
     @Override public int height() { return this.lsd.height(); }
     @Override public ImageData.Scan scan() { return this.scan; }

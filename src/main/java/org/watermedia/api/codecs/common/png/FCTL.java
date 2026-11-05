@@ -25,9 +25,6 @@ public record FCTL(int sequence, int width, int height, int xOffset, int yOffset
     public static final byte BLEND_OP_SOURCE = 0;       // REPLACE ALL COMPONENTS INCLUDING ALPHA
     public static final byte BLEND_OP_OVER = 1;         // ALPHA COMPOSITE (PORTER-DUFF "OVER")
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
     /** Reads a complete fcTL chunk (length, type, data and CRC) from the buffer. */
     public static FCTL read(final ByteBuffer buffer) throws IOException {
         return convert(PngChunk.read(buffer, SIGNATURE));

@@ -27,9 +27,6 @@ public final class AlphaDecoder {
 
     private AlphaDecoder() {}
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
     /** Decodes a WebP ALPH payload, inverse filter included, into one alpha byte per pixel; an unknown compression throws {@link UnsupportedFormatException}. */
     public static byte[] decode(final ByteBuffer data, final int w, final int h) throws CodecException {
         final ByteBuffer buffer = data.slice().order(ByteOrder.LITTLE_ENDIAN);

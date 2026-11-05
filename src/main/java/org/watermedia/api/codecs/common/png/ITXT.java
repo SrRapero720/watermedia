@@ -17,9 +17,6 @@ public record ITXT(String keyword, boolean compressed, int compressionMethod,
     // CAP DECOMPRESSED TEXT: A FEW COMPRESSED BYTES CAN INFLATE TO GIGABYTES (DECOMPRESSION BOMB)
     private static final int MAX_DECOMPRESSED_BYTES = 2 * 1_024 * 1_024;
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
     /** Reads a complete iTXt chunk (length, type, data and CRC) from the buffer. */
     public static ITXT read(final ByteBuffer buffer) throws IOException {
         return convert(PngChunk.read(buffer, SIGNATURE));

@@ -29,9 +29,6 @@ final class PacketQueue {
         this.maxBytes = maxBytes;
     }
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
     /**
      * Enqueues a clone of the packet, blocking while the byte limit is reached (backpressure to the demux thread); the
      * caller keeps its packet. Returns false when the queue was aborted or finished, the wait was interrupted or the clone failed.

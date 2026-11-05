@@ -225,9 +225,6 @@ public final class PngReader extends ImageReader {
         }
     }
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
     @Override public int width() { return this.ihdr.width(); }
     @Override public int height() { return this.ihdr.height(); }
     @Override public ImageData.Scan scan() { return this.scan; }

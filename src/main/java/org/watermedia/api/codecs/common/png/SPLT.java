@@ -15,9 +15,6 @@ import java.nio.charset.StandardCharsets;
 public record SPLT(String paletteName, int sampleDepth, SPLTEntry[] entries) implements IChunk {
     public static final int SIGNATURE = 0x73_50_4C_54; // "sPLT"
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
     /** Reads a complete sPLT chunk (length, type, data and CRC) from the buffer. */
     public static SPLT read(final ByteBuffer buffer) throws IOException {
         return convert(PngChunk.read(buffer, SIGNATURE));

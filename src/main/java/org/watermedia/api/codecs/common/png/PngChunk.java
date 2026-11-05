@@ -18,9 +18,6 @@ public record PngChunk(int length, int type, byte[] data, int crc) {
     // HARD SANITY CAP FOR A SINGLE CHUNK READ FROM A STREAM, WHERE THE REMAINING LENGTH IS UNKNOWN
     private static final int MAX_CHUNK_BYTES = 256 * 1_024 * 1_024;
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
     /** Reads a complete chunk from the buffer position, advancing past it. */
     public static PngChunk read(final ByteBuffer buffer) throws IOException {
         try {

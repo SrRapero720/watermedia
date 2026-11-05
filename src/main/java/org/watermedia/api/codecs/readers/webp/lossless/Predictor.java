@@ -11,9 +11,6 @@ final class Predictor {
 
     private Predictor() {}
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
     // ADDS THE BLOCK-SELECTED PREDICTORS TO THE RESIDUAL ARGB PIXELS IN ROW ORDER, IN PLACE
     public static void inverse(final int[] pixels, final int width, final int height, final int[] modes, final int blockBits) {
         if (width == 0 || height == 0) return;

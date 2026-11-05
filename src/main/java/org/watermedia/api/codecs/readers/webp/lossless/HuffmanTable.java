@@ -36,9 +36,6 @@ public final class HuffmanTable {
         this.singleSymbolValue = singleSymbolValue;
     }
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
     /** Builds a canonical LSB-first table from symbol lengths; rejects over-subscribed codes. */
     public static HuffmanTable build(final int[] codeLengths, final int alphabetSize) throws CodecException {
         // COUNT CODE LENGTHS AND FIND SINGLE SYMBOL IF PRESENT

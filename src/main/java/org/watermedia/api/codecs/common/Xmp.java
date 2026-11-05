@@ -15,9 +15,6 @@ public final class Xmp {
 
     private Xmp() {}
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
     /** Adds the title, description, copyright, label comment, creation time, software and authors found in the packet. */
     public static void read(final ImageMetadata metadata, final byte[] packet) {
         if (packet == null || packet.length == 0) return;

@@ -29,9 +29,6 @@ public final class VP8LosslessDecoder {
 
     private VP8LosslessDecoder() {}
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
     /** Decodes VP8L image data that starts past the 5-byte header and inverse transforms it into {@code width * height} packed ARGB pixels. */
     public static int[] decode(final ByteBuffer data, final int width, final int height) throws CodecException {
         LOGGER.trace(IT, "Starting decode: {}x{}", width, height);

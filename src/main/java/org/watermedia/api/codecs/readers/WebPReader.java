@@ -144,9 +144,6 @@ public final class WebPReader extends ImageReader {
                 this.scan.frameCount(), this.orientation);
     }
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
     @Override public int width() { return this.orientation >= 5 ? this.canvasHeight : this.canvasWidth; }
     @Override public int height() { return this.orientation >= 5 ? this.canvasWidth : this.canvasHeight; }
     @Override public ImageData.Scan scan() { return this.scan; }
