@@ -164,6 +164,7 @@ The generic version of these rules lives in AGENTS.md → "Code pattern"; this i
 | `modloaders/` | Compile-only stubs of Forge/NeoForge/Fabric loader classes (bodies throw "Stub!"), never shipped |
 | `gradle/common.gradle` | Shared Java/JUnit setup, loader range math, `processResources` expansion, jar manifest, `publishMods` validation |
 | `docs/` | `DOCS-EN-US.md` (API guide) and its five translations `DOCS-<LANG>.md` (see §18), `BLUEPRINTS.md` (the guide's outline), `animated-picture-stream-spec.md` (APS example spec) |
+| `scripts/ai/` | Agent check scripts (PowerShell 7, exit code 1 on failure): `check-translations.ps1` (every `DOCS-<LANG>.md` against `DOCS-EN-US.md`), `check-wiki.ps1` (the `/documentation/` wiki clone against the docs), see §18 |
 | `config/` | Gitignored runtime files of the app (`watermedia.toml`, `waterconfig.toml`, `app.properties`); the repo copy of `watermedia.toml` is stale (old key names), the Java spec is the authority |
 | `run/` | Working directory of the IntelliJ run configuration `WaterMedia App` (`run/config`, `run/logs` gitignored) |
 | Root files | `CODE-MAP.md`, `CHANGELOG.md`, `TODO.md`, `PENDING.md` (gitignored), `WATER.md` (`water://` spec), `README.md`, `LICENSE.md` (DPS NC v1.0.1), `jitpack.yml` (JDK 25, custom `install`) |
@@ -818,8 +819,8 @@ requested, and SVG yields RGBA when RGBA is requested (everything else is conver
 ### 8.5 Audio engines
 - `SFXEngine` (abstract sealed, permits `ALEngine`, `JSEngine`): `MIN/MAX_SAMPLE_RATE_HZ 4_000/384_000`; records
   `ChannelSupport(channels, Set<SampleType>)` and `SpatialAudio(x, y, z, referenceDistance, maxDistance, rolloff,
-  auxOnly, Environment)` with `Environment.process(source, audio)` / `reset(source)` (host sound thread, e.g. Sound
-  Physics adapter). Public: `supportedChannels()`, `supportedTypes()`, `channelSupport(int)`,
+  auxOnly, Environment)` with `Environment.process(source, audio)` / `reset(source)` (host sound thread, e.g. a
+  spatial sound mod adapter; owner 2026-11-05: docs name no specific mod). Public: `supportedChannels()`, `supportedTypes()`, `channelSupport(int)`,
   `closestChannelSupport(int)`, `source()`, `spatial()`, `spatialAudio([SpatialAudio])`, `sampleType()`, `channels()`,
   `sampleRate()`, `speed()`, `volume()`, `canSpeed()`, `released()`, `release()`. Driver API: `format(type, channels,
   rate)`, `pause()`, `play()`, `speed(float)`, `volume(float)`, `upload(ByteBuffer)` (direct, whole frames; false =
@@ -1227,8 +1228,9 @@ System properties: `watermedia.engine`, `watermedia.app` (child JVM flag), `wate
   2. Re-cut every changed language into its pages, keeping the doc's line breaks: same-page links stay `(#anchor)`,
      links into another page become `(<LANG>-<page>#anchor)`. A renamed heading updates its sidebar entry; a new `#` section adds a page in every
      language plus its sidebar entries.
-  3. Check that no link or anchor is broken and that each language's pages joined in order equal its `DOCS-<LANG>.md`
-     (link targets ignored).
+  3. Run `pwsh scripts/ai/check-translations.ps1` (byte-identical code blocks, heading levels, badges, links, no
+     dashes or NUL bytes) and `pwsh scripts/ai/check-wiki.ps1` (no broken link or anchor, sidebars and the language
+     picker present, each language's pages joined in order equal to its doc, no stray pages); both must pass.
   4. Commit the wiki in the git format and push it right after the docs commit.
 - `README.md`: landing page (projects, donations, basic usage, engines, Vulkan contract incl. Minecraft 26.x,
   available APIs, Binaries, license). `WATER.md`: `water://` spec. `docs/animated-picture-stream-spec.md`: APS example
