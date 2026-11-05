@@ -243,7 +243,7 @@ public abstract sealed class SFXEngine permits ALEngine, JSEngine {
                 throw new IllegalArgumentException("Reflected-only audio requires an environment processor");
         }
 
-        /** Host adapter for effects such as Sound Physics Remastered, called on the host's sound thread; it must not retain or delete the source nor switch context. */
+        /** Host adapter for environment effects such as reverb or occlusion from spatial sound mods, called on the host's sound thread; it must not retain or delete the source nor switch context. */
         public interface Environment {
             /** Applies the complete environment after the original world position and dry sound are restored. */
             void process(int source, SpatialAudio audio);

@@ -25,7 +25,7 @@ public record OpenALContext(long device, long context) implements AutoCloseable 
             return Assumptions.abort("OpenAL natives unavailable: " + unavailable);
         }
         Assumptions.assumeTrue(device != 0L, "no OpenAL output device");
-        // EFX HOSTS (SOUND PHYSICS) REQUEST AUXILIARY SENDS, SO THE CONTEXT ASKS FOR SOME WHEN THE DEVICE OFFERS EFX
+        // EFX HOSTS (SPATIAL SOUND MODS) REQUEST AUXILIARY SENDS, SO THE CONTEXT ASKS FOR SOME WHEN THE DEVICE OFFERS EFX
         final long context = capabilities.ALC_EXT_EFX
                 ? ALC10.alcCreateContext(device, new int[] { EXTEfx.ALC_MAX_AUXILIARY_SENDS, 4, 0 })
                 : ALC10.alcCreateContext(device, (IntBuffer) null);

@@ -682,7 +682,7 @@ public final class ALEngine extends SFXEngine {
                     AL10.alSourcef(this.source, AL10.AL_REFERENCE_DISTANCE, audio.referenceDistance());
                     AL10.alSourcef(this.source, AL10.AL_MAX_DISTANCE, audio.maxDistance());
                     AL10.alSourcef(this.source, AL10.AL_ROLLOFF_FACTOR, audio.rolloff());
-                    // SOUND PHYSICS MAY MOVE AL_POSITION TOWARD A REFLECTION; ALWAYS RESTORE THE REAL ORIGIN FIRST
+                    // AN ENVIRONMENT PROCESSOR MAY MOVE AL_POSITION TOWARD A REFLECTION; ALWAYS RESTORE THE REAL ORIGIN FIRST
                     if (audio.environment() != null) audio.environment().process(this.source, audio);
                     this.spatialAudio = audio;
                     return true;
