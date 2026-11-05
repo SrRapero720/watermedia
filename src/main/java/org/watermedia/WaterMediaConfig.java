@@ -289,10 +289,8 @@ public final class WaterMediaConfig {
 
     /** Internal bootstrap operation for the configuration facade. */
     public static final class Module extends WaterMediaModule {
-        public Module(final WaterMedia watermedia) { super(watermedia); }
-
         @Override
-        public void start() throws InterruptedException {
+        public void start(final String name, final Path tmp, final Path cwd, final boolean clientSide) throws InterruptedException {
             WaterConfig.init();
             final ConfigSpec existing = WaterConfig.spec(WaterMedia.ID, false);
             if (existing == null) {

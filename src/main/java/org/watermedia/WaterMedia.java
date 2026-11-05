@@ -44,38 +44,20 @@ public final class WaterMedia {
     private static final Path DEFAULT_TMP = Path.of(System.getProperty("java.io.tmpdir")).toAbsolutePath().resolve(ID);
     private static final Path DEFAULT_CWD = Path.of("").toAbsolutePath();
 
-    // THE INSTANCE OF THIS PROCESS: CREATED BY start(), NEVER REPLACED AND NEVER RELEASED
-    private static volatile WaterMedia instance;
+    // ENVIRONMENT: WRITTEN ONCE BY start() BEFORE THE VOLATILE started FLAG, WHICH PUBLISHES THEM;
+    // EVERY READER CHECKS THE FLAG FIRST, SO ANY THREAD THAT SEES IT SET SEES THEM TOO
+    private static String name;
+    private static Path tmp;
+    private static Path cwd;
+    private static boolean clientSide;
+    private static int steps;
+    private static volatile boolean started;
 
-    // ENVIRONMENT
-    public final String name;
-    public final Path tmp;
-    public final Path cwd;
-    public final boolean clientSide;
+    // LOAD PROGRESS: THE APP SPLASH POLLS IT FROM ITS RENDER THREAD WHILE start() HOLDS THE CLASS LOCK, SO ONLY VOLATILE READS FIT
+    private static volatile String loading;
+    private static volatile int done;
 
-    // LOAD STATE
-    // THE APP SPLASH POLLS THESE FROM ITS RENDER THREAD WHILE THE HOST THREAD WALKS THE MODULES
-    private final List<WaterMediaModule> modules;
-    private volatile WaterMediaModule loading;
-    private volatile int done;
-    private volatile boolean loaded;
-
-    private WaterMedia(final String name, final Path tmp, final Path cwd, final boolean clientSide) {
-        this.name = name;
-        this.tmp = (tmp == null ? DEFAULT_TMP : tmp).toAbsolutePath().normalize();
-        this.cwd = (cwd == null ? DEFAULT_CWD : cwd).toAbsolutePath().normalize();
-        this.clientSide = clientSide;
-
-        // THE MODULES IN LOAD ORDER: CONFIGURATION, NATIVES, THEN THE APIS THAT USE THEM; EACH ONE DECIDES BY ITSELF WHETHER THIS SIDE RUNS IT.
-        final List<WaterMediaModule> modules = new ArrayList<>(5);
-        modules.add(new WaterMediaConfig.Module(this));
-        // BINARIES IS OPTIONAL: ITS INSTALL IS CHECKED WITH THE CLASS LOADER'S getResource(), WHICH SEES OTHER JARS WITHOUT LINKING THE CLASS
-        if (WaterMedia.class.getClassLoader().getResource("org/watermedia/binaries/WaterMediaBinaries.class") != null) modules.add(new WaterMediaBinaries(this));
-        modules.add(new NetworkAPI.Module(this));
-        modules.add(new CodecsAPI.Module(this));
-        modules.add(new PlayerAPI.Module(this));
-        this.modules = List.copyOf(modules);
-    }
+    private WaterMedia() {}
 
     // ==========================================================================
     // PUBLIC API
@@ -91,58 +73,54 @@ public final class WaterMedia {
     public static synchronized void start(final String name, final Path tmp, final Path cwd, final boolean clientSide) {
         if (ThreadTool.workerThread()) throw new IllegalStateException("Start WaterMedia from a host thread, not a managed worker");
         if (name == null || name.isBlank()) throw new IllegalArgumentException("Environment name cannot be empty");
-        if (instance != null) throw new IllegalStateException("WaterMedia has already started");
+        if (started) throw new IllegalStateException("WaterMedia has already started");
+
+        // THE MODULES IN LOAD ORDER: CONFIGURATION, NATIVES, THEN THE APIS THAT USE THEM; EACH ONE DECIDES BY ITSELF WHETHER THIS SIDE RUNS IT.
+        final List<WaterMediaModule> modules = new ArrayList<>(5);
+        modules.add(new WaterMediaConfig.Module());
+        // BINARIES IS OPTIONAL: ITS INSTALL IS CHECKED WITH THE CLASS LOADER'S getResource(), WHICH SEES OTHER JARS WITHOUT LINKING THE CLASS
+        if (WaterMedia.class.getClassLoader().getResource("org/watermedia/binaries/WaterMediaBinaries.class") != null) modules.add(new WaterMediaBinaries());
+        modules.add(new NetworkAPI.Module());
+        modules.add(new CodecsAPI.Module());
+        modules.add(new PlayerAPI.Module());
 
         // PUBLISHED BEFORE THE FIRST MODULE STARTS, SO THE STATIC ACCESSORS ALREADY WORK FOR THE MODULES
-        final WaterMedia watermedia = new WaterMedia(name, tmp, cwd, clientSide);
-        instance = watermedia;
+        WaterMedia.name = name;
+        WaterMedia.tmp = (tmp == null ? DEFAULT_TMP : tmp).toAbsolutePath().normalize();
+        WaterMedia.cwd = (cwd == null ? DEFAULT_CWD : cwd).toAbsolutePath().normalize();
+        WaterMedia.clientSide = clientSide;
+        steps = modules.size();
+        started = true;
         LOGGER.info(IT, "Starting {} {} for {} ({})", NAME, VERSION, name, clientSide ? "client" : "server");
-        LOGGER.info(IT, "Working directory: {}", watermedia.cwd);
-        LOGGER.info(IT, "Temporary directory: {}", watermedia.tmp);
+        LOGGER.info(IT, "Working directory: {}", WaterMedia.cwd);
+        LOGGER.info(IT, "Temporary directory: {}", WaterMedia.tmp);
 
         try {
-            for (final WaterMediaModule module: watermedia.modules) {
-                watermedia.loading = module;
-                LOGGER.info(IT, "Loading {} ({}/{})", module.name(), watermedia.done + 1, watermedia.modules.size());
-                module.start();
-                watermedia.done++;
+            for (final WaterMediaModule module: modules) {
+                loading = module.name();
+                LOGGER.info(IT, "Loading {} ({}/{})", loading, done + 1, steps);
+                module.start(WaterMedia.name, WaterMedia.tmp, WaterMedia.cwd, WaterMedia.clientSide);
+                done++; // SINGLE WRITER: ONLY start() TOUCHES IT, UNDER THE CLASS LOCK
             }
-            watermedia.loaded = true;
         } catch (final Exception | LinkageError failure) {
-            final String module = watermedia.loading.name();
+            final String module = loading;
             if (failure instanceof InterruptedException) Thread.currentThread().interrupt();
             LOGGER.error(IT, "{} did not load: module {} failed", NAME, module, failure);
             throw new IllegalStateException("WaterMedia module " + module + " failed", failure);
         } finally {
-            watermedia.loading = null;
+            loading = null;
         }
-        LOGGER.info(IT, "{} loaded {} module(s)", NAME, watermedia.done);
+        LOGGER.info(IT, "{} loaded {} module(s)", NAME, done);
     }
 
     /** True once every module loaded; a part a module lives without (FFmpeg, the file server) does not change it. */
-    public static boolean loaded() {
-        final WaterMedia watermedia = instance;
-        return watermedia != null && watermedia.loaded;
-    }
-
+    public static boolean loaded() { return started && done == steps; }
     /** Returns the name of the module being loaded, or null outside a load; loading screens pair it with {@link #step()} and {@link #steps()}. */
-    public static String loading() {
-        final WaterMedia watermedia = instance;
-        final WaterMediaModule module = watermedia == null ? null : watermedia.loading;
-        return module == null ? null : module.name();
-    }
-
+    public static String loading() { return loading; }
     /** Returns how many modules finished loading so far. */
-    public static int step() {
-        final WaterMedia watermedia = instance;
-        return watermedia == null ? 0 : watermedia.done;
-    }
-
+    public static int step() { return done; }
     /** Returns how many modules this process loads; zero before {@link #start}. */
-    public static int steps() {
-        final WaterMedia watermedia = instance;
-        return watermedia == null ? 0 : watermedia.modules.size();
-    }
+    public static int steps() { return started ? steps : 0; }
 
     /** Prefixes a resource path with this library's identifier, as {@code watermedia:path}. */
     @Deprecated
@@ -187,25 +165,25 @@ public final class WaterMedia {
         };
     }
 
+    /** Returns the environment name given to {@link #start}; throws before it. */
+    public static String name() { requireStarted(); return name; }
     /** Returns the process's absolute working directory; throws before {@link #start}. */
-    public static Path cwd() { return instance().cwd; }
+    public static Path cwd() { requireStarted(); return cwd; }
     /** Returns the process's absolute temporary directory; throws before {@link #start}. */
-    public static Path tmp() { return instance().tmp; }
+    public static Path tmp() { requireStarted(); return tmp; }
     /** Whether WaterMedia runs on a client; throws before {@link #start}. */
-    public static boolean clientSide() { return instance().clientSide; }
+    public static boolean clientSide() { requireStarted(); return clientSide; }
 
     /** Rejects a client-only operation of {@code type} before {@link #start} or on a server; engines, players and client-only tools call it from their constructors. */
     public static void checkIsClientSideOrThrow(final Class<?> type) {
-        if (!instance().clientSide) throw new IllegalStateException("Called " + type.getSimpleName() + " in a server environment");
+        if (!clientSide()) throw new IllegalStateException("Called " + type.getSimpleName() + " in a server environment");
     }
 
     // ==========================================================================
     // UTILITY
     // ==========================================================================
-    // THE INSTANCE, OR THE ONE FAILURE EVERY ACCESSOR GIVES BEFORE start()
-    private static WaterMedia instance() {
-        final WaterMedia watermedia = instance;
-        if (watermedia == null) throw new IllegalStateException(NAME + " has not started");
-        return watermedia;
+    // THE ONE FAILURE EVERY ACCESSOR GIVES BEFORE start(); ITS VOLATILE READ MUST COME BEFORE THE ENVIRONMENT READ
+    private static void requireStarted() {
+        if (!started) throw new IllegalStateException(NAME + " has not started");
     }
 }

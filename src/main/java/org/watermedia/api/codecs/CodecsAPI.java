@@ -9,7 +9,6 @@ import org.bytedeco.ffmpeg.global.avutil;
 import org.bytedeco.ffmpeg.global.swresample;
 import org.bytedeco.ffmpeg.global.swscale;
 import org.bytedeco.javacpp.BytePointer;
-import org.watermedia.WaterMedia;
 import org.watermedia.WaterMediaConfig;
 import org.watermedia.api.codecs.encoders.FFEncoder;
 import org.watermedia.api.codecs.encoders.GifEncoder;
@@ -682,12 +681,10 @@ public final class CodecsAPI {
     // ==========================================================================
     /** Internal module: boots the FFmpeg natives that decode and encode audio and video; only clients run it. */
     public static final class Module extends WaterMediaModule {
-        public Module(final WaterMedia watermedia) { super(watermedia); }
-
         @Override
-        public void start() {
+        public void start(final String name, final Path tmp, final Path cwd, final boolean clientSide) {
             // THE BINARIES MODULE EXTRACTS NOTHING ON A DEDICATED SERVER, SO THERE IS NOTHING TO LOAD
-            if (!this.watermedia.clientSide) return;
+            if (!clientSide) return;
             // THE NATIVES COME FROM THE BINARIES MODULE; WITHOUT ITS JAR THERE IS NOTHING TO LOAD
             if (CodecsAPI.class.getClassLoader().getResource("org/watermedia/binaries/WaterMediaBinaries.class") == null) {
                 LOGGER.warn(IT, "FFmpeg is unavailable: WaterMedia Binaries is not installed");

@@ -260,27 +260,34 @@ Package map (`src/main/java/org/watermedia`):
 
 ## 5. Lifecycle, configuration and bootstrap
 
-### `WaterMedia` (`org/watermedia/WaterMedia.java`): process singleton and module walker
+### `WaterMedia` (`org/watermedia/WaterMedia.java`): static process state and module walker (no instances)
 - Constants `ID="watermedia"`, `NAME`, `VERSION=IOTool.jarVersion()` ("unknown" from class folders), `USER_AGENT`,
   `BROWSER_AGENT` (Chrome UA whose major grows every two weeks), `LOGGER=logger(ID)`.
 - `start(String name, Path tmp, Path cwd, boolean clientSide)` (static synchronized): throws `IllegalStateException`
   if called from an owned worker thread (`ThreadTool.workerThread()`) or twice, `IllegalArgumentException` on a blank
-  name. Defaults: `tmp` → `<java.io.tmpdir>/watermedia`, `cwd` → current directory. Publishes `instance` first, then
-  runs the hardcoded module list on the calling thread: `WaterMediaConfig.Module` → `WaterMediaBinaries` (only when
-  `org/watermedia/binaries/WaterMediaBinaries.class` is visible) → `NetworkAPI.Module` → `CodecsAPI.Module` →
-  `PlayerAPI.Module`. `Exception | LinkageError` → ERROR log + `IllegalStateException("WaterMedia module X failed")`.
-  ⚠ No stop/unload exists; a failed start cannot be retried in-process.
-- `loaded()`, `loading()` (module name or null), `step()`, `steps()` (4 or 5): volatile, safe from any thread.
-  `cwd()`, `tmp()`, `clientSide()` throw before start. `checkIsClientSideOrThrow(Class)` guards client-only ctors.
-  `toId(path)` → `watermedia:path`. `logger(name)` → redacting `ExtendedLoggerWrapper`.
+  name. Defaults: `tmp` → `<java.io.tmpdir>/watermedia`, `cwd` → current directory. Builds the hardcoded module list
+  `WaterMediaConfig.Module` → `WaterMediaBinaries` (only when `org/watermedia/binaries/WaterMediaBinaries.class` is
+  visible) → `NetworkAPI.Module` → `CodecsAPI.Module` → `PlayerAPI.Module`, writes the static environment (`name`,
+  `tmp`, `cwd`, `clientSide`, `steps`), sets the volatile `started` flag, then runs every `module.start(name, tmp,
+  cwd, clientSide)` on the calling thread. `Exception | LinkageError` → ERROR log + `IllegalStateException("WaterMedia
+  module X failed")`. ⚠ No stop/unload exists; a failed start cannot be retried in-process.
+- Memory model: the environment and `steps` are plain write-once statics published by the volatile `started` write;
+  every reader checks `started` first (`requireStarted()`, `steps()`, `loaded()`), ⚠ keep that order. `loading`
+  (module name) and `done` stay volatile because the app splash polls them while `start` holds the class lock.
+- `loaded()` (`started && done == steps`), `loading()` (module name or null), `step()`, `steps()` (4 or 5): safe from
+  any thread. `name()`, `cwd()`, `tmp()`, `clientSide()` throw before start. `checkIsClientSideOrThrow(Class)` guards
+  client-only ctors. `toId(path)` → `watermedia:path` (deprecated). `logger(name)` → redacting `ExtendedLoggerWrapper`.
 - Gates elsewhere: `PlayerAPI.mrl/preload`, the constructors of players with an MRL (`MediaPlayer.arm()`) and
   `NetworkAPI.upload` throw until `loaded()`; `ServerMediaPlayer` has no MRL and works before the load and on servers.
 
 ### `WaterMediaModule` (`bootstrap/WaterMediaModule.java`)
-- `protected WaterMediaModule(WaterMedia)`, field `watermedia` (read `clientSide`, `tmp`, `cwd`), `abstract void
-  start() throws Exception` (once, on the starting thread), `final String name()` (enclosing class name).
+- No constructor or fields: `abstract void start(String name, Path tmp, Path cwd, boolean clientSide) throws
+  Exception` (once, on the starting thread, with the normalized environment), `final String name()` (enclosing class
+  name).
 - Modules decide per side themselves; a part that can be missing (file server, FFmpeg, disk cache) logs and continues;
-  only escaping exceptions abort the load. ↪ new module: nested `Module`, add it to the `WaterMedia` constructor list.
+  only escaping exceptions abort the load. What a module writes in `start` is visible to any thread that saw
+  `WaterMedia.loaded()` true (the `done` volatile write follows it). ↪ new module: nested `Module`, add
+  `new X.Module()` to the list in `WaterMedia.start`.
 
 ### `WaterMediaConfig` (`org/watermedia/WaterMediaConfig.java`): WaterConfig TOML spec `watermedia`
 - Static tree `codecs`, `player`, `platforms`, `network` (instances of nested `@Spec(disableStatic=true)` classes);

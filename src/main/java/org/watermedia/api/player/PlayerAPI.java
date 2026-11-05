@@ -228,15 +228,13 @@ public final class PlayerAPI {
 
     /** Internal module: media resolution and the network cache; only clients run it. */
     public static final class Module extends WaterMediaModule {
-        public Module(final WaterMedia watermedia) { super(watermedia); }
-
         @Override
-        public void start() {
+        public void start(final String name, final Path tmp, final Path cwd, final boolean clientSide) {
             // A DEDICATED SERVER PLAYS NOTHING: THE RESOLVER AND THE CACHE STAY OFF
-            if (!this.watermedia.clientSide) return;
+            if (!clientSide) return;
             MRL.start();
             try {
-                NetworkCache.start(this.watermedia.tmp.resolve("cache"));
+                NetworkCache.start(tmp.resolve("cache"));
             } catch (final Exception failure) { // PLAYBACK WORKS WITHOUT THE DISK CACHE
                 LOGGER.error(IT, "The media cache did not start; playback continues without it", failure);
             }

@@ -15,6 +15,7 @@ import java.io.FileInputStream;
 import java.io.IOException;
 import java.net.*;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -225,14 +226,12 @@ public final class NetworkAPI {
 
     /** Internal module: the upload workers and, when configured, the local file server. */
     public static final class Module extends WaterMediaModule {
-        public Module(final WaterMedia watermedia) { super(watermedia); }
-
         @Override
-        public void start() {
+        public void start(final String name, final Path tmp, final Path cwd, final boolean clientSide) {
             uploads = Executors.newFixedThreadPool(UPLOAD_THREADS, ThreadTool.workerFactory("NetworkAPI-Upload", Thread.NORM_PRIORITY));
-            if (!serverEnabled(this.watermedia.clientSide, WaterMediaConfig.network.server)) return;
+            if (!serverEnabled(clientSide, WaterMediaConfig.network.server)) return;
             try {
-                NetworkServer.start(WaterMediaConfig.network.serverPort, this.watermedia.cwd);
+                NetworkServer.start(WaterMediaConfig.network.serverPort, cwd);
             } catch (final Exception failure) { // UPLOADS STILL WORK WITHOUT THE LOCAL SERVER
                 LOGGER.error(IT, "The local file server did not start; uploads still work without it", failure);
             }
