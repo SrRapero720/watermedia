@@ -4,7 +4,7 @@
 <a href="https://www.curseforge.com/minecraft/mc-mods/watermedia"><img src="https://cf.way2muchnoise.eu/watermedia.svg?badge_style=for_the_badge" alt="CurseForge downloads"></a>
 <a href="https://www.curseforge.com/minecraft/mc-mods/watermedia/files"><img src="https://img.shields.io/curseforge/v/869524?style=for-the-badge&label=CURSEFORGE&labelColor=2d2d2d&color=e04e14" alt="CurseForge"></a>
 <a href="https://modrinth.com/mod/watermedia"><img src="https://img.shields.io/modrinth/v/watermedia?style=for-the-badge&logo=modrinth&label=MODRINTH&color=1bd96a" alt="Modrinth"></a>
-<br>
+<br><br>
 <a href="https://jitpack.io/#SrRapero720/watermedia"><img src="https://img.shields.io/jitpack/version/com.github.SrRapero720/watermedia?style=for-the-badge&label=JITPACK&color=34495e" alt="JitPack"></a>
 <a href="https://discord.gg/VsVZPUWWYr"><img src="https://img.shields.io/discord/486853064284831744?style=for-the-badge&logo=discord&logoColor=white&label=DISCORD&color=7289DA" alt="Discord"></a>
 </p>
@@ -80,7 +80,7 @@ plays up to 1080p (8K with VIP) when you add your session cookie in the settings
   <tr><td>⏯️ Owleaf PlayBack</td><td>Owleaf_Studio</td><td><a href="https://mods.cf/1224054">CurseForge</a></td></tr>
 </table>
 
-<h3 style="color: #EB622B;"><strong>Special mentions</strong></h3>
+<h3 style="color: #EB622B;"><strong>🏅 Special mentions</strong></h3>
 
 - VideoPlayer (not maintained)
 
@@ -120,11 +120,106 @@ your friends with all the mods listed above.
 - **¿Can I use my own FFmpeg?**
   - *Yes, FFmpeg can be turned off or swapped for your own compatible build in the settings*
 - **¿Why are some videos blocked?**
-  - *Mature content is blocked by default; you can allow it in the settings*
+  - *Mature content is blocked by default, and the site whitelist or blacklist can leave a site out; see FOR USERS*
 - **¿Why does the game stop at startup with TLauncher?**
   - *TLauncher is not supported, and the game stops when it's detected*
 - **¿Where do I report bugs?**
   - *On [GitHub Issues](https://github.com/SrRapero720/watermedia/issues) or [Discord](https://discord.gg/VsVZPUWWYr)*
+
+<h1 style="color: #EB622B;"><strong>🙋 FOR USERS</strong></h1>
+
+WATERMeDIA keeps its settings in `config/watermedia.toml`, inside your game folder (or your server folder on a
+dedicated server). It's created on the first launch with a comment above every field. Edit it while the game is
+closed, and your changes apply the next time it starts. Each name below is a `[section]` plus a field:
+`player.cacheBudget` is `cacheBudget` under `[player]`.
+
+<h2 style="color: #EB622B;"><strong>📤 ENABLE THE FILE SERVER</strong></h2>
+
+The file server lets players upload their own videos, music and pictures to your Minecraft server and share them
+with everyone through `water://remote/` links, with no outside hosting. It needs WATERMeDIA on the server and a mod
+that offers uploads.
+
+1. On the server, set these fields in `config/watermedia.toml`, with your server's public IP or domain in
+   `remoteUrl`:
+   ```toml
+   [network]
+     server = "DEDICATED"
+     serverBindAddress = "0.0.0.0"
+     serverPort = 25572
+     remoteUrl = "http://play.example.com:25572/"
+     token = "a-long-secret-only-you-know"
+   ```
+2. Open that port (TCP) in your firewall or your host's panel; WATERMeDIA doesn't open it for you.
+3. Copy the same `remoteUrl` and `token` into the `config/watermedia.toml` of every player. Modpacks can ship it.
+
+- The server won't start for outside players while `token` keeps its default value. Change it on every server
+  update to keep strangers from uploading.
+- Each upload can weigh up to 8 MB (`maxUploadSize`, 0 means no limit) and all of them together up to 1024 MB
+  (`maxStorageSize`).
+- Uploaded files land in `watermedia/files` inside the server folder; delete them there to free space.
+- It speaks plain HTTP, so put it behind your own HTTPS proxy when it faces the internet.
+- `server = "ALWAYS"` also runs it from your own game, for worlds you host yourself.
+
+<h2 style="color: #EB622B;"><strong>🖥️ STANDALONE APP</strong></h2>
+
+The WATERMeDIA jar is also a desktop media player. With Java 17 or newer installed, double click it, or run
+`java -jar watermedia-<version>.jar` from a terminal.
+
+- **Play media** opens any link or file path, or searches by keyword. The sample tiles try links from every
+  supported platform, and **Television** opens live TV channels by region.
+- Keep _WATERMeDIA: Binaries_ in the same folder to play videos and music; without it, only pictures and animations
+  play.
+- The first launch downloads a few libraries, so it needs internet that time.
+- It draws with Vulkan and falls back to OpenGL when Vulkan fails. Write `engine=OPENGL` in `config/app.properties`
+  to always use OpenGL.
+- **Cleanup cache** empties the media cache, the same one your game uses.
+
+<h3 style="color: #EB622B;"><strong>🐞 BUG REPORTS AND LOGS</strong></h3>
+
+Something broke in your game? Open the app from your Minecraft `mods` folder and pick **Upload Logs** (`U`):
+
+1. It finds your `latest.log`, the newest crash report and the newest JVM crash file (`hs_err_pid`).
+2. It hides tokens, passwords and login data, then uploads the files to [mclo.gs](https://mclo.gs).
+3. It copies a ready report to your clipboard. Choose where to send it, WATERMeDIA or the mod you suspect
+   (FancyMenu, WaterFrames, WaterVision or LittleFrames, when installed), and paste it into the issue page that
+   opens.
+
+Files over 10 MB or 25,000 lines don't upload, so share those by hand. You can always send `logs/latest.log` and the
+`crash-reports` folder from your game folder on [GitHub Issues](https://github.com/SrRapero720/watermedia/issues) or
+[Discord](https://discord.gg/VsVZPUWWYr).
+
+<h2 style="color: #EB622B;"><strong>💾 CONFIGURE CACHE SIZE</strong></h2>
+
+Downloaded videos and pictures stay on disk, so they load faster next time and save bandwidth. They live in
+`watermedia/cache` inside your system's temporary folder (`%TEMP%` on Windows, `/tmp` on Linux), and deleting it
+while the game is closed is safe.
+
+- `player.cacheBudget`: disk space for the whole cache, in MB (8192 by default). Once it's full, the oldest files
+  leave first.
+- `codecs.ffmpeg.cacheMaxResponse`: the biggest video or music file it keeps, in MB (10 by default). Bigger files
+  stream every time.
+- `player.watertx.cache` and `codecs.ffmpeg.cache`: set them to `false` to stop caching pictures or videos.
+- `player.watertx.texturesBudget`: video memory for smooth animations, in MB (32 by default). Set it to 0 when your
+  GPU runs short on VRAM.
+
+<h2 style="color: #EB622B;"><strong>🚦 WHITELIST, BLACKLIST AND MATURE CONTENT</strong></h2>
+
+Choose which sites can play under `[platforms]`:
+
+```toml
+[platforms]
+  allowMatureContent = false
+  whitelist = ["youtube.com", "imgur.com"]
+  blacklist = ["example.com"]
+```
+
+- `whitelist`: when it lists any site, only links from those sites play. Empty, the default, lets every site play.
+- `blacklist`: links from these sites never play.
+- Both take hostnames only, like `website.com`: no `https://`, paths or `*`.
+- `website.com` covers the whole site, subdomains included (`some.website.com`, `another.website.com`), while
+  `some.website.com` covers only that subdomain and never `website.com` itself.
+- `allowMatureContent`: mature videos and streams stay blocked until you set it to `true`. It works where the
+  platform marks them, such as Kick, Twitch or Twitter (X), and PornHub needs it to play at all.
 
 <h1 style="color: #EB622B;"><strong>💻 FOR DEVELOPERS</strong></h1>
 
