@@ -1,3 +1,9 @@
+# 📦 UPDATE 3.0.1 (after-release hotfix)
+- 🛠️ Update developers documentation
+- 🛠️ Reworked bootstrap internals.
+- 🛠️ Renamed internal Screen class to BaseScreen to prevent confusions with Minecraft's Screen class
+- 🐛 Fixed JitPack builds aren't working properly.
+
 # 📦 RELEASE 3.0.0
 ### IMPORTANT: FULL REWRITE! MODS MADE FOR 2.x WON'T WORK UNTIL THEY RELEASE A COMPATIBILITY UPDATE
 _VLC_ is gone and no longer required: we now use _FFmpeg_ (included in the companion mod _WATERMeDIA: Binaries_) as the engine, plus our own Java decoders for pictures.
@@ -37,7 +43,7 @@ _VLC_ is gone and no longer required: we now use _FFmpeg_ (included in the compa
   - A newer query cancels the one in flight, typing is debounced, and `search(query, true)` skips the cache
   - `platforms.searchLimit` caps the results per platform, and each platform gets 5 seconds so a slow one never stalls the rest
   - `PlatformAPI.searchHistory()` keeps recent queries, newest first
-- ⚙️ Added `SFXEngine.SpatialAudio` for positional audio, with an adapter for _Sound Physics Remastered_ effects
+- ⚙️ Added `SFXEngine.SpatialAudio` for positional audio, with an adapter for reverb and occlusion from spatial sound mods
   - Spatial `ALEngine`s play through sinks: `addSink(Mix)` adds another positional source playing the `LEFT`, `RIGHT` or `MONO` mix of the same decode, in step with the rest; `MediaPlayer.sinks()` and `addSink` reach them from the player
 - ⚙️ `MediaPlayer.audioTracks()` lists every audio a player can play, `audioTrack(track)` switches to one while playing, and `audioLanguage("es-MX")` sets the language to prefer
 - ⚙️ Added `NetRequest` and `HttpHeaders` for web requests
@@ -67,7 +73,7 @@ _VLC_ is gone and no longer required: we now use _FFmpeg_ (included in the compa
   - Dubbed videos play their original language, or the one your mod prefers, and you can switch languages while watching (requires mod support)
 - ✨ Pick the quality, change the speed, seek precisely, loop, and lower the resolution of distant screens to save VRAM (requires mod support)
   - Seeking or pressing play on a finished video restarts it from that spot, and still pictures can get a display time
-- ✨ Positional audio that fades with distance, with _Sound Physics Remastered_ effects (requires mod support)
+- ✨ Positional audio that fades with distance, ready for reverb from spatial sound mods (requires mod support)
   - Stereo screens can play each side from its own edge, and extra speakers can play a screen's sound anywhere without loading it twice
 - ✨ Synchronized playback: everyone on a server watches the same moment, following one server clock (requires mod support)
 - ✨ WATERMeDIA now loads on dedicated servers, where _WATERMeDIA: Binaries_ is optional
