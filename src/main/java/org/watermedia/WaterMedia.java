@@ -145,6 +145,7 @@ public final class WaterMedia {
     }
 
     /** Prefixes a resource path with this library's identifier, as {@code watermedia:path}. */
+    @Deprecated
     public static String toId(final String path) { return ID + ":" + path; }
 
     /** Creates a project logger that redacts secrets from messages, parameters and traces before appenders see them. */
