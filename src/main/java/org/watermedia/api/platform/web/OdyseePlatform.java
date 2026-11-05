@@ -53,10 +53,6 @@ public final class OdyseePlatform implements Platform {
         this.liveApi = liveApi;
     }
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
-
     @Override
     public String name() { return NAME; }
 

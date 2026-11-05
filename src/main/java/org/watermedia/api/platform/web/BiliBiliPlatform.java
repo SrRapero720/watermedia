@@ -61,10 +61,6 @@ public final class BiliBiliPlatform implements Platform {
     private static final Object FINGERPRINT_LOCK = new Object();
     private static volatile String fingerprint;
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
-
     @Override
     public String name() { return NAME; }
 

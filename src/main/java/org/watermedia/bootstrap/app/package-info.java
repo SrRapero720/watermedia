@@ -1,7 +1,8 @@
 /**
- * This package is entirely made by Claude, this is a gimmick that was intended to be a debug utility but ended up being in the
- * most overdone test app.
+ * This package is entirely made by Claude. It's a gimmick that was meant to be a debug utility, but it ended up being
+ * the most overdone test app: a full player, settings, OpenGL and Vulkan hotswap and more.
  * <br>
- * Also helps me to retrieve logs way simple.
+ * It also makes retrieving logs way easier for me, since users can upload them to mclo.gs and report an issue on
+ * GitHub right from the app.
  */
 package org.watermedia.bootstrap.app;

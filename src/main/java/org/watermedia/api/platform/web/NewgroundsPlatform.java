@@ -98,10 +98,6 @@ public final class NewgroundsPlatform implements Platform {
     private final Object guardLock = new Object();
     private long clearedAt = System.nanoTime();
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
-
     @Override
     public String name() { return NAME; }
 

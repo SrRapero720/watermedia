@@ -135,10 +135,6 @@ public class OpenMultimediaScreen extends BaseScreen {
         this.navigator = navigator;
     }
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
-
     // THE SHELL KEEPS THE HOME SCREEN MOUNTED UNDER THIS ONE IN THE CENTER SLOT
     @Override
     public String under() {
@@ -192,7 +188,7 @@ public class OpenMultimediaScreen extends BaseScreen {
     }
 
     // ==========================================================================
-    // PUBLIC API: INPUT
+    // INPUT
     // ==========================================================================
 
     // THE TREE HANDLES POINTERS; ONLY THE SCREEN SHORTCUTS LIVE HERE

@@ -50,10 +50,6 @@ public final class TitleBar extends Element<TitleBar> {
         this.height = H;
     }
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
-
     /** Sets the window title text. */
     public TitleBar title(final String value) {
         this.title = value == null ? "" : value;

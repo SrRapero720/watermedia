@@ -17,9 +17,6 @@ public final class JSONTool {
 
     private JSONTool() {}
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
     /** Binds a JSON tree to {@code type}, or returns null for a null tree; a shape mismatch throws {@link JsonSyntaxException}. */
     public static <T> T parse(final JsonElement json, final Class<T> type) {
         return json == null ? null : GSON.fromJson(json, type);

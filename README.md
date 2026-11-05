@@ -68,15 +68,16 @@ plays up to 1080p (8K with VIP) when you add your session cookie in the settings
 
 <table width="100%" style="width: 100%">
   <tr><th>Mod</th><th>Author</th><th>Link</th></tr>
-  <tr><td>🖼️ WaterFrames</td><td>SrRapero720</td><td><a href="https://www.curseforge.com/minecraft/mc-mods/waterframes">CurseForge</a></td></tr>
-  <tr><td>📺 WaterVision</td><td>SrRapero720</td><td><a href="https://www.curseforge.com/minecraft/mc-mods/watervision">CurseForge</a></td></tr>
-  <tr><td>🧱 FancyMenu</td><td>Keksuccino</td><td><a href="https://www.curseforge.com/minecraft/mc-mods/fancymenu">CurseForge</a></td></tr>
-  <tr><td>📽️ Holographic Renderers</td><td>Mysticpasta1</td><td><a href="https://www.curseforge.com/minecraft/mc-mods/holographic-renderers">CurseForge</a></td></tr>
+  <tr><td>🖼️ WaterFrames</td><td>SrRapero720</td><td><a href="https://mods.cf/834607">CurseForge</a></td></tr>
+  <tr><td>📺 WaterVision</td><td>SrRapero720</td><td><a href="https://mods.cf/1167473">CurseForge</a></td></tr>
+  <tr><td>🧱 FancyMenu</td><td>Keksuccino</td><td><a href="https://mods.cf/367706">CurseForge</a></td></tr>
+  <tr><td>🖼️ LittlePictureFrames</td><td>CreativeMD</td><td><a href="https://mods.cf/435557">CurseForge</a></td></tr>
+  <tr><td>🏺 Vista</td><td>MehVahdJukaar</td><td><a href="https://mods.cf/1368607">CurseForge</a></td></tr>
+  <tr><td>⏪ WaterFrames: Backported Edition</td><td>Toshayo</td><td><a href="https://mods.cf/1178892">CurseForge</a></td></tr>
+  <tr><td>📽️ Holographic Renderers</td><td>Mysticpasta1</td><td><a href="https://mods.cf/532110">CurseForge</a></td></tr>
   <tr><td>📽️ BBS CML Edition</td><td>McHorse</td><td><a href="https://mods.cf/1392794">CurseForge</a></td></tr>
-  <tr><td>🖼️ LittlePictureFrames</td><td>CreativeMD</td><td><a href="https://www.curseforge.com/minecraft/mc-mods/littleframes">CurseForge</a></td></tr>
-  <tr><td>⏪ WaterFrames: Backported Edition</td><td>Toshayo</td><td><a href="https://www.curseforge.com/minecraft/mc-mods/waterframesbackported">CurseForge</a></td></tr>
   <tr><td>💻 Conditional Videos</td><td>MateoF024</td><td><a href="https://mods.cf/1521845">CurseForge</a></td></tr>
-  <tr><td>⏯️ Owleaf PlayBack</td><td>Owleaf_Studio</td><td><a href="https://www.curseforge.com/minecraft/mc-mods/owleaf-playback">CurseForge</a></td></tr>
+  <tr><td>⏯️ Owleaf PlayBack</td><td>Owleaf_Studio</td><td><a href="https://mods.cf/1224054">CurseForge</a></td></tr>
 </table>
 
 <h3 style="color: #EB622B;"><strong>Special mentions</strong></h3>

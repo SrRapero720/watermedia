@@ -25,9 +25,6 @@ import static org.bytedeco.ffmpeg.global.avutil.av_dict_set;
 public final class TLSLifecycleProbe {
     private TLSLifecycleProbe() {}
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
     public static void run(final Path root, final boolean empty) throws Exception {
         final TrustManagerFactory factory = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
         factory.init((KeyStore) null);

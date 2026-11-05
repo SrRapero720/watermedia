@@ -25,10 +25,6 @@ public final class Switch extends Element<Switch> {
     private float animFrom;
     private boolean drawn;
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
-
     public Switch on(final boolean value) {
         // ONLY A REAL TRANSITION ANIMATES; A PER-FRAME REBIND TO THE SAME VALUE (SETTINGS SYNC) NEVER DOES
         if (value != this.on) {

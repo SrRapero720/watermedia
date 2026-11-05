@@ -36,10 +36,6 @@ public final class DTubePlatform implements Platform {
     // THE CDN LINKS ARE SIGNED WITH A LIFETIME D.tube DOES NOT PUBLISH
     private static final Duration TTL = Duration.ofMinutes(30);
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
-
     @Override
     public String name() { return NAME; }
 

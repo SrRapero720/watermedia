@@ -54,7 +54,7 @@ public final class RootScreen {
     }
 
     // ==========================================================================
-    // PUBLIC API: RENDER AND MOUNT
+    // RENDER AND MOUNT
     // ==========================================================================
 
     /** Updates, measures, lays out and draws the tree in logical pixels; with {@code cache} it fills the engine's layers and composites them. */
@@ -141,7 +141,7 @@ public final class RootScreen {
     }
 
     // ==========================================================================
-    // PUBLIC API: INPUT ENTRY POINTS
+    // INPUT ENTRY POINTS
     // ==========================================================================
 
     // A PRESS CAPTURES THE POINTER AND A REAL DRAG SUPPRESSES THE NEXT CLICK

@@ -47,10 +47,6 @@ public final class TikTokPlatform implements Platform {
     // PLAY URLS ARE SIGNED; WHEN THEY CARRY NO expire PARAMETER THIS IS THE FALLBACK
     private static final Duration TTL = Duration.ofMinutes(30);
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
-
     @Override
     public String name() { return NAME; }
 

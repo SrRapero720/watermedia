@@ -25,10 +25,6 @@ public final class StatusText extends Element<StatusText> {
         this.label(label);
     }
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
-
     /** Sets the chip label (rendered uppercase). */
     public StatusText label(final String value) {
         this.label = value == null ? "" : value.toUpperCase(Locale.ROOT);

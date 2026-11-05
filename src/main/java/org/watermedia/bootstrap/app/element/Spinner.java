@@ -43,10 +43,6 @@ public final class Spinner extends Element<Spinner> {
         this.height = Theme.CONTROL;
     }
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
-
     public Spinner value(final double v) {
         this.value = MathUtil.clamp(v, this.min, this.max);
         return this;

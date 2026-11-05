@@ -60,7 +60,7 @@ public abstract class Element<T extends Element<T>> {
     protected Consumer<T> onHover;
 
     // ==========================================================================
-    // PUBLIC API: MEASURE / LAYOUT / DRAW PIPELINE
+    // MEASURE / LAYOUT / DRAW PIPELINE
     // ==========================================================================
 
     /** Refreshes this view from live state before measure; containers forward it to every child, visible or not. */
@@ -107,7 +107,7 @@ public abstract class Element<T extends Element<T>> {
     }
 
     // ==========================================================================
-    // PUBLIC API: EVENT DISPATCH
+    // EVENT DISPATCH
     // ==========================================================================
 
     // EVERY DISPATCHER RETURNS true WHEN IT CONSUMED THE EVENT
@@ -162,7 +162,7 @@ public abstract class Element<T extends Element<T>> {
     }
 
     // ==========================================================================
-    // PUBLIC API: WIRING
+    // WIRING
     // ==========================================================================
 
     /** Requests a repaint of the window this view belongs to. */
@@ -177,7 +177,7 @@ public abstract class Element<T extends Element<T>> {
     }
 
     // ==========================================================================
-    // PUBLIC API: ACCESSORS
+    // ACCESSORS
     // ==========================================================================
 
     public int left() { return this.left; }
@@ -201,7 +201,7 @@ public abstract class Element<T extends Element<T>> {
     public int innerHeight() { return Math.max(0, this.measuredHeight - this.padding.vertical()); }
 
     // ==========================================================================
-    // PUBLIC API: FLUENT SETTERS
+    // FLUENT SETTERS
     // ==========================================================================
 
     public T size(final int w, final int h) {

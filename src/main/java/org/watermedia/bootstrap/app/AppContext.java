@@ -70,9 +70,6 @@ public final class AppContext implements Executor {
     // GLOBAL EXIT-CONFIRM DIALOG, RAISED BY THE TITLEBAR CLOSE AND THE EXIT ACTION
     public volatile boolean exitConfirm;
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
     /** Returns the window width in logical pixels, the coordinate space of the element tree. */
     public int logicalWidth() {
         return Math.round(this.windowWidth / this.uiScale);

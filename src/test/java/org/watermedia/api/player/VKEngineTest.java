@@ -666,9 +666,6 @@ public class VKEngineTest {
             }
         }
 
-        // ======================================================================
-        // PUBLIC API
-        // ======================================================================
         @Override public VkInstance vkInstance() { return instance; }
         @Override public VkPhysicalDevice physicalDevice() { return physical; }
         @Override public VkDevice vkDevice() { return this.device; }

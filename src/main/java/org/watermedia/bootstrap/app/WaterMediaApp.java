@@ -82,9 +82,6 @@ public class WaterMediaApp {
         initLogging();
     }
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
     public static void start(final Runnable task) {
         // PHASE 1: SHOW THE WINDOW ASAP; THE APP SPEC REGISTERS FIRST SO ITS LOAD ON THE WATERCONFIG IO POOL
         // OVERLAPS THE SLOWER WINDOW AND ENGINE BOOT

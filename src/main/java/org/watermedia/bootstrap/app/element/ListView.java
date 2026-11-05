@@ -35,10 +35,6 @@ public final class ListView<D> extends Group<ListView<D>> {
     // INNER HEIGHT OF THE LAST LAYOUT; update() PICKS ITS WINDOW WITH IT BEFORE THE NEXT LAYOUT RUNS
     private int viewport;
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
-
     public ListView<D> items(final List<D> data) {
         this.items.clear();
         if (data != null) this.items.addAll(data);

@@ -54,9 +54,6 @@ public final class AppBootstrap {
     private static final Path PREFERENCES = Path.of("config", AppConfig.ID + ".properties");
     private BootstrapWindow window;
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
     public static void main(final String... args) {
         final AppBootstrap bootstrap = new AppBootstrap();
         final boolean application = System.getProperty(APP_FLAG) != null;

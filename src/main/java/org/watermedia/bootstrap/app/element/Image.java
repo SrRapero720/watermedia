@@ -14,10 +14,6 @@ public final class Image extends Element<Image> {
     private Fit fit = Fit.CONTAIN;
     private Color tint;
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
-
     public Image image(final int id, final int sourceWidth, final int sourceHeight) {
         this.textureId = id;
         this.imageWidth = sourceWidth;

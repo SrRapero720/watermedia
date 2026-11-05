@@ -30,10 +30,6 @@ public final class MedalPlatform implements Platform {
     // MEDAL SWAPS THE REAL CLIP FOR THIS PLACEHOLDER FILE WHEN A GUEST IS NOT ALLOWED TO WATCH IT
     private static final String PRIVACY_PROTECTED = "video/privacy-protected-guest";
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
-
     @Override
     public String name() { return NAME; }
 

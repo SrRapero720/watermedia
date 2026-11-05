@@ -21,7 +21,7 @@ boolean ready = WaterMedia.loaded();
 - Any other failure (the configuration, an installed Binaries module) makes `start` throw `IllegalStateException` with that failure as its cause, and `loaded()` stays false.
 - Pure Java image decoding through `CodecsAPI` needs no startup at all.
 
-`PlayerAPI.mrl`, the media players and `NetworkAPI.upload` throw `IllegalStateException` until `loaded()` is true, and the media ones always do on dedicated servers. `NetworkAPI.upload` also rejects anything that isn't an existing file right away; an unreachable or misconfigured remote server fails the returned status instead.
+Each API knows by itself whether its module loaded: `PlayerAPI.mrl` and the media players throw `IllegalStateException` until the player module starts, and always do on dedicated servers; `NetworkAPI.upload` throws until the network module starts. `NetworkAPI.upload` also rejects anything that isn't an existing file right away; an unreachable or misconfigured remote server fails the returned status instead.
 
 `PlatformAPI` needs no startup: its registry is static and `register`, `fetch` and `search` work anytime. Handlers that need Binaries (YouTube, _yt-dlp_) fail with their own `PlatformException` until it loads, and always on dedicated servers.
 

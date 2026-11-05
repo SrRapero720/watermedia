@@ -82,7 +82,7 @@ public final class OpenGLRenderBackend implements RenderBackend {
     }
 
     // ==========================================================================
-    // PUBLIC API: CONTEXT / CAPABILITIES
+    // CONTEXT / CAPABILITIES
     // ==========================================================================
     @Override
     public Supplier<GFXEngine> mediaEngineSupplier(final Thread renderThread, final Executor renderExecutor) {
@@ -100,7 +100,7 @@ public final class OpenGLRenderBackend implements RenderBackend {
     }
 
     // ==========================================================================
-    // PUBLIC API: PER-FRAME FLOW
+    // PER-FRAME FLOW
     // ==========================================================================
     @Override
     public void beginFrame() {
@@ -127,7 +127,7 @@ public final class OpenGLRenderBackend implements RenderBackend {
     }
 
     // ==========================================================================
-    // PUBLIC API: LIFECYCLE (SHADERS / BUFFERS)
+    // LIFECYCLE (SHADERS / BUFFERS)
     // ==========================================================================
     @Override
     public void init() {
@@ -251,7 +251,7 @@ public final class OpenGLRenderBackend implements RenderBackend {
     }
 
     // ==========================================================================
-    // PUBLIC API: TREE CACHE LAYERS
+    // TREE CACHE LAYERS
     // ==========================================================================
     @Override
     public boolean beginLayer(final int index, final float r, final float g, final float b, final float a) {
@@ -299,7 +299,7 @@ public final class OpenGLRenderBackend implements RenderBackend {
     }
 
     // ==========================================================================
-    // PUBLIC API: TEXTURES
+    // TEXTURES
     // ==========================================================================
     @Override
     public TextureHandle createTexture(final int width, final int height, final ByteBuffer rgba) {
@@ -341,7 +341,7 @@ public final class OpenGLRenderBackend implements RenderBackend {
     }
 
     // ==========================================================================
-    // PUBLIC API: DRAWING
+    // DRAWING
     // ==========================================================================
     @Override
     public void draw(final DrawMode mode, final float[] vertices, final int vertexCount, final boolean textured) {
@@ -465,7 +465,7 @@ public final class OpenGLRenderBackend implements RenderBackend {
     }
 
     // ==========================================================================
-    // CONTEXT / CAPABILITIES
+    // HELPERS: CONTEXT / CAPABILITIES
     // ==========================================================================
     private void attachContext() {
         // THE REAL CONTEXT IS PINNED TO 3.2 CORE, WHICH SOME DRIVERS (NVIDIA) REPORT VERBATIM RATHER THAN THE GPU MAX,
@@ -520,7 +520,7 @@ public final class OpenGLRenderBackend implements RenderBackend {
     }
 
     // ==========================================================================
-    // TREE CACHE LAYERS
+    // HELPERS: TREE CACHE LAYERS
     // ==========================================================================
     private boolean createLayer(final int index) {
         final int texture = GL11.glGenTextures();
@@ -561,7 +561,7 @@ public final class OpenGLRenderBackend implements RenderBackend {
     }
 
     // ==========================================================================
-    // DRAWING
+    // HELPERS: DRAWING
     // ==========================================================================
     private void softVertex(final int index, final float x, final float y) {
         final int off = index * FLOATS_PER_VERTEX;

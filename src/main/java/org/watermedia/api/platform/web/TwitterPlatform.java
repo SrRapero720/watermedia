@@ -32,10 +32,6 @@ public final class TwitterPlatform implements Platform {
     private static final Pattern RESOLUTION_PATTERN = Pattern.compile("/(\\d{2,5})x(\\d{2,5})/");
     private static final int TITLE_LENGTH = 72;
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
-
     @Override
     public String name() { return NAME; }
 

@@ -61,9 +61,6 @@ public class AppConfig {
     private static boolean late;
     private static Boolean crtBeforeLoad;
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
     /** Returns the registered spec, or {@code null} when registration failed. */
     public static ConfigSpec spec() {
         return spec;

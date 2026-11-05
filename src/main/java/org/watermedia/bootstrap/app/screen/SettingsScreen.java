@@ -138,10 +138,6 @@ public final class SettingsScreen extends BaseScreen {
         this.navigator = navigator;
     }
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
-
     @Override
     public void onEnter() {
         super.onEnter(); // ensureBuilt() CONSTRUCTS THE TREE ONCE
@@ -166,7 +162,7 @@ public final class SettingsScreen extends BaseScreen {
     }
 
     // ==========================================================================
-    // PUBLIC API: INPUT
+    // INPUT
     // ==========================================================================
 
     // TREE DISPATCH FIRST, THEN THE SCREEN SHORTCUTS ON GLFW_RELEASE

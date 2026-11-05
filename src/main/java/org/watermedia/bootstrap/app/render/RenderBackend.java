@@ -10,9 +10,6 @@ import java.util.function.Supplier;
 /** Low-level renderer contract implemented by the OpenGL and Vulkan backends. */
 public interface RenderBackend {
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
     void init();
     void cleanup();
     void configureFrameState();

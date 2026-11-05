@@ -29,10 +29,6 @@ public final class Header extends Group<Header> {
         this.height = H;
     }
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
-
     /** Sets the screen name (rendered bold uppercase). */
     public Header name(final String value) {
         this.name = value == null ? "" : value;

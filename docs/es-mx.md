@@ -21,7 +21,7 @@ boolean ready = WaterMedia.loaded();
 - Cualquier otra falla (la configuración, un módulo de Binaries instalado) hace que `start` lance `IllegalStateException` con esa falla como causa, y `loaded()` se queda en falso.
 - La decodificación de imágenes en Java puro con `CodecsAPI` no necesita arranque.
 
-`PlayerAPI.mrl`, los reproductores multimedia y `NetworkAPI.upload` lanzan `IllegalStateException` hasta que `loaded()` sea verdadero, y los de medios siempre lo hacen en servidores dedicados. `NetworkAPI.upload` además rechaza de entrada lo que no sea un archivo existente; en cambio, un servidor remoto inalcanzable o mal configurado hace fallar el estado devuelto.
+Cada API sabe por sí misma si su módulo ya cargó: `PlayerAPI.mrl` y los reproductores multimedia lanzan `IllegalStateException` hasta que arranca el módulo del reproductor, y siempre lo hacen en servidores dedicados; `NetworkAPI.upload` lo lanza hasta que arranca el módulo de red. `NetworkAPI.upload` además rechaza de entrada lo que no sea un archivo existente; en cambio, un servidor remoto inalcanzable o mal configurado hace fallar el estado devuelto.
 
 `PlatformAPI` no necesita arranque: su registro es estático y `register`, `fetch` y `search` funcionan en cualquier momento. Los handlers que necesitan Binaries (YouTube, _yt-dlp_) fallan con su propia `PlatformException` hasta que carga, y siempre en servidores dedicados.
 

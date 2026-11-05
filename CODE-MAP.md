@@ -11,7 +11,7 @@ Where to look (task → section → entry point):
 
 | Task | Section | Start at |
 |---|---|---|
-| Start the library or add a lifecycle module | §5 | `WaterMedia.start`, nested `Module extends WaterMediaModule` |
+| Start the library or add a lifecycle module | §5 | `WaterMedia.start`, `X extends WaterMedia.Module` |
 | Add or read a setting | §14, §5 | `WaterMediaConfig` nested classes (`@Spec.Field`) |
 | Decode an image or animation | §6.1 | `CodecsAPI.decode` / `CodecsAPI.reader` + `ImageReader.next()` |
 | Classify unknown bytes or a MIME type | §6.1, §11 | `CodecsAPI.sniff`, `MediaType.of` / `ofExtension` |
@@ -109,11 +109,18 @@ The generic version of these rules lives in AGENTS.md → "Code pattern"; this i
     IMAGE`, `PUBLIC API: CONTROL`) ordered inside that sequence instead of a `HELPERS` box. No one-line
     `// ==== X ====` banners and no plain `// UTILITY` comments remain. ⚠ No em or en dashes anywhere in the sources,
     comments and log messages included (0 left on 2026-11-01).
+    ⚠ `PUBLIC API` boxes belong only to public API (owner rule, 2026-11-05): the `public_packages` plus the `api.codecs`
+    subpackages, which stay experimental public API whose breaking changes skip the version schema. Internal code
+    (`tools`, `bootstrap/**`, `api.platform.web`, Binaries) and tests drop the plain box, so public members follow the
+    header directly; topic boxes keep only the topic (`PIXELS`, `NATIVE TLS`, `MODAL INPUT`), and a private section
+    repeating a public topic becomes `HELPERS: X` (`OpenGLRenderBackend`, `VulkanRenderBackend`).
   - A marker is shared across a package only for decoder families: `VP8LosslessDecoder.IT` (used by
     `HuffmanDecoder`) and `VP8LossyDecoder.IT` (used by `VP8BoolDecoder`).
-  - Lifecycle hooks are nested `public static final class Module extends WaterMediaModule` (`WaterMediaConfig`,
-    `NetworkAPI`, `CodecsAPI`, `PlayerAPI`); `WaterMediaBinaries` is the only top-level module. Utility classes are
-    `final` with `private X() {}` (39 of them, e.g. `DataTool`, `CodecsAPI`, `PlayerAPI`, `RenderSystem`).
+  - Modules are the classes themselves: `WaterMediaConfig`, `WaterMediaBinaries`, `NetworkAPI`, `CodecsAPI` and
+    `PlayerAPI` extend `WaterMedia.Module`, guard a public constructor with `private static final AtomicBoolean
+    LOADED` (`compareAndSet(false, true)` or ISE "X is already loaded") and override `protected start(...)` in their
+    `INTERNAL API` box. Utility classes are `final` with `private X() {}` (e.g. `DataTool`, `PlatformAPI`,
+    `RenderSystem`).
 - Shared counters are guarded by the owning state monitor; read them under the lock and log outside it.
 - Logging
   - `api` and `tools` static-import `LOGGER` from `WaterMedia`; `bootstrap/app` uses `WaterMedia.LOGGER` qualified;
@@ -170,8 +177,7 @@ Package map (`src/main/java/org/watermedia`):
   `internal/WaterPlatform`, `web/*` (21 handlers + `WebRequests`).
 - `api/network`: `NetworkAPI`, `NetworkServer`. `api/util`: `NetRequest`, `HttpHeaders`, `MediaType`, `MediaQuality`,
   `PixelFormat`, `SampleType`, `Metadata`, `Track`, `MathUtil`, `MathEases`.
-- `bootstrap`: `AppBootstrap`, `DefensiveCheck`, `ForgeBootstrap`, `NeoBootstrap`, `FabricBootstrap`,
-  `WaterMediaModule`; `bootstrap/app` (runtime), `app/render` (+`opengl`, `vulkan`), `app/element`, `app/ui`,
+- `bootstrap`: `AppBootstrap`, `DefensiveCheck`, `ForgeBootstrap`, `NeoBootstrap`, `FabricBootstrap`; `bootstrap/app` (runtime), `app/render` (+`opengl`, `vulkan`), `app/element`, `app/ui`,
   `app/screen`.
 - `tools`: `DataTool`, `FFTool`, `IOTool`, `JSONTool`, `M3UTool`, `ThreadTool`.
 
@@ -265,35 +271,42 @@ Package map (`src/main/java/org/watermedia`):
   `BROWSER_AGENT` (Chrome UA whose major grows every two weeks), `LOGGER=logger(ID)`.
 - `start(String name, Path tmp, Path cwd, boolean clientSide)` (static synchronized): throws `IllegalStateException`
   if called from an owned worker thread (`ThreadTool.workerThread()`) or twice, `IllegalArgumentException` on a blank
-  name. Defaults: `tmp` → `<java.io.tmpdir>/watermedia`, `cwd` → current directory. Builds the hardcoded module list
-  `WaterMediaConfig.Module` → `WaterMediaBinaries` (only when `org/watermedia/binaries/WaterMediaBinaries.class` is
-  visible) → `NetworkAPI.Module` → `CodecsAPI.Module` → `PlayerAPI.Module`, writes the static environment (`name`,
-  `tmp`, `cwd`, `clientSide`, `steps`), sets the volatile `started` flag, then runs every `module.start(name, tmp,
-  cwd, clientSide)` on the calling thread. `Exception | LinkageError` → ERROR log + `IllegalStateException("WaterMedia
-  module X failed")`. ⚠ No stop/unload exists; a failed start cannot be retried in-process.
+  name. Defaults: `tmp` → `<java.io.tmpdir>/watermedia`, `cwd` → current directory. Constructs the hardcoded module
+  list `new WaterMediaConfig()` → `new WaterMediaBinaries()` (only when `org/watermedia/binaries/WaterMediaBinaries.class`
+  is visible) → `new NetworkAPI()` → `new CodecsAPI()` → `new PlayerAPI()` (all constructed before the first start;
+  a refused construction throws raw, before `started`), writes the static environment (`name`, `tmp`, `cwd`,
+  `clientSide`, `steps`), sets the volatile `started` flag, then runs every `module.start(name, tmp, cwd,
+  clientSide)` on the calling thread; `loading()` is the class simple name. `Exception | LinkageError` → ERROR log +
+  `IllegalStateException("WaterMedia module X failed")`. ⚠ No stop/unload exists; a failed start cannot be retried
+  in-process.
 - Memory model: the environment and `steps` are plain write-once statics published by the volatile `started` write;
   every reader checks `started` first (`requireStarted()`, `steps()`, `loaded()`), ⚠ keep that order. `loading`
   (module name) and `done` stay volatile because the app splash polls them while `start` holds the class lock.
 - `loaded()` (`started && done == steps`), `loading()` (module name or null), `step()`, `steps()` (4 or 5): safe from
   any thread. `name()`, `cwd()`, `tmp()`, `clientSide()` throw before start. `checkIsClientSideOrThrow(Class)` guards
   client-only ctors. `toId(path)` → `watermedia:path` (deprecated). `logger(name)` → redacting `ExtendedLoggerWrapper`.
-- Gates elsewhere: `PlayerAPI.mrl/preload`, the constructors of players with an MRL (`MediaPlayer.arm()`) and
-  `NetworkAPI.upload` throw until `loaded()`; `ServerMediaPlayer` has no MRL and works before the load and on servers.
+- Gates are self-aware, never `WaterMedia.loaded()`: `PlayerAPI.mrl/preload` throw until `MRL.session` exists (the
+  player module started on a client); `NetworkAPI.upload` throws until its volatile `uploads` exists. Players need an
+  MRL with sources, which only a live session yields, so `MediaPlayer.arm()` has no gate. `ServerMediaPlayer` has no MRL
+  and works before the load and on servers.
 
-### `WaterMediaModule` (`bootstrap/WaterMediaModule.java`)
-- No constructor or fields: `abstract void start(String name, Path tmp, Path cwd, boolean clientSide) throws
-  Exception` (once, on the starting thread, with the normalized environment), `final String name()` (enclosing class
-  name).
+### `WaterMedia.Module` (nested in `WaterMedia.java`)
+- `public abstract static class Module` with only `protected abstract void start(String name, Path tmp, Path cwd,
+  boolean clientSide) throws Exception` (once, on the starting thread, with the normalized environment). Subclasses
+  own their loaded state: a `LOADED` `AtomicBoolean` flipped by the first construction; a second one throws, whoever
+  calls it. ⚠ Their constructors are public (WaterMedia sits in another package) but only `WaterMedia.start` may call
+  them; one called earlier makes `start` throw.
 - Modules decide per side themselves; a part that can be missing (file server, FFmpeg, disk cache) logs and continues;
   only escaping exceptions abort the load. What a module writes in `start` is visible to any thread that saw
-  `WaterMedia.loaded()` true (the `done` volatile write follows it). ↪ new module: nested `Module`, add
-  `new X.Module()` to the list in `WaterMedia.start`.
+  `WaterMedia.loaded()` true (the `done` volatile write follows it). ↪ new module: extend `WaterMedia.Module` with the
+  `LOADED` constructor guard, add `new X()` to the list in `WaterMedia.start`. `PlatformAPI` is not a module (nothing
+  to load).
 
 ### `WaterMediaConfig` (`org/watermedia/WaterMediaConfig.java`): WaterConfig TOML spec `watermedia`
 - Static tree `codecs`, `player`, `platforms`, `network` (instances of nested `@Spec(disableStatic=true)` classes);
   key path = TOML tables (`codecs.ffmpeg.disable`, `player.watertx.texturesBudget`). Annotations `@Spec.Field`,
   `@Comment`, `@NumberConditions`, `@StringConditions`, controls (SEEKBAR, DROPDOWN, PASSWORD, INPUT_FOLDER).
-- `Module.start()`: `WaterConfig.init()`; if no spec `watermedia` exists → `registerBlocking(WaterMediaConfig.class)`;
+- `start(...)`: `WaterConfig.init()`; if no spec `watermedia` exists → `registerBlocking(WaterMediaConfig.class)`;
   else waits on the existing spec monitor until loaded or FAILED, then `refresh()` (one writer per process).
 - File `config/watermedia.toml` under the WaterConfig path (CWD `config/`); library `me.srrapero720.waterconfig`
   (nested jar, `requires static waterconfig`, `opens org.watermedia to waterconfig`). Full key table in §14.
@@ -327,7 +340,7 @@ Package map (`src/main/java/org/watermedia`):
 - ⚠ Runs before Log4j/Gson exist (plain `HttpURLConnection`, `System.out`); shares `<tmpdir>/watermedia/libs`.
 
 ### Binaries module (`binaries/src/main/java/org/watermedia/binaries`)
-- `WaterMediaBinaries extends WaterMediaModule`: `ID="watermedia_binaries"`, `FFMPEG_ID="ffmpeg"`, `YTDLP_ID="yt-dlp"`,
+- `WaterMediaBinaries extends WaterMedia.Module`: `ID="watermedia_binaries"`, `FFMPEG_ID="ffmpeg"`, `YTDLP_ID="yt-dlp"`,
   `BOTGUARD_ID="botguard"`. `start()`: dedicated server → nothing; client → registers `yt-dlp` and `botguard`
   directories under `tmp`, and unless `codecs.ffmpeg.disable` runs `FFmpegBinaries.start(<tmp>/ffmpeg)` eagerly; an
   `IOException` aborts the WaterMedia load. `pathOf(id)` → directory or null; `binaryDir(id)` throws when not started.
@@ -345,7 +358,7 @@ Package map (`src/main/java/org/watermedia`):
 - ⚠ Binaries links core members that must keep their semantics: `IOTool.{platform, platformClassifier,
   currentGeneration, publishGeneration, deleteTree, makeExecutable, sha256, requireSha256, verifySha256}`,
   `JSONTool.parse(String, Class)`, `NetRequest` (`httpsOnly`, `maxBytes`, `deadline`, `maxRedirects`, timeouts,
-  `send`, `download`, `text`, `statusCode`, `close`), `WaterMedia`, `WaterMediaConfig`, `WaterMediaModule`.
+  `send`, `download`, `text`, `statusCode`, `close`), `WaterMedia`, `WaterMediaConfig`, `WaterMedia.Module`.
 
 ## 6. Codecs API (`api/codecs`)
 
@@ -368,7 +381,7 @@ status queries `ffmpegLoaded`, `ffmpegError` and `vulkanDecode` stay supported. 
     numbers (RIFF, ISO BMFF brands, images, EBML/FLV/ASF/MPEG/MXF/TS, audio sync words, Ogg, WebVTT/ASS). ⚠ Many image
     formats sniff as IMAGE without a reader (BMP, TIFF, PSD, JP2, JXL, ICO, DDS, QOI, EXR, HEIF/AVIF...).
   - `ffmpegLoaded()`, `ffmpegError()`, `vulkanDecode()` (FFmpeg lists a `vulkan` hwdevice AND `FFTool.vulkanBindings()`).
-  - `Module.start()`: server → return; no Binaries class → WARN; else `startFFmpeg()`: honours `codecs.ffmpeg.disable`,
+  - `start(...)`: server → return; no Binaries class → WARN; else `startFFmpeg()`: honours `codecs.ffmpeg.disable`,
     builds the preload path (`WaterMediaBinaries.pathOf("ffmpeg")` then `codecs.ffmpeg.customPath`), sets JavaCPP
     properties, logs component versions, probes hwdevice types, `FFTool.startTLS()`, publishes `ffmpegLoaded`. Failure
     → `ffmpegFailure` (boolean accessor only). ⚠ Native FFmpeg log routing (`av_log_set_callback`) is commented out
@@ -607,7 +620,7 @@ requested, and SVG yields RGBA when RGBA is requested (everything else is conver
 - Engine factories (client only): `glEngine(Thread renderThread, Executor renderEx)` (both null = calling-thread GL),
   `vkEngine(VKContext)`, `jfxEngine(Runnable onFrame)` (throws without JavaFX 13+), `awtEngine(Runnable)`,
   `headlessEngine([boolean preload])`, `alEngine([int buffers][, boolean spatial])`, `jsEngine([int bufferMs])`.
-- `Module.start()` (client only): `MRL.start()` then `NetworkCache.start(tmp.resolve("cache"))` (failure logged).
+- `start(...)` (client only): `MRL.start()` then `NetworkCache.start(tmp.resolve("cache"))` (failure logged).
 
 ### 7.3 `MRL`: cached async resolution
 - Statuses `FETCHING, LOADED, EXPIRED, ERROR, BLOCKED, FORGOTTEN` (`loaded()`, `failed()`, `regenerable()`,
@@ -892,7 +905,7 @@ requested, and SVG yields RGBA when RGBA is requested (everything else is conver
   `error()`, `percentage()`, `displaySpeed()`, `cancel()`; ⚠ a cancelled status reads as failed with "Cancelled").
   POST `<remoteUrl>/upload` with `network.token`, filename and content-type headers, fixed-length streaming in 8 KiB
   chunks; 503 → "server is busy". `remoteUrl()` validates `network.remoteUrl` (http(s), trailing slash stripped).
-  `Module.start()`: upload pool, then `NetworkServer.start(port, cwd)` when `network.server` is `ALWAYS`, or `DEDICATED`
+  `start(...)`: upload pool, then `NetworkServer.start(port, cwd)` when `network.server` is `ALWAYS`, or `DEDICATED`
   on a non-client; failure logged, uploads keep working.
 - `NetworkServer` (package-private entry points `start`, `address`, `stop`): JDK `HttpServer` bound to
   `network.serverBindAddress:serverPort` (`127.0.0.1:25572`; ⚠ a non-loopback bind with the default token refuses to
@@ -1100,7 +1113,7 @@ original context current; GL needs the pumped render executor; `WaterMedia.start
 | `platforms.allowMatureContent` | false | mature gates in the web handlers |
 | `platforms.searchCleanupInterval` / `searchLimit` | 15.0 min / 2 (1..50) | `PlatformAPI` |
 | `platforms.biliBiliCookie` | "" (password) | `BiliBiliPlatform` |
-| `network.server` | `OFF` (`DEDICATED`, `ALWAYS`) | `NetworkAPI.Module` (startup) |
+| `network.server` | `OFF` (`DEDICATED`, `ALWAYS`) | `NetworkAPI.start` (startup) |
 | `network.serverBindAddress` / `serverPort` | `127.0.0.1` / 25572 | `NetworkServer.start` (startup) |
 | `network.maxServerRequests` / `serverTimeout` | 8 (1..256) / 30000 ms | `NetworkServer` (startup) |
 | `network.maxStorageSize` / `maxUploadSize` | 1024 MB (≥ 1) / 8 MB (0 = unlimited) | `NetworkServer` (startup) |

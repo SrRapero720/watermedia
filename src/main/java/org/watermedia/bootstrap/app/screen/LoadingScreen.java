@@ -39,10 +39,6 @@ public final class LoadingScreen extends BaseScreen {
         super(text, ctx);
     }
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
-
     // NO keybinds() OVERRIDE: BOOT HAS NO CANCEL PATH, SO THE SPLASH ADVERTISES NO SHORTCUTS
 
     @Override

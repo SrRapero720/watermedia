@@ -30,9 +30,6 @@ public final class M3UTool {
 
     private M3UTool() {}
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
     /** Fetches and parses the playlist at {@code uri} with WaterMedia's User-Agent; see {@link #parse}. */
     public static Playlist fetch(final URI uri) throws IOException {
         return fetch(uri, null);

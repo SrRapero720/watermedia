@@ -19,9 +19,6 @@ public final class MediaCatalog {
     public IptvChannel[] iptvChannels = new IptvChannel[0];
     public final List<TestURI> customTests = new ArrayList<>();
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
     /** Reads the bundled groups and channels; without DEBUG logging the debug-only links are left out. */
     public void load() {
         try { this.uriGroups = JSONTool.parse(IOTool.jarRead("assets/watermedia/catalog/uris.json"), URIGroup[].class); }

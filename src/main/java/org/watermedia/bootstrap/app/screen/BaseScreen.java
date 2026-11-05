@@ -26,10 +26,6 @@ public abstract class BaseScreen extends Group<BaseScreen> {
         this.height = MAX_PARENT;
     }
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
-
     /** The content slot built by {@link #build()}, or {@code null} before the first build. */
     public final Element<?> body() {
         return this.body;

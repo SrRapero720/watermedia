@@ -36,10 +36,6 @@ public final class DrivePlatform implements Platform {
     // A CONFIRMED DOWNLOAD URL CARRIES SESSION TOKENS (uuid, at) WHOSE LIFETIME GOOGLE DOES NOT PUBLISH
     private static final Duration CONFIRMED_TTL = Duration.ofMinutes(30);
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
-
     @Override
     public String name() { return NAME; }
 

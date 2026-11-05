@@ -90,10 +90,6 @@ public final class MRLSelectorScreen extends BaseScreen {
         this.navigator = navigator;
     }
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
-
     @Override
     public void onEnter() {
         super.onEnter();

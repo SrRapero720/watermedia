@@ -36,10 +36,6 @@ public final class ImgurPlatform implements Platform {
     private static final String ALBUM_URL = API_URL + "/album/%s?client_id=" + API_KEY;
     private static final String SEARCH_URL = API_URL + "/gallery/search/top/all/0?client_id=" + API_KEY + "&q=%s";
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
-
     @Override
     public String name() { return NAME; }
 

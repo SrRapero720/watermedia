@@ -127,10 +127,6 @@ public final class PlayerScreen extends BaseScreen {
         this.navigator = navigator;
     }
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
-
     @Override
     public void onEnter() {
         super.onEnter();
@@ -866,10 +862,6 @@ public final class PlayerScreen extends BaseScreen {
         private final WrapCache titleWrap = new WrapCache();
         private final WrapCache descWrap = new WrapCache();
 
-        // ======================================================================
-        // PUBLIC API
-        // ======================================================================
-
         @Override
         public boolean dispatchScroll(final double mx, final double my, final double amount) {
             if (!this.visible || this.maxScroll <= 0 || !this.contains(mx, my)) return false;
@@ -1230,10 +1222,6 @@ public final class PlayerScreen extends BaseScreen {
                     .add(this.loop).add(this.speedDrop)
                     .add(this.back);
         }
-
-        // ======================================================================
-        // PUBLIC API
-        // ======================================================================
 
         @Override
         public Element<?> dispatchPress(final double mx, final double my) {

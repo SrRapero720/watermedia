@@ -80,10 +80,6 @@ public sealed class YtDlpPlatform implements Platform permits YouTubePlatform {
 
     private final YtDlpBinary binary = new YtDlpBinary();
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
-
     @Override
     public String name() { return NAME; }
 

@@ -24,10 +24,6 @@ public final class StreamablePlatform implements Platform {
     // STREAMABLE STATUS CODES: 0=UPLOADING, 1=PROCESSING, 2=READY, 3=ERROR
     private static final int STATUS_READY = 2;
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
-
     @Override
     public String name() { return NAME; }
 

@@ -18,10 +18,6 @@ public final class Icon extends Element<Icon> {
         this.icon = icon == null ? "" : icon;
     }
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
-
     public Icon icon(final String value) {
         this.icon = value == null ? "" : value;
         return this;

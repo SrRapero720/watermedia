@@ -25,9 +25,6 @@ public final class ClickSound {
     public boolean enabled = true;
     private int source = -1;
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
     /** Opens the default OpenAL device and loads the tick; without audio the app keeps running silent. */
     public void open() {
         try {

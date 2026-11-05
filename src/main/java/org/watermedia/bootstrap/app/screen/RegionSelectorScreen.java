@@ -50,10 +50,6 @@ public final class RegionSelectorScreen extends BaseScreen {
         this.navigator = navigator;
     }
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
-
     @Override
     public void onEnter() {
         super.onEnter();

@@ -58,10 +58,6 @@ public final class TextField extends Element<TextField> {
         this.padding = Spacing.hv(10, 8);
     }
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
-
     public TextField value(final String v) {
         this.value = v == null ? "" : v;
         return this;

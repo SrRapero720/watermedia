@@ -42,10 +42,6 @@ public final class Dropdown extends Element<Dropdown> {
         this.height = Theme.CONTROL;
     }
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
-
     public Dropdown items(final List<String> values) {
         this.items = values == null ? new ArrayList<>() : new ArrayList<>(values);
         if (this.selectedIndex >= this.items.size()) this.selectedIndex = Math.max(0, this.items.size() - 1);

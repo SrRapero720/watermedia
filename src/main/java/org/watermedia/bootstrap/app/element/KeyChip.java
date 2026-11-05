@@ -27,10 +27,6 @@ public final class KeyChip extends Element<KeyChip> {
         this.key(key);
     }
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
-
     public KeyChip key(final String value) {
         this.key = value == null ? "" : value;
         this.upper = this.key.toUpperCase(Locale.ROOT);

@@ -24,10 +24,6 @@ public final class IconButton extends Element<IconButton> {
         this.icon = icon == null ? "" : icon;
     }
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
-
     public IconButton icon(final String key) {
         this.icon = key == null ? "" : key;
         return this;

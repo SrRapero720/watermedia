@@ -72,10 +72,6 @@ final class KeybindsBar extends Group<KeybindsBar> {
         this.add(this.row);
     }
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
-
     /** Pins a fixed keybind list, replacing the constructor supplier as the source. */
     public KeybindsBar keybinds(final List<Keybind> list) {
         final List<Keybind> copy = list == null ? List.of() : List.copyOf(list);

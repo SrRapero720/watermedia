@@ -31,10 +31,6 @@ public final class SectionHead extends Element<SectionHead> {
         this.label(label);
     }
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
-
     public SectionHead label(final String value) {
         final String source = value == null ? "" : value;
         if (!source.equals(this.labelSource)) {

@@ -17,10 +17,6 @@ public final class CheckBox extends Element<CheckBox> {
     private Consumer<Boolean> onChange;
     private float scale = AppTheme.TEXT_BODY;
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
-
     public CheckBox checked(final boolean value) {
         this.checked = value;
         return this;

@@ -29,9 +29,6 @@ public final class IOTool {
 
     private IOTool() {}
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
     // NORMALISED OS TOKEN ("windows"/"macos"/"linux"), OR null IF UNSUPPORTED; platformClassifier NAMES THE ffmpeg
     // ZIPS WHILE platform() RESOLVES THE PER-OS/ARCH ASSETS OF DOWNLOADED NATIVE BINARIES
     public static String os() {

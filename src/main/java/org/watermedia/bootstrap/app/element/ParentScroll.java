@@ -12,10 +12,6 @@ public final class ParentScroll extends Group<ParentScroll> {
     private int scrollbarWidth = 6;
     private final ScrollState scroll = new ScrollState();
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
-
     public ParentScroll scrollbarWidth(final int width) {
         this.scrollbarWidth = Math.max(2, width);
         return this;

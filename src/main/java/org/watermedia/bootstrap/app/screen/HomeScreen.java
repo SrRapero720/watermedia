@@ -116,10 +116,6 @@ public class HomeScreen extends BaseScreen {
         this.navigator = navigator;
     }
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
-
     @Override
     public void onEnter() {
         this.rebuildMenu();

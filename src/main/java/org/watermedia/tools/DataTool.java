@@ -31,7 +31,7 @@ public final class DataTool {
     private DataTool() {}
 
     // ==========================================================================
-    // PUBLIC API: BYTES, TEXT AND REDACTION
+    // BYTES, TEXT AND REDACTION
     // ==========================================================================
     public static boolean startsWith(final ByteBuffer buffer, final int offset, final byte[] header) {
         if (buffer.limit() - offset < header.length) return false;
@@ -193,7 +193,7 @@ public final class DataTool {
     }
 
     // ==========================================================================
-    // PUBLIC API: PIXELS
+    // PIXELS
     // ==========================================================================
     // CONVERTS BT.601 LIMITED-RANGE YUV 4:2:0 PLANES (VP8) TO PACKED OPAQUE ARGB INTS, WHICH LAND AS [B,G,R,A]
     // BYTES ONCE WRITTEN LITTLE-ENDIAN. STRIDES MAY EXCEED THE WIDTH (MACROBLOCK PADDING)
@@ -291,7 +291,7 @@ public final class DataTool {
     }
 
     // ==========================================================================
-    // PUBLIC API: PIXEL-PLANE AREA SCALING (TxMediaPlayer, DownscaleFilter)
+    // PIXEL-PLANE AREA SCALING (TxMediaPlayer, DownscaleFilter)
     // ==========================================================================
     // WHETHER THE AREA SCALER UNDERSTANDS format: PACKED YUYV/UYVY (PIXEL PAIRS SHARE CHROMA) AND
     // COMPRESSED BCn (GPU-SIDE BLOCKS) CANNOT BE AVERAGED BYTE-WISE.

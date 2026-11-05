@@ -27,10 +27,6 @@ public final class Text extends Element<Text> {
         this.text = text == null ? "" : text;
     }
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
-
     public Text text(final String value) {
         this.text = value == null ? "" : value;
         return this;

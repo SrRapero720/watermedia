@@ -37,10 +37,6 @@ public final class Button extends Element<Button> {
         this.label = label == null ? "" : label;
     }
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
-
     public Button label(final String value) {
         this.label = value == null ? "" : value;
         return this;

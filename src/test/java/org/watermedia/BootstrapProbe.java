@@ -16,12 +16,11 @@ import java.net.ServerSocket;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
+import java.util.function.Supplier;
 
 /** Exercises one WaterMedia load per process: the load is final, so every scenario gets its own JVM. */
 public final class BootstrapProbe {
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
     public static void main(final String[] arguments) throws Exception {
         final String scenario = arguments[0];
         final Path root = Path.of("").toAbsolutePath();
@@ -149,5 +148,14 @@ public final class BootstrapProbe {
             WaterMedia.start("PROBE", root.resolve("temp"), root, true);
             throw new AssertionError("WaterMedia accepted a second start");
         } catch (final IllegalStateException expected) {}
+        // EVERY MODULE KNOWS BY ITSELF THAT IT WAS LOADED: A SECOND CONSTRUCTION THROWS
+        final List<Supplier<WaterMedia.Module>> modules = List.of(WaterMediaConfig::new, WaterMediaBinaries::new, NetworkAPI::new, CodecsAPI::new, PlayerAPI::new);
+        for (final Supplier<WaterMedia.Module> module: modules) {
+            try {
+                throw new AssertionError("A module accepted a second construction: " + module.get().getClass().getSimpleName());
+            } catch (final IllegalStateException expected) {
+                if (!expected.getMessage().endsWith("is already loaded")) throw new AssertionError("Unexpected refusal", expected);
+            }
+        }
     }
 }

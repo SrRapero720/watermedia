@@ -39,10 +39,6 @@ public final class Canvas {
         this.text = text;
     }
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
-
     /** Starts a tree pass; a cached one defers the live painters to {@link #paintLive} instead of drawing them. */
     public void beginTree(final boolean cached) {
         this.live.clear();

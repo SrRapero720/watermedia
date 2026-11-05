@@ -79,9 +79,6 @@ public final class PixelIcon {
 
     private PixelIcon() {}
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
     public static void draw(final String name, final int x, final int y, final int size, final Color color) {
         final String[] mask = ICONS.getOrDefault(name, ICONS.get("info"));
         final int rows = mask.length;

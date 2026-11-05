@@ -43,9 +43,6 @@ public final class TextRenderer {
         this.baseSize = DEFAULT_FONT_SIZE;
     }
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
     public void margin(final int margin) {
         this.margin = Math.max(0, margin);
     }

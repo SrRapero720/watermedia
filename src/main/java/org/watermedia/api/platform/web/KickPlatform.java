@@ -42,10 +42,6 @@ public final class KickPlatform implements Platform {
     // LIVE AND VOD PLAYLIST LINKS ROTATE; RE-RESOLVING KEEPS A STALE PLAYLIST FROM BEING SERVED
     private static final Duration PLAYLIST_TTL = Duration.ofMinutes(30);
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
-
     @Override
     public String name() { return NAME; }
 

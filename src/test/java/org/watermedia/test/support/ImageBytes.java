@@ -12,10 +12,6 @@ public final class ImageBytes {
 
     private final ByteArrayOutputStream out = new ByteArrayOutputStream();
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
-
     /** Appends one byte. */
     public ImageBytes u8(final int v) { this.out.write(v); return this; }
     /** Appends a little-endian 16-bit value. */

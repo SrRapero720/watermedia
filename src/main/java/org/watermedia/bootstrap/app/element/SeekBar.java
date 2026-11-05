@@ -24,10 +24,6 @@ public final class SeekBar extends Element<SeekBar> {
         this.height = 16;
     }
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
-
     public SeekBar value(final float v) {
         this.value = MathUtil.clamp(v, 0f, 1f);
         return this;

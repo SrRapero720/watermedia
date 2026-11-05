@@ -54,10 +54,6 @@ public final class YouTubePlatform extends YtDlpPlatform {
     private final BotGuardBinary botGuard = new BotGuardBinary();
     private final Object botGuardLock = new Object(); // SERIALISE MINTS: THE BOTGUARD RUNS SHARE A SNAPSHOT FILE
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
-
     @Override
     public String name() { return NAME; }
 

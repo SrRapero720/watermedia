@@ -31,10 +31,6 @@ public final class SegmentedControl extends Element<SegmentedControl> {
         this.height = Theme.BUTTON;
     }
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
-
     public SegmentedControl segments(final String[] values) {
         this.segments = values == null ? new String[0] : values;
         return this;

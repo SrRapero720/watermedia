@@ -58,9 +58,6 @@ public final class DefensiveCheck {
 
     private DefensiveCheck() {}
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
     /** Throws when this game process belongs to TLauncher; leftovers of a past install only warn. A null game directory is the working directory. */
     public static void run(final Path gameDir) {
         final List<String> evidence = new ArrayList<>();

@@ -29,9 +29,6 @@ public final class CacheCleaner {
         this.repaint = repaint;
     }
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
     /** Counts the files and bytes in the media cache, as {@code {files, bytes}}. */
     public static long[] scan() throws IOException {
         final long[] stats = new long[2];

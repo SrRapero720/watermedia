@@ -13,10 +13,6 @@ public abstract class Group<T extends Group<T>> extends Element<T> {
 
     protected final List<Element<?>> children = new ArrayList<>();
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
-
     public T add(final Element<?> child) {
         if (child != null) {
             child.parent = this;

@@ -40,9 +40,6 @@ public final class Assets {
     public int duckFrameWidth;
     public int duckFrameHeight;
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
     /** Creates the icon, duck and banner textures on the active render engine and sets the window icon. */
     public void load(final AppContext ctx) {
         // ImageIO DECODES THEM BECAUSE THE LOADING SCREEN SHOWS THEM BEFORE THE CODECS API LOADS

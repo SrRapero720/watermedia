@@ -184,7 +184,7 @@ public final class VulkanRenderBackend implements RenderBackend, VKContext {
     }
 
     // ==========================================================================
-    // PUBLIC API: LIFECYCLE
+    // LIFECYCLE
     // ==========================================================================
     @Override
     public void init() {
@@ -254,7 +254,7 @@ public final class VulkanRenderBackend implements RenderBackend, VKContext {
     }
 
     // ==========================================================================
-    // PUBLIC API: PER-FRAME FLOW
+    // PER-FRAME FLOW
     // ==========================================================================
     @Override
     public void beginFrame() {
@@ -386,7 +386,7 @@ public final class VulkanRenderBackend implements RenderBackend, VKContext {
     }
 
     // ==========================================================================
-    // PUBLIC API: TREE CACHE LAYERS
+    // TREE CACHE LAYERS
     // ==========================================================================
     @Override
     public boolean beginLayer(final int index, final float r, final float g, final float b, final float a) {
@@ -448,7 +448,7 @@ public final class VulkanRenderBackend implements RenderBackend, VKContext {
     }
 
     // ==========================================================================
-    // PUBLIC API: DRAWING
+    // DRAWING
     // ==========================================================================
     @Override
     public void useProjection(final Matrix4f projection) {
@@ -652,7 +652,7 @@ public final class VulkanRenderBackend implements RenderBackend, VKContext {
     }
 
     // ==========================================================================
-    // PUBLIC API: TEXTURES
+    // TEXTURES
     // ==========================================================================
     @Override
     public TextureHandle createTexture(final int width, final int height, final ByteBuffer rgba) {
@@ -691,7 +691,7 @@ public final class VulkanRenderBackend implements RenderBackend, VKContext {
     }
 
     // ==========================================================================
-    // PUBLIC API: VKContext
+    // VKContext
     // ==========================================================================
     @Override
     public Supplier<GFXEngine> mediaEngineSupplier(final Thread renderThread, final Executor renderExecutor) {
@@ -1364,7 +1364,7 @@ public final class VulkanRenderBackend implements RenderBackend, VKContext {
     }
 
     // ==========================================================================
-    // TREE CACHE LAYERS
+    // HELPERS: TREE CACHE LAYERS
     // ==========================================================================
     private boolean createLayer(final int index) {
         // A DEVICE-LOCAL IMAGE THE LAYER PASS RENDERS INTO AND THE WINDOW PASS SAMPLES; A FAILURE DISABLES THE CACHE
@@ -1419,7 +1419,7 @@ public final class VulkanRenderBackend implements RenderBackend, VKContext {
     }
 
     // ==========================================================================
-    // DRAWING
+    // HELPERS: DRAWING
     // ==========================================================================
     private void beginRenderPass() {
         try (final MemoryStack stack = stackPush()) {
@@ -1557,7 +1557,7 @@ public final class VulkanRenderBackend implements RenderBackend, VKContext {
     }
 
     // ==========================================================================
-    // TEXTURES
+    // HELPERS: TEXTURES
     // ==========================================================================
     private TextureRecord uploadTexture(final int w, final int h, final ByteBuffer rgba) {
         // A SAMPLED R8G8B8A8_UNORM DEVICE-LOCAL IMAGE: THE TIGHTLY PACKED RGBA GOES THROUGH A HOST-VISIBLE STAGING

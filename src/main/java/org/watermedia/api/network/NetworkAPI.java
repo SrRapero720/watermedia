@@ -7,7 +7,6 @@ import org.watermedia.WaterMediaConfig;
 import org.watermedia.api.platform.internal.WaterPlatform;
 import org.watermedia.api.util.MathUtil;
 import org.watermedia.api.util.NetRequest;
-import org.watermedia.bootstrap.WaterMediaModule;
 import org.watermedia.tools.ThreadTool;
 
 import java.io.File;
@@ -18,11 +17,12 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.watermedia.WaterMedia.LOGGER;
 
 /** File transfer facade: uploads to the remote WaterMedia file server and the local one's startup. */
-public final class NetworkAPI {
+public final class NetworkAPI extends WaterMedia.Module {
     private static final Marker IT = MarkerManager.getMarker(NetworkAPI.class.getSimpleName());
     /** URI scheme of the internal sources the WaterMedia file servers serve. */
     public static final String PROTOCOL_WATER = "water";
@@ -31,10 +31,14 @@ public final class NetworkAPI {
     /** Request header carrying the original name of an uploaded file. */
     public static final String X_WATERMEDIA_FILENAME = "X-WaterMedia-Filename";
     private static final int UPLOAD_THREADS = 4;
-    // THE UPLOAD WORKERS, CREATED WHEN THE MODULE LOADS AND KEPT FOR THE LIFE OF THE PROCESS
+    private static final AtomicBoolean LOADED = new AtomicBoolean(); // FLIPS ON THE FIRST CONSTRUCTION, WHEN WATERMEDIA STARTS
+    // THE UPLOAD WORKERS, CREATED WHEN THE MODULE STARTS AND KEPT FOR THE LIFE OF THE PROCESS; upload() CHECKS THEM AS ITS OWN LOAD GATE
     private static volatile ExecutorService uploads;
 
-    private NetworkAPI() {}
+    /** Creates the network module; {@link WaterMedia#start} calls it once per process and a second call throws. */
+    public NetworkAPI() {
+        if (!LOADED.compareAndSet(false, true)) throw new IllegalStateException("NetworkAPI is already loaded");
+    }
 
     // ==========================================================================
     // PUBLIC API
@@ -52,7 +56,7 @@ public final class NetworkAPI {
     public static UploadStatus upload(final File file) {
         if (file == null || !file.isFile()) throw new IllegalArgumentException("Not a file: " + file);
         final ExecutorService workers = uploads;
-        if (!WaterMedia.loaded() || workers == null) throw new IllegalStateException("The network module is not loaded");
+        if (workers == null) throw new IllegalStateException("The network module is not loaded");
         final UploadStatus status = new UploadStatus(file.length());
         workers.execute(() -> {
             try {
@@ -70,6 +74,21 @@ public final class NetworkAPI {
         if (base == null || base.isBlank() || !(base.startsWith("http://") || base.startsWith("https://")))
             throw new IllegalStateException("network.remoteUrl is not an absolute http(s) URL: " + base);
         return base.endsWith("/") ? base.substring(0, base.length() - 1) : base;
+    }
+
+    // ==========================================================================
+    // INTERNAL API
+    // ==========================================================================
+    // THE UPLOAD WORKERS AND, WHEN CONFIGURED, THE LOCAL FILE SERVER
+    @Override
+    protected void start(final String name, final Path tmp, final Path cwd, final boolean clientSide) {
+        uploads = Executors.newFixedThreadPool(UPLOAD_THREADS, ThreadTool.workerFactory("NetworkAPI-Upload", Thread.NORM_PRIORITY));
+        if (!serverEnabled(clientSide, WaterMediaConfig.network.server)) return;
+        try {
+            NetworkServer.start(WaterMediaConfig.network.serverPort, cwd);
+        } catch (final Exception failure) { // UPLOADS STILL WORK WITHOUT THE LOCAL SERVER
+            LOGGER.error(IT, "The local file server did not start; uploads still work without it", failure);
+        }
     }
 
     // ==========================================================================
@@ -221,20 +240,6 @@ public final class NetworkAPI {
             if (this.complete || this.failed) return;
             this.error = error;
             this.failed = true;
-        }
-    }
-
-    /** Internal module: the upload workers and, when configured, the local file server. */
-    public static final class Module extends WaterMediaModule {
-        @Override
-        public void start(final String name, final Path tmp, final Path cwd, final boolean clientSide) {
-            uploads = Executors.newFixedThreadPool(UPLOAD_THREADS, ThreadTool.workerFactory("NetworkAPI-Upload", Thread.NORM_PRIORITY));
-            if (!serverEnabled(clientSide, WaterMediaConfig.network.server)) return;
-            try {
-                NetworkServer.start(WaterMediaConfig.network.serverPort, cwd);
-            } catch (final Exception failure) { // UPLOADS STILL WORK WITHOUT THE LOCAL SERVER
-                LOGGER.error(IT, "The local file server did not start; uploads still work without it", failure);
-            }
         }
     }
 }

@@ -67,7 +67,7 @@ public final class RenderEngine {
     }
 
     // ==========================================================================
-    // PUBLIC API: RENDERING
+    // RENDERING
     // ==========================================================================
     public void init() {
         this.backend.init();
@@ -410,7 +410,7 @@ public final class RenderEngine {
     }
 
     // ==========================================================================
-    // PUBLIC API: TREE CACHE
+    // TREE CACHE
     // ==========================================================================
     // THE TREE PAINTS INTO OFFSCREEN LAYERS ONLY WHEN IT CHANGES, AND EVERY OTHER FRAME DRAWS THE LAYERS
     // BACK WITH THE LIVE PAINTERS (THE CRT BAND) BETWEEN THEM

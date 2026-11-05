@@ -33,9 +33,6 @@ public final class RenderSystem {
 
     private RenderSystem() {}
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
     /** Selects the engine for the next window, downgrading Vulkan to OpenGL when no Vulkan loader is present. */
     public static void chooseEngine(final Engine requested) {
         final boolean missing = requested == Engine.VULKAN && !glfwVulkanSupported();

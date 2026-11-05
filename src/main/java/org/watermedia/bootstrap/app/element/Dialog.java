@@ -63,7 +63,7 @@ public final class Dialog extends Group<Dialog> {
     }
 
     // ==========================================================================
-    // PUBLIC API: SETUP
+    // SETUP
     // ==========================================================================
 
     public Dialog title(final String text) {
@@ -162,7 +162,7 @@ public final class Dialog extends Group<Dialog> {
     }
 
     // ==========================================================================
-    // PUBLIC API: MODAL INPUT
+    // MODAL INPUT
     // ==========================================================================
 
     // WHILE VISIBLE, EVERYTHING IS CONSUMED AFTER THE CONTENT HAD ITS CHANCE

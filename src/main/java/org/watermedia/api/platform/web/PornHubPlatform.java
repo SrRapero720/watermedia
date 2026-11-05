@@ -29,10 +29,6 @@ public final class PornHubPlatform implements Platform {
     private static final String[] HOSTS = { "pornhub.com" };
     private static final Pattern FLASHVARS_PATTERN = Pattern.compile("\\bvar\\s+flashvars_\\d+\\s*=\\s*(\\{[\\s\\S]*?\\});");
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
-
     @Override
     public String name() { return NAME; }
 

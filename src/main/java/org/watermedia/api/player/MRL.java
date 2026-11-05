@@ -2,7 +2,6 @@ package org.watermedia.api.player;
 
 import org.apache.logging.log4j.Marker;
 import org.apache.logging.log4j.MarkerManager;
-import org.watermedia.WaterMedia;
 import org.watermedia.WaterMediaConfig;
 import org.watermedia.api.codecs.CodecsAPI;
 import org.watermedia.api.platform.*;
@@ -197,7 +196,7 @@ public final class MRL {
     static MRL get(final URI uri) {
         if (uri == null) throw new IllegalArgumentException("URI cannot be null");
         final Session current = session;
-        if (current == null || !WaterMedia.loaded()) throw new IllegalStateException("The player module is not loaded");
+        if (current == null) throw new IllegalStateException("The player module is not loaded");
         // A RELATIVE URI CAN NEVER RESOLVE: BORN IN ERROR INSTEAD OF CACHED AND FAILING LATE
         if (!uri.isAbsolute()) return error(uri.toString(), new IllegalArgumentException("URI must be absolute: " + uri));
         synchronized (current) {

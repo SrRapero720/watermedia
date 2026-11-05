@@ -71,9 +71,6 @@ public class NetworkServerTest {
     private int previousStorage;
     private int previousUpload;
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
     // CHILD-JVM PROBE: A SECOND PROCESS MUST NOT TAKE OVER, NOR CLEAN, THE STORAGE A LIVE SERVER OWNS
     public static void main(final String[] arguments) throws Exception {
         if (arguments.length != 1 || !arguments[0].equals("storage-lock"))

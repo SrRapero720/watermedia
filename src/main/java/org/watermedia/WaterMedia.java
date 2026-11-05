@@ -14,7 +14,6 @@ import org.watermedia.api.codecs.CodecsAPI;
 import org.watermedia.api.network.NetworkAPI;
 import org.watermedia.api.player.PlayerAPI;
 import org.watermedia.binaries.WaterMediaBinaries;
-import org.watermedia.bootstrap.WaterMediaModule;
 import org.watermedia.tools.DataTool;
 import org.watermedia.tools.IOTool;
 import org.watermedia.tools.ThreadTool;
@@ -75,14 +74,15 @@ public final class WaterMedia {
         if (name == null || name.isBlank()) throw new IllegalArgumentException("Environment name cannot be empty");
         if (started) throw new IllegalStateException("WaterMedia has already started");
 
-        // THE MODULES IN LOAD ORDER: CONFIGURATION, NATIVES, THEN THE APIS THAT USE THEM; EACH ONE DECIDES BY ITSELF WHETHER THIS SIDE RUNS IT.
-        final List<WaterMediaModule> modules = new ArrayList<>(5);
-        modules.add(new WaterMediaConfig.Module());
+        // THE MODULES IN LOAD ORDER: CONFIGURATION, NATIVES, THEN THE APIS THAT USE THEM; EACH ONE REFUSES A SECOND
+        // CONSTRUCTION AND DECIDES BY ITSELF WHETHER THIS SIDE RUNS IT
+        final List<Module> modules = new ArrayList<>(5);
+        modules.add(new WaterMediaConfig());
         // BINARIES IS OPTIONAL: ITS INSTALL IS CHECKED WITH THE CLASS LOADER'S getResource(), WHICH SEES OTHER JARS WITHOUT LINKING THE CLASS
         if (WaterMedia.class.getClassLoader().getResource("org/watermedia/binaries/WaterMediaBinaries.class") != null) modules.add(new WaterMediaBinaries());
-        modules.add(new NetworkAPI.Module());
-        modules.add(new CodecsAPI.Module());
-        modules.add(new PlayerAPI.Module());
+        modules.add(new NetworkAPI());
+        modules.add(new CodecsAPI());
+        modules.add(new PlayerAPI());
 
         // PUBLISHED BEFORE THE FIRST MODULE STARTS, SO THE STATIC ACCESSORS ALREADY WORK FOR THE MODULES
         WaterMedia.name = name;
@@ -96,8 +96,8 @@ public final class WaterMedia {
         LOGGER.info(IT, "Temporary directory: {}", WaterMedia.tmp);
 
         try {
-            for (final WaterMediaModule module: modules) {
-                loading = module.name();
+            for (final Module module: modules) {
+                loading = module.getClass().getSimpleName();
                 LOGGER.info(IT, "Loading {} ({}/{})", loading, done + 1, steps);
                 module.start(WaterMedia.name, WaterMedia.tmp, WaterMedia.cwd, WaterMedia.clientSide);
                 done++; // SINGLE WRITER: ONLY start() TOUCHES IT, UNDER THE CLASS LOCK
@@ -185,5 +185,19 @@ public final class WaterMedia {
     // THE ONE FAILURE EVERY ACCESSOR GIVES BEFORE start(); ITS VOLATILE READ MUST COME BEFORE THE ENVIRONMENT READ
     private static void requireStarted() {
         if (!started) throw new IllegalStateException(NAME + " has not started");
+    }
+
+    // ==========================================================================
+    // NESTED TYPES
+    // ==========================================================================
+    /**
+     * One unit of WaterMedia's load: an API or a companion module that {@link WaterMedia#start} creates and starts once
+     * per process. Each subclass knows by itself whether it is loaded: its constructor flips its own flag on the first
+     * call and throws on the second. It decides whether this side needs it and handles the parts it can live without;
+     * a failure that escapes {@link #start} ends the load.
+     */
+    public abstract static class Module {
+        /** Starts the module, once, on the thread that called {@link WaterMedia#start}, with the environment it received. */
+        protected abstract void start(final String name, final Path tmp, final Path cwd, final boolean clientSide) throws Exception;
     }
 }

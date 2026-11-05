@@ -13,10 +13,6 @@ public class Parent extends Group<Parent> {
         this.orientation = orientation == null ? Orientation.VERTICAL : orientation;
     }
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
-
     public static Parent column() {
         return new Parent(Orientation.VERTICAL);
     }

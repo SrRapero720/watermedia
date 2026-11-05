@@ -26,10 +26,6 @@ public final class PlatformSmokeTest {
             "https://soundcloud.com/imaginedragons/believer",
     };
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
-
     public static void main(final String[] args) throws Exception {
         WaterMedia.start("TEST", null, null, true);
 

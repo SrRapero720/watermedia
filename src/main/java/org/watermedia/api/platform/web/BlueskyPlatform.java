@@ -49,10 +49,6 @@ public final class BlueskyPlatform implements Platform {
     // VIDEO PLAYLISTS ARE SERVED THROUGH A CDN WITH SHORT-LIVED SESSION TOKENS
     private static final Duration TTL = Duration.ofMinutes(30);
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
-
     @Override
     public String name() { return NAME; }
 

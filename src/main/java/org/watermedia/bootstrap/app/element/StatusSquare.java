@@ -22,10 +22,6 @@ public final class StatusSquare extends Element<StatusSquare> {
         this.status(value);
     }
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
-
     /** Sets a fixed status. */
     public StatusSquare status(final Status value) {
         final Status fixed = value == null ? Status.OFF : value;

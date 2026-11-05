@@ -35,7 +35,7 @@ public final class FFTool {
     private FFTool() {}
 
     // ==========================================================================
-    // PUBLIC API: FORMATS AND NATIVES
+    // FORMATS AND NATIVES
     // ==========================================================================
     /** Maps an FFmpeg pixel format to its engine layout, or null when no engine layout matches. */
     public static Pixels pixels(final int avPixFmt) {
@@ -184,7 +184,7 @@ public final class FFTool {
     public static void bundled(final boolean value) { bundled = value; }
 
     // ==========================================================================
-    // PUBLIC API: NATIVE TLS
+    // NATIVE TLS
     // ==========================================================================
     /** Exports the JVM trust anchors as the PEM bundle every input verifies against, after checking the patched transport options. */
     public static void startTLS() throws Exception {

@@ -26,10 +26,6 @@ public final class Badge extends Element<Badge> {
         this.label = label == null ? "" : label;
     }
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
-
     public Badge label(final String value) {
         this.label = value == null ? "" : value;
         return this;

@@ -1,8 +1,11 @@
 package org.watermedia.tools;
 
+import org.apache.logging.log4j.Marker;
 import org.watermedia.api.util.MathUtil;
 
 import java.util.concurrent.*;
+
+import static org.watermedia.WaterMedia.LOGGER;
 
 /**
  * Daemon thread creation with one per-name counter shared by every creator, so no two threads ever
@@ -16,9 +19,21 @@ public final class ThreadTool {
 
     private ThreadTool() {}
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
+    public static void silentCall(final SilentRunnable run) {
+        try {
+            run.call();
+        } catch (final Exception ignored) {
+        }
+    }
+
+    public static void safeCall(final SilentRunnable run, final Marker it, final String log) {
+        try {
+            run.call();
+        } catch (final Exception e) {
+            LOGGER.error(it, log, e);
+        }
+    }
+
     /** Starts a daemon thread with normal priority named {@code name-N}. */
     public static Thread thread(final String name, final Runnable task) {
         final Thread t = factory(name, Thread.NORM_PRIORITY).newThread(task);
@@ -100,5 +115,10 @@ public final class ThreadTool {
         if (count <= 32) return 4;
         if (count <= 64) return 6;
         return 8;
+    }
+
+    @FunctionalInterface
+    public interface SilentRunnable {
+        void call() throws Exception;
     }
 }

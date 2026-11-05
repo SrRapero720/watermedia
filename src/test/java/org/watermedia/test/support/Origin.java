@@ -47,10 +47,6 @@ public final class Origin implements AutoCloseable {
         }, this.workers);
     }
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
-
     /** Creates an origin answering every request with {@code body}, honouring byte ranges like a media CDN. */
     public static Origin of(final byte[] body, final String type) { return new Origin(body, type, false); }
 

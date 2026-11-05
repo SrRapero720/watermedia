@@ -5,21 +5,27 @@ import org.apache.logging.log4j.MarkerManager;
 import org.watermedia.WaterMedia;
 import org.watermedia.api.codecs.CodecsAPI;
 import org.watermedia.api.util.MediaType;
-import org.watermedia.bootstrap.WaterMediaModule;
+import org.watermedia.tools.ThreadTool;
 
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.util.concurrent.Executor;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Supplier;
 
 import static org.watermedia.WaterMedia.LOGGER;
 
 /** Player facade: resolves MRLs and creates players and engines. */
-public final class PlayerAPI {
+public final class PlayerAPI extends WaterMedia.Module {
     private static final Marker IT = MarkerManager.getMarker(PlayerAPI.class.getSimpleName());
-    private PlayerAPI() {}
+    private static final AtomicBoolean LOADED = new AtomicBoolean(); // FLIPS ON THE FIRST CONSTRUCTION, WHEN WATERMEDIA STARTS
+
+    /** Creates the player module; {@link WaterMedia#start} calls it once per process and a second call throws. */
+    public PlayerAPI() {
+        if (!LOADED.compareAndSet(false, true)) throw new IllegalStateException("PlayerAPI is already loaded");
+    }
 
     // ==========================================================================
     // PUBLIC API
@@ -39,7 +45,7 @@ public final class PlayerAPI {
      * @param uri the media URI or file path
      * @return the MRL instance (may still be loading, or in ERROR for malformed input)
      * @throws IllegalArgumentException when {@code uri} is null
-     * @throws IllegalStateException before WaterMedia loads, and on dedicated servers
+     * @throws IllegalStateException before the player module loads, and on dedicated servers
      */
     public static MRL mrl(final String uri) {
         if (uri == null) throw new IllegalArgumentException("URI cannot be null");
@@ -66,7 +72,7 @@ public final class PlayerAPI {
      * @param uri the media URI
      * @return the MRL instance (may still be loading)
      * @throws IllegalArgumentException when {@code uri} is null
-     * @throws IllegalStateException    before WaterMedia loads, and on dedicated servers
+     * @throws IllegalStateException    before the player module loads, and on dedicated servers
      */
     public static MRL mrl(final URI uri) {
         return MRL.get(uri);
@@ -223,21 +229,14 @@ public final class PlayerAPI {
     }
 
     // ==========================================================================
-    // NESTED TYPES
+    // INTERNAL API
     // ==========================================================================
-
-    /** Internal module: media resolution and the network cache; only clients run it. */
-    public static final class Module extends WaterMediaModule {
-        @Override
-        public void start(final String name, final Path tmp, final Path cwd, final boolean clientSide) {
-            // A DEDICATED SERVER PLAYS NOTHING: THE RESOLVER AND THE CACHE STAY OFF
-            if (!clientSide) return;
-            MRL.start();
-            try {
-                NetworkCache.start(tmp.resolve("cache"));
-            } catch (final Exception failure) { // PLAYBACK WORKS WITHOUT THE DISK CACHE
-                LOGGER.error(IT, "The media cache did not start; playback continues without it", failure);
-            }
-        }
+    // MEDIA RESOLUTION AND THE NETWORK CACHE; ONLY CLIENTS RUN IT
+    @Override
+    protected void start(final String name, final Path tmp, final Path cwd, final boolean clientSide) {
+        // A DEDICATED SERVER PLAYS NOTHING: THE RESOLVER AND THE CACHE STAY OFF
+        if (!clientSide) return;
+        MRL.start();
+        ThreadTool.safeCall(() -> NetworkCache.start(tmp.resolve("cache")), IT, "The media cache did not start; playback continues without it");
     }
 }

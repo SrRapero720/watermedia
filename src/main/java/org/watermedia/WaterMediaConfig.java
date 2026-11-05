@@ -6,18 +6,19 @@ import me.srrapero720.waterconfig.api.Control;
 import me.srrapero720.waterconfig.api.annotations.*;
 import me.srrapero720.waterconfig.impl.fields.StringField;
 import org.watermedia.api.util.MediaQuality;
-import org.watermedia.bootstrap.WaterMediaModule;
 
 import java.io.File;
 import java.nio.file.Path;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Pattern;
 
 /** WaterMedia configuration: the TOML-backed settings of the codecs, the network, the media players and the platforms. */
 @Spec(value = WaterMedia.ID, format = WaterConfig.FORMAT_TOML)
-public final class WaterMediaConfig {
+public final class WaterMediaConfig extends WaterMedia.Module {
     private static final int DEFAULT_NETWORK_SERVER_PORT = 25_572;
     /** Upload token shipped by default; a file server reachable from other machines refuses to start with it. */
     public static final String DEFAULT_NETWORK_TOKEN = "watermedia_default_token_change_it";
+    private static final AtomicBoolean LOADED = new AtomicBoolean(); // FLIPS ON THE FIRST CONSTRUCTION, WHEN WATERMEDIA STARTS
 
     @Spec.Field
     @Comment("CodecsAPI settings")
@@ -35,7 +36,29 @@ public final class WaterMediaConfig {
     @Comment("Platform-specific settings")
     public static final Platforms platforms = new Platforms();
 
-    private WaterMediaConfig() {}
+    /** Creates the configuration module; {@link WaterMedia#start} calls it once per process and a second call throws. */
+    public WaterMediaConfig() {
+        if (!LOADED.compareAndSet(false, true)) throw new IllegalStateException("WaterMediaConfig is already loaded");
+    }
+
+    // ==========================================================================
+    // INTERNAL API
+    // ==========================================================================
+    @Override
+    protected void start(final String name, final Path tmp, final Path cwd, final boolean clientSide) throws InterruptedException {
+        WaterConfig.init();
+        final ConfigSpec existing = WaterConfig.spec(WaterMedia.ID, false);
+        if (existing == null) {
+            WaterConfig.registerBlocking(WaterMediaConfig.class);
+        } else {
+            // THE HOST CONFIGURATION SERVICE IS PROCESS-SCOPED; NEVER REGISTER A SECOND WRITER.
+            synchronized (existing) {
+                while (!existing.isLoaded() && existing.status() != ConfigSpec.Status.FAILED) existing.wait();
+                if (!existing.isLoaded()) throw new IllegalStateException("WaterMedia configuration failed", existing.loadError());
+                existing.refresh();
+            }
+        }
+    }
 
     // ==========================================================================
     // NESTED TYPES
@@ -285,24 +308,5 @@ public final class WaterMediaConfig {
 
         /** Where the file storage server runs. */
         public enum Server { OFF, DEDICATED, ALWAYS }
-    }
-
-    /** Internal bootstrap operation for the configuration facade. */
-    public static final class Module extends WaterMediaModule {
-        @Override
-        public void start(final String name, final Path tmp, final Path cwd, final boolean clientSide) throws InterruptedException {
-            WaterConfig.init();
-            final ConfigSpec existing = WaterConfig.spec(WaterMedia.ID, false);
-            if (existing == null) {
-                WaterConfig.registerBlocking(WaterMediaConfig.class);
-            } else {
-                // THE HOST CONFIGURATION SERVICE IS PROCESS-SCOPED; NEVER REGISTER A SECOND WRITER.
-                synchronized (existing) {
-                    while (!existing.isLoaded() && existing.status() != ConfigSpec.Status.FAILED) existing.wait();
-                    if (!existing.isLoaded()) throw new IllegalStateException("WaterMedia configuration failed", existing.loadError());
-                    existing.refresh();
-                }
-            }
-        }
     }
 }

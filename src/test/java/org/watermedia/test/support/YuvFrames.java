@@ -15,10 +15,6 @@ public final class YuvFrames {
 
     private YuvFrames() {}
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
-
     /** A direct plane holding exactly the given unsigned bytes, at position 0. */
     public static ByteBuffer direct(final int... bytes) {
         final ByteBuffer buffer = BufferUtils.createByteBuffer(bytes.length);

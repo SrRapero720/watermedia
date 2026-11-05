@@ -45,9 +45,6 @@ public final class AppTheme {
 
     private AppTheme() {}
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
     public static Color hex(final int rgb) {
         return new Color(rgb);
     }

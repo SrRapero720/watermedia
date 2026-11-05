@@ -33,9 +33,6 @@ public final class RecordingBackend implements RenderBackend {
     public float[] lastVertices = new float[0];
     public float[] lastClear = new float[0];
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
     /** Puts a fresh {@link RenderEngine} over this backend behind {@link RenderSystem} and returns it. */
     public RenderEngine install() {
         final RenderEngine engine = new RenderEngine(this);

@@ -74,10 +74,6 @@ public class ListRow extends Group<ListRow> {
     private int separatorX = -1;
     private boolean separator = true;
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
-
     /** Sets the fill at rest, while hovered and while selected; a null one falls back to the rest fill or to none. */
     public ListRow fill(final Color normal, final Color hovered, final Color selected) {
         this.fill = normal;

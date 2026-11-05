@@ -17,10 +17,6 @@ public final class ProgressBar extends Element<ProgressBar> {
         this.height = this.trackHeight;
     }
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
-
     public ProgressBar progress(final float value) {
         this.progress = MathUtil.clamp(value, 0f, 1f);
         return this;

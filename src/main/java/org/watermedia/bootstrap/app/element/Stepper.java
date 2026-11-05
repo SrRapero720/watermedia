@@ -22,10 +22,6 @@ public final class Stepper extends Element<Stepper> {
         this.labels = labels == null ? new String[0] : labels.clone();
     }
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
-
     /** Sets the live test for finished steps; steps count from 1. */
     public Stepper complete(final IntPredicate test) {
         this.complete = test == null ? step -> false : test;

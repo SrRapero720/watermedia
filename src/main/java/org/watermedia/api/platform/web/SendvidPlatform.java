@@ -34,10 +34,6 @@ public final class SendvidPlatform implements Platform {
     private static final int MAX_POLLS = 30;
     private static final long POLL_DELAY_MS = 2_000L;
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
-
     @Override
     public String name() { return NAME; }
 

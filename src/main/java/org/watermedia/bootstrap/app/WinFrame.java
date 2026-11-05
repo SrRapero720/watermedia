@@ -46,9 +46,6 @@ public final class WinFrame {
 
     private WinFrame() {}
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
     /** Subclasses the Win32 window of a GLFW window, replacing any previous install; call it after every window rebuild. */
     public static void install(final long window, final AppContext context) {
         if (!ACTIVE || window == 0L) return;

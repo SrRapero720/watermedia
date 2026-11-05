@@ -724,8 +724,6 @@ public abstract sealed class MediaPlayer permits ServerMediaPlayer, FFMediaPlaye
     final void arm() {
         synchronized (this.tickLock) {
             if (this.armed) return;
-            // A SERVER PLAYER NEEDS NO SESSION; A MEDIA PLAYER NEEDS THE LOADED PLAYER MODULE
-            if (this.mrl != null && !WaterMedia.loaded()) throw new IllegalStateException("Cannot create a media player before WaterMedia loads");
             this.armed = true;
             // BACKDATE THE COOLDOWN SO THE FIRST CORRECTION IS NEVER BLOCKED (nanoTime ORIGIN IS ARBITRARY)
             this.lastSeekNanos = System.nanoTime() - SEEK_COOLDOWN_NS;

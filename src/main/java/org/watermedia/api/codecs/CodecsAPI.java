@@ -9,6 +9,7 @@ import org.bytedeco.ffmpeg.global.avutil;
 import org.bytedeco.ffmpeg.global.swresample;
 import org.bytedeco.ffmpeg.global.swscale;
 import org.bytedeco.javacpp.BytePointer;
+import org.watermedia.WaterMedia;
 import org.watermedia.WaterMediaConfig;
 import org.watermedia.api.codecs.encoders.FFEncoder;
 import org.watermedia.api.codecs.encoders.GifEncoder;
@@ -22,7 +23,6 @@ import org.watermedia.api.codecs.readers.svg.SvgReader;
 import org.watermedia.api.util.MediaType;
 import org.watermedia.api.util.PixelFormat;
 import org.watermedia.binaries.WaterMediaBinaries;
-import org.watermedia.bootstrap.WaterMediaModule;
 import org.watermedia.tools.DataTool;
 import org.watermedia.tools.FFTool;
 import org.watermedia.tools.IOTool;
@@ -37,6 +37,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Locale;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.watermedia.WaterMedia.LOGGER;
 
@@ -51,7 +52,7 @@ import static org.watermedia.WaterMedia.LOGGER;
  * encoders and filters they hand out, may change or break in any update, so mods should not use them yet. The status
  * queries {@link #ffmpegLoaded()}, {@link #ffmpegError()} and {@link #vulkanDecode()} are safe to call.
  */
-public final class CodecsAPI {
+public final class CodecsAPI extends WaterMedia.Module {
     private static final Marker IT = MarkerManager.getMarker(CodecsAPI.class.getSimpleName());
 
     // METADATA KEYS: VALUES ARE JDK TYPES ONLY, SO EVERY HOST CAN READ THEM
@@ -176,12 +177,16 @@ public final class CodecsAPI {
     private static final int PROBE_SIZE = SVG_SNIFF_WINDOW_BYTES;
 
     // NATIVE STATE IS PUBLISHED ONCE, WHEN THE MODULE LOADS
+    private static final AtomicBoolean LOADED = new AtomicBoolean(); // FLIPS ON THE FIRST CONSTRUCTION, WHEN WATERMEDIA STARTS
     private static volatile boolean ffmpegLoaded;
     private static volatile Throwable ffmpegFailure;
     // private static LogCallback nativeLog; // KEEPS THE NATIVE LOG THUNK REACHABLE WHILE FFMPEG MAY CALL IT
     private static volatile boolean vulkanHwDecode; // THE BUILD DECODES WITH VULKAN VIDEO AND ITS BINDINGS LINK (PROBED AT BOOT)
 
-    private CodecsAPI() {}
+    /** Creates the codecs module; {@link WaterMedia#start} calls it once per process and a second call throws. */
+    public CodecsAPI() {
+        if (!LOADED.compareAndSet(false, true)) throw new IllegalStateException("CodecsAPI is already loaded");
+    }
 
     // ==========================================================================
     // PUBLIC API: READERS, ENCODERS AND SNIFFING
@@ -501,6 +506,22 @@ public final class CodecsAPI {
     }
 
     // ==========================================================================
+    // INTERNAL API
+    // ==========================================================================
+    // BOOTS THE FFMPEG NATIVES THAT DECODE AND ENCODE AUDIO AND VIDEO; ONLY CLIENTS RUN IT
+    @Override
+    protected void start(final String name, final Path tmp, final Path cwd, final boolean clientSide) {
+        // THE BINARIES MODULE EXTRACTS NOTHING ON A DEDICATED SERVER, SO THERE IS NOTHING TO LOAD
+        if (!clientSide) return;
+        // THE NATIVES COME FROM THE BINARIES MODULE; WITHOUT ITS JAR THERE IS NOTHING TO LOAD
+        if (CodecsAPI.class.getClassLoader().getResource("org/watermedia/binaries/WaterMediaBinaries.class") == null) {
+            LOGGER.warn(IT, "FFmpeg is unavailable: WaterMedia Binaries is not installed");
+            return;
+        }
+        startFFmpeg(); // LOGS ITS OWN FAILURE AND LEAVES ffmpegError() SET
+    }
+
+    // ==========================================================================
     // UTILITY
     // ==========================================================================
     // BOOTS THE BUNDLED FFMPEG NATIVES: POINTS JAVACPP AT THE EXTRACTED BINARIES, LOGS THE BUILD
@@ -679,21 +700,6 @@ public final class CodecsAPI {
     // ==========================================================================
     // NESTED TYPES
     // ==========================================================================
-    /** Internal module: boots the FFmpeg natives that decode and encode audio and video; only clients run it. */
-    public static final class Module extends WaterMediaModule {
-        @Override
-        public void start(final String name, final Path tmp, final Path cwd, final boolean clientSide) {
-            // THE BINARIES MODULE EXTRACTS NOTHING ON A DEDICATED SERVER, SO THERE IS NOTHING TO LOAD
-            if (!clientSide) return;
-            // THE NATIVES COME FROM THE BINARIES MODULE; WITHOUT ITS JAR THERE IS NOTHING TO LOAD
-            if (CodecsAPI.class.getClassLoader().getResource("org/watermedia/binaries/WaterMediaBinaries.class") == null) {
-                LOGGER.warn(IT, "FFmpeg is unavailable: WaterMedia Binaries is not installed");
-                return;
-            }
-            startFFmpeg(); // LOGS ITS OWN FAILURE AND LEAVES ffmpegError() SET
-        }
-    }
-
     // OPENS THE FILE ON THE FIRST WRITE, SO AN ENCODER THAT REFUSES ITS TRACKS OR GETS NO FRAMES LEAVES IT UNTOUCHED
     private static final class LazyFile extends OutputStream {
         private final Path file;

@@ -88,10 +88,6 @@ public final class TwitchPlatform implements Platform {
     // /{channel}
     private static final Pattern CHANNEL_PATH = Pattern.compile("^/([^/#?]+)/?$");
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
-
     @Override
     public String name() { return NAME; }
 

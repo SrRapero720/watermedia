@@ -35,7 +35,7 @@ import static org.watermedia.WaterMedia.LOGGER;
  * consumers build their domain types (e.g. {@code MRL.Source}) from that data. The registry is
  * static and the search workers start on first use, so resolving, searching and registering work at
  * any time; a handler that needs the Binaries module (yt-dlp, YouTube) fails with its own
- * {@link PlatformException} until WaterMedia loads.
+ * {@link PlatformException} until that module loads.
  */
 public final class PlatformAPI {
     private static final Marker IT = MarkerManager.getMarker(PlatformAPI.class.getSimpleName());
