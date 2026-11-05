@@ -19,7 +19,7 @@ import org.watermedia.bootstrap.app.ui.TextRenderer;
  * Boot splash: the glowing banner, the animated duck (or the pack icon), the title and a progress bar naming the
  * module being loaded. Its elements pull {@link WaterMedia#loading()} and {@link WaterMedia#step()} every frame.
  */
-public final class LoadingScreen extends Screen {
+public final class LoadingScreen extends BaseScreen {
     private static final int BANNER_MAX_W = 1_000;
     private static final int BANNER_MAX_H = 170;
     private static final int BANNER_UP_SHIFT = 18;

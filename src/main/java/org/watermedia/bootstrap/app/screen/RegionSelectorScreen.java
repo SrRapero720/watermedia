@@ -29,7 +29,7 @@ import static org.lwjgl.glfw.GLFW.*;
  * Region selector for IPTV channels: a {@link Header} over a panel holding a {@link ListView} of region rows,
  * which owns scrolling, hit-testing and selection.
  */
-public final class RegionSelectorScreen extends Screen {
+public final class RegionSelectorScreen extends BaseScreen {
     private static final int ROW_H = 54;
     private static final int ROW_GAP = 8;
     // CONSTANT SO THE PER-FRAME keybinds() POLL OF KeybindsBar ALLOCATES NOTHING

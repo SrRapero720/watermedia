@@ -61,7 +61,7 @@ import static org.lwjgl.glfw.GLFW.*;
  * Settings screen for the WaterConfig specs: a spec tab strip over a sections column and a {@link ListView} of
  * setting widgets. Each tab is built reflectively from its {@link ConfigSpec} and shows its autosave state.
  */
-public final class SettingsScreen extends Screen {
+public final class SettingsScreen extends BaseScreen {
     private static final int SIDEBAR_W = 220;
     private static final int ROW_H = Theme.ROW_MD;
     private static final int CONTROL_W = 320;

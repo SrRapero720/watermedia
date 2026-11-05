@@ -13,13 +13,13 @@ import java.util.List;
  * Base class for retained screens: a view stacking the {@code body} built lazily by {@link #build()} and an
  * {@code overlay} {@link ParentFrame} for its dialogs. Input arrives only through the {@link Element} dispatch.
  */
-public abstract class Screen extends Group<Screen> {
+public abstract class BaseScreen extends Group<BaseScreen> {
     protected final TextRenderer text;
     private final ParentFrame overlay = new ParentFrame();
     private Element<?> body;
     private boolean built;
 
-    protected Screen(final TextRenderer text, final AppContext ctx) {
+    protected BaseScreen(final TextRenderer text, final AppContext ctx) {
         this.text = text;
         this.ctx = ctx;
         this.width = MAX_PARENT;

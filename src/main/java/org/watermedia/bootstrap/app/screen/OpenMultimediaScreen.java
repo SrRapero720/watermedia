@@ -53,7 +53,7 @@ import static org.watermedia.bootstrap.app.render.RenderSystem.mediaEngineSuppli
  * Dialog over the home screen that previews and plays a custom URL or path, or searches the platforms
  * when the input is neither.
  */
-public class OpenMultimediaScreen extends Screen {
+public class OpenMultimediaScreen extends BaseScreen {
     private static final long LOAD_TIMEOUT_MS = 30_000L;
     private static final int SEARCH_PREVIEW_H = 130;      // SHRUNK PREVIEW HEIGHT WHILE SEARCHING
     private static final long PREVIEW_ANIM_MS = 220L;     // PREVIEW GROW/SHRINK EASE DURATION

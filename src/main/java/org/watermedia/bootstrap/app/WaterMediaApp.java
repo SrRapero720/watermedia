@@ -18,7 +18,7 @@ import org.watermedia.api.codecs.CodecsAPI;
 import org.watermedia.api.util.MathUtil;
 import org.watermedia.bootstrap.AppBootstrap;
 import org.watermedia.bootstrap.app.screen.*;
-import org.watermedia.bootstrap.app.screen.Screen.Keybind;
+import org.watermedia.bootstrap.app.screen.BaseScreen.Keybind;
 import org.watermedia.bootstrap.app.ui.AppTheme;
 import org.watermedia.bootstrap.app.ui.TextRenderer;
 import org.watermedia.bootstrap.app.render.RenderSystem;

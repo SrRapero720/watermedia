@@ -53,7 +53,7 @@ import static org.watermedia.bootstrap.app.render.RenderSystem.mediaEngineSuppli
  * Plays the selected media under a HUD with the info row, metrics panel and transport bar, plus modal
  * source/quality and video-settings dialogs.
  */
-public final class PlayerScreen extends Screen {
+public final class PlayerScreen extends BaseScreen {
     private static final float META_SCALE = AppTheme.TEXT_SECTION;
     private static final float META_HEAD_SCALE = AppTheme.TEXT_DISPLAY;
     private static final float META_DESC_LABEL_SCALE = AppTheme.TEXT_BUTTON;

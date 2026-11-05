@@ -1,8 +1,8 @@
 package org.watermedia.bootstrap.app;
 
+import org.watermedia.bootstrap.app.screen.BaseScreen;
 import org.watermedia.bootstrap.app.screen.RootScreen;
-import org.watermedia.bootstrap.app.screen.Screen;
-import org.watermedia.bootstrap.app.screen.Screen.Keybind;
+import org.watermedia.bootstrap.app.screen.BaseScreen.Keybind;
 
 import java.util.HashMap;
 import java.util.List;
@@ -11,16 +11,16 @@ import java.util.function.BiConsumer;
 
 /**
  * Navigates between the registered screens: runs their exit/enter hooks and mounts the target in the root's
- * center slot, over the underlay it declares through {@link Screen#under()}.
+ * center slot, over the underlay it declares through {@link BaseScreen#under()}.
  */
 final class ScreenManager {
-    private final Map<String, Screen> screens = new HashMap<>();
+    private final Map<String, BaseScreen> screens = new HashMap<>();
     private RootScreen root;
-    private Screen current;
+    private BaseScreen current;
     private String currentName;
     private BiConsumer<String, String> onNavigate;
 
-    public void register(final String name, final Screen screen) {
+    public void register(final String name, final BaseScreen screen) {
         this.screens.put(name, screen);
     }
 
@@ -39,7 +39,7 @@ final class ScreenManager {
             this.backToHome();
             return;
         }
-        final Screen next = this.screens.get(screenName);
+        final BaseScreen next = this.screens.get(screenName);
         if (next == null) return;
         // NAVIGATING TO THE ALREADY-CURRENT SCREEN MUST NOT RE-RUN onExit/onEnter (WHICH RESET ITS STATE)
         if (screenName.equals(this.currentName)) return;
@@ -52,7 +52,7 @@ final class ScreenManager {
         // A SCREEN DECLARING under() KEEPS THAT SCREEN MOUNTED (AND ANIMATING) BENEATH IT; THE TOP
         // MOUNT'S FULL-SLOT HIT BOX BLOCKS EVERY POINTER EVENT FROM REACHING THE UNDERLAY
         if (this.root != null) {
-            final Screen under = this.current.under() != null ? this.screens.get(this.current.under()) : null;
+            final BaseScreen under = this.current.under() != null ? this.screens.get(this.current.under()) : null;
             if (under != null && under != this.current) this.root.mountUnder(under, this.current);
             else this.root.mount(this.current);
         }
@@ -75,6 +75,6 @@ final class ScreenManager {
 
     /** Releases the media of every registered screen before an engine hot swap. */
     public void releaseMediaAll() {
-        for (final Screen screen: this.screens.values()) screen.releaseMedia();
+        for (final BaseScreen screen: this.screens.values()) screen.releaseMedia();
     }
 }

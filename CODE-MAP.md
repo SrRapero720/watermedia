@@ -27,7 +27,7 @@ Where to look (task → section → entry point):
 | Pixel buffers: blend, scale, orient, premultiply | §11 | `DataTool.blendOver` / `scaleArea` / `orient` / `premultiply` |
 | FFmpeg ↔ engine formats and native errors | §11 | `FFTool.pixels` / `avPixelFormat` / `sampleType` / `failure` |
 | Threads, digests, bounded reads, shader includes | §11 | `ThreadTool.workerFactory`, `IOTool.sha256` / `readLimited` / `shader` |
-| Change the desktop app | §12 | `Screen` subclasses, `Element` widgets, draw through `Canvas` only |
+| Change the desktop app | §12 | `BaseScreen` subclasses, `Element` widgets, draw through `Canvas` only |
 | Build, natives, CI, release | §4 | `build.gradle`, `gradle/common.gradle`, `binaries/tools` |
 | Write or find a test | §16 | mirrored package + `test/support` helpers |
 | Check what is disabled or missing | §19 | gaps list, `TODO.md`, `PENDING.md` |

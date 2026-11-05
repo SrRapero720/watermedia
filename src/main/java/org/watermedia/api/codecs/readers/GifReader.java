@@ -33,7 +33,7 @@ import static org.watermedia.WaterMedia.LOGGER;
  *
  * <p>Receives a {@link ByteBuffer} positioned immediately after the 6-byte signature
  * ({@code GIF87a} or {@code GIF89a}); the signature is consumed by {@code CodecsAPI}. The
- * constructor reads the Logical Screen Descriptor and the optional Global Color Table, then walks
+ * constructor reads the Logical BaseScreen Descriptor and the optional Global Color Table, then walks
  * the block stream once to collect the frame delays, the loop count, comments and application
  * extensions. Each {@link #next()} parses one Image Descriptor + LZW data block and composes it
  * onto the canvas.

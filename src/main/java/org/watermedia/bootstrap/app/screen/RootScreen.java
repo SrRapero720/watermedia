@@ -6,7 +6,7 @@ import org.watermedia.bootstrap.app.element.Element;
 import org.watermedia.bootstrap.app.element.Parent;
 import org.watermedia.bootstrap.app.element.ParentFrame;
 import org.watermedia.bootstrap.app.render.RenderSystem;
-import org.watermedia.bootstrap.app.screen.Screen.Keybind;
+import org.watermedia.bootstrap.app.screen.BaseScreen.Keybind;
 import org.watermedia.bootstrap.app.ui.TextRenderer;
 
 import java.util.List;
@@ -130,7 +130,7 @@ public final class RootScreen {
     public boolean continuous() {
         for (final Element<?> child: this.centerSlot.children()) {
             if (!child.visible()) continue;
-            if (child instanceof final Screen screen && screen.continuous()) return true;
+            if (child instanceof final BaseScreen screen && screen.continuous()) return true;
         }
         return false;
     }

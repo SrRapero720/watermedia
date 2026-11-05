@@ -10,7 +10,7 @@ import org.watermedia.bootstrap.app.element.StatusSquare;
 import org.watermedia.bootstrap.app.element.StatusText;
 import org.watermedia.bootstrap.app.element.Text;
 import org.watermedia.bootstrap.app.render.RenderSystem;
-import org.watermedia.bootstrap.app.screen.Screen.Keybind;
+import org.watermedia.bootstrap.app.screen.BaseScreen.Keybind;
 import org.watermedia.bootstrap.app.ui.AppTheme;
 import org.watermedia.bootstrap.app.ui.Spacing;
 

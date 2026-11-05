@@ -51,7 +51,7 @@ import static org.lwjgl.glfw.GLFW.*;
  * Lists the media of the selected group with a filter field and a live preview of the selected entry,
  * opening it in the player once its MRL loads.
  */
-public final class MRLSelectorScreen extends Screen {
+public final class MRLSelectorScreen extends BaseScreen {
     private static final long LOAD_TIMEOUT_MS = 30_000L;
     private static final int CORNER = 10; // AMBER CORNER TRIANGLE SIDE
 

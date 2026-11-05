@@ -45,7 +45,7 @@ import static org.lwjgl.glfw.GLFW.*;
  * Home screen: menu tiles grouped by section and the upload-logs and cleanup {@link Dialog}s, bound every frame
  * to {@code ctx.upload} and {@code ctx.cleanup}, which own their flow; this screen only fires actions.
  */
-public class HomeScreen extends Screen {
+public class HomeScreen extends BaseScreen {
     private static final Marker IT = MarkerManager.getMarker(HomeScreen.class.getSimpleName());
 
     private static final int UPLOAD_ROW_H = 52;
