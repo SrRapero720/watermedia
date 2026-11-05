@@ -94,8 +94,7 @@ public final class GLEngine extends GFXEngine {
     // ONE DRAIN HUB PER RENDER THREAD (ONE BATCHED TASK/FRAME IN ONE ENVELOPE); ORPHANS, KEYED
     // BY GLCapabilities IDENTITY, HOLDS EXPOSED TEXTURE NAMES AWAITING PROVABLY-SAFE DELETION.
     private static final Map<Thread, Hub> HUBS = new ConcurrentHashMap<>();
-    private static final Map<GLCapabilities, ArrayDeque<Integer>> ORPHANS =
-            Collections.synchronizedMap(new WeakHashMap<>());
+    private static final Map<GLCapabilities, ArrayDeque<Integer>> ORPHANS = Collections.synchronizedMap(new WeakHashMap<>());
     // ONE CONVERSION KIT PER CONTEXT BY GLCapabilities IDENTITY, GUARDED BY ITS OWN MONITOR; THE LAST ENGINE OUT REMOVES ITS
     // ENTRY, SO THE MAP HOLDS ONLY CONTEXTS WITH A LIVE CONVERTING ENGINE (SEE Kit)
     private static final Map<GLCapabilities, Kit> KITS = new HashMap<>();
