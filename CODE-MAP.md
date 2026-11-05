@@ -226,7 +226,7 @@ Package map (`src/main/java/org/watermedia`):
   `requires('watermedia-binaries')`) and Modrinth (`modrinthid`, `MODRINTH_TOKEN`, README as description); type
   `ALPHA`/`BETA`/`STABLE` from `versiontype`; validation: `RELEASE` needs `x.y.z`, pre-releases `x.y.z.w`.
   Modrinth's `projectDescription` (`gradle/common.gradle`) PATCHes the project body with `README.md` on every
-  `publishModrinth`, so the tag's README is the description; Binaries has no README, so its body is left alone.
+  `publishModrinth`, so the tag's README is the description; Binaries does the same with `binaries/README.md`.
   ⚠ CurseForge has no description API (upload API only, mod-publish-plugin has no option): its description is
   pasted by hand in Markdown mode.
 - `maven-publish` publication `watermedia`: only `jar` + `sourcesJar`, no POM dependencies and no Gradle module
