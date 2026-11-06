@@ -161,10 +161,9 @@ def readme = providers.fileContents(layout.projectDirectory.file('README.md')).a
 def userAgent = "$githubRepository/$publishVersion"
 [
         [store: 'Modrinth', method: 'PATCH', uri: "https://api.modrinth.com/v2/project/$modrinthid",
-         secret: 'MODRINTH_TOKEN', header: 'Authorization', prefix: '', fields: { String text -> [body: text] }],
+         secret: 'MODRINTH_TOKEN', header: 'Authorization', fields: { String text -> [body: text] }],
         [store: 'Curseforge', method: 'PUT', uri: "https://authors.curseforge.com/_api/projects/description/$curseforgeid",
-         secret: 'CURSEFORGE_SESSION', header: 'Cookie', prefix: 'CobaltSession=',
-         fields: { String text -> [description: text, descriptionType: 5] }]
+         secret: 'CURSEFORGE_SESSION', cookie: 'CobaltSession', fields: { String text -> [description: text, descriptionType: 5] }]
 ].each { Map page ->
     def secret = providers.environmentVariable(page.secret)
     tasks.register("sync${page.store}Description") {
@@ -172,15 +171,24 @@ def userAgent = "$githubRepository/$publishVersion"
         description = "Replaces the $page.store project description with README.md"
         doLast {
             if (!secret.present) throw new GradleException("$page.secret is not set")
+            def uri = URI.create(page.uri)
+            def cookies = new CookieManager()
+            def client = HttpClient.newBuilder().cookieHandler(cookies).build()
+            def request = HttpRequest.newBuilder(uri).header('User-Agent', userAgent).timeout(Duration.ofMinutes(1))
+            if (page.header) request.header(page.header, secret.get())
+            if (page.cookie) {
+                // VERSION 0 SENDS THE PLAIN name=value FORM BROWSERS USE
+                def session = new HttpCookie(page.cookie, secret.get())
+                session.version = 0
+                session.path = '/'
+                session.secure = true
+                cookies.cookieStore.add(uri, session)
+                // CURSEFORGE ALSO WANTS THE AuthorsUser COOKIE THAT ITS FIRST ANSWER HANDS OUT, SO A READ GOES FIRST
+                client.send(request.copy().GET().build(), HttpResponse.BodyHandlers.discarding())
+            }
             def body = JsonOutput.toJson(page.fields.call(readme.get().replace('\r\n', '\n')))
-            def request = HttpRequest.newBuilder(URI.create(page.uri))
-                    .header(page.header, page.prefix + secret.get())
-                    .header('Content-Type', 'application/json')
-                    .header('User-Agent', userAgent)
-                    .timeout(Duration.ofMinutes(1))
-                    .method(page.method, HttpRequest.BodyPublishers.ofString(body))
-                    .build()
-            def response = HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofString())
+            def response = client.send(request.header('Content-Type', 'application/json')
+                    .method(page.method, HttpRequest.BodyPublishers.ofString(body)).build(), HttpResponse.BodyHandlers.ofString())
             int status = response.statusCode()
             // AN EXPIRED SESSION OR A TOKEN WITHOUT WRITE ACCESS ANSWERS 401 OR 403
             def reason = status in [401, 403] ? "; renew $page.secret" : ''

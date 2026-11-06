@@ -230,8 +230,11 @@ Package map (`src/main/java/org/watermedia`):
 - Store descriptions (`gradle/common.gradle`, group `publishing`): `syncModrinthDescription` PATCHes
   `/v2/project/<modrinthid>` with `{body}`; `syncCurseforgeDescription` PUTs `{description, descriptionType: 5}` (5 is
   Markdown, 1 HTML) to `authors.curseforge.com/_api/projects/description/<curseforgeid>` with
-  `Cookie: CobaltSession=<CURSEFORGE_SESSION>`. Both send `README.md` (CRLF to LF) and fail on any answer from 300 up;
-  401/403 names the secret to renew. Binaries runs the same tasks over `binaries/README.md`.
+  the `CobaltSession=<CURSEFORGE_SESSION>` cookie in a `CookieManager`; a GET goes first because the site only accepts
+  the session next to the `AuthorsUser` cookie its first answer hands out (403 without it). Both send `README.md`
+  (CRLF to LF) and fail on any answer from 300 up; 401/403 names the secret to renew. Binaries runs the same tasks over
+  `binaries/README.md`. CurseForge rewrites inline HTML (drops `align`, adds `rel="nofollow"`, compacts `style`) and
+  reads back the old text for a few seconds after the PUT.
   ⚠ CurseForge has no public description API: that call is the authors site editor's own (unofficial, may change),
   the upload token gets 401 there, and the session cookie expires and opens the whole account.
 - `maven-publish` publication `watermedia`: only `jar` + `sourcesJar`, no POM dependencies and no Gradle module
