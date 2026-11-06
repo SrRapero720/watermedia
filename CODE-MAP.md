@@ -230,9 +230,10 @@ Package map (`src/main/java/org/watermedia`):
 - Store descriptions (`gradle/common.gradle`, group `publishing`): `syncModrinthDescription` PATCHes
   `/v2/project/<modrinthid>` with `{body}`; `syncCurseforgeDescription` PUTs `{description, descriptionType: 5}` (5 is
   Markdown, 1 HTML) to `authors.curseforge.com/_api/projects/description/<curseforgeid>` with
-  the `CobaltSession=<CURSEFORGE_SESSION>` cookie in a `CookieManager`; a GET goes first because the site only accepts
-  the session next to the `AuthorsUser` cookie its first answer hands out (403 without it). Both send `README.md`
-  (CRLF to LF) and fail on any answer from 300 up; 401/403 names the secret to renew. Binaries runs the same tasks over
+  `Cookie: CobaltSession=<CURSEFORGE_SESSION>; AuthorsUser=<CURSEFORGE_AUTHORS_USER>`, both from the same browser
+  session (401 without the first, 403 without the second, 500 when the second is malformed). Each store declares its `headers` and `cookies` as
+  name → secret; a missing secret fails the task. Both send `README.md` (CRLF to LF) and fail on any answer from 300 up;
+  401/403 names the secrets to renew. Binaries runs the same tasks over
   `binaries/README.md`. CurseForge rewrites inline HTML (drops `align`, adds `rel="nofollow"`, compacts `style`) and
   reads back the old text for a few seconds after the PUT.
   ⚠ CurseForge has no public description API: that call is the authors site editor's own (unofficial, may change),
@@ -282,7 +283,7 @@ Package map (`src/main/java/org/watermedia`):
   `workflow_dispatch` (input `store`: `all`, `curseforge`, `modrinth`) skips the build and uploads and only syncs the
   descriptions from the README of the selected ref. Jobs share `.github/actions/setup-build` (Gradle version,
   `SetupJava.ps1`, setup-gradle). Secrets: `CURSEFORGE_TOKEN`, `MODRINTH_TOKEN` (needs "Write projects"),
-  `CURSEFORGE_SESSION`.
+  `CURSEFORGE_SESSION` and `CURSEFORGE_AUTHORS_USER` (the authors site cookies; renew both together).
 - Binaries CI (`binaries/.github/workflows/building-*.yml`, push/PR on `master`, `3.0.x` and tags): checks out the
   core `SrRapero720/watermedia@master` and the Binaries revision into its `binaries/` folder, then builds Binaries as root.
   `building-release.yml` mirrors the core release jobs (`-x shadowJar`, its own `setup-build` under `watermedia/binaries`).

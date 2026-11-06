@@ -152,6 +152,7 @@ jobs:
         run: gradle syncCurseforgeDescription --warning-mode fail
         env:
           CURSEFORGE_SESSION: ${{ secrets.CURSEFORGE_SESSION }}
+          CURSEFORGE_AUTHORS_USER: ${{ secrets.CURSEFORGE_AUTHORS_USER }}
 
   modrinth-description:
     needs: modrinth

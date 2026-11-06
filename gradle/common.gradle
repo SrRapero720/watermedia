@@ -156,42 +156,38 @@ publishMods {
 
 // ==== STORE DESCRIPTIONS ====
 // README.md IS THE STORE PAGE. MODRINTH TAKES IT THROUGH ITS API; CURSEFORGE HAS NO PUBLIC ONE, SO IT GOES THROUGH THE
-// AUTHORS SITE EDITOR'S OWN CALL, SIGNED IN WITH THE CobaltSession COOKIE, WHERE DESCRIPTION TYPE 5 IS MARKDOWN
+// AUTHORS SITE EDITOR'S OWN CALL, SIGNED IN WITH THE CobaltSession AND AuthorsUser COOKIES OF A BROWSER SESSION (IT
+// ANSWERS 401 WITHOUT THE FIRST AND 403 WITHOUT THE SECOND), WHERE DESCRIPTION TYPE 5 IS MARKDOWN
 def readme = providers.fileContents(layout.projectDirectory.file('README.md')).asText
 def userAgent = "$githubRepository/$publishVersion"
 [
         [store: 'Modrinth', method: 'PATCH', uri: "https://api.modrinth.com/v2/project/$modrinthid",
-         secret: 'MODRINTH_TOKEN', header: 'Authorization', fields: { String text -> [body: text] }],
+         headers: [Authorization: 'MODRINTH_TOKEN'], cookies: [:], fields: { String text -> [body: text] }],
         [store: 'Curseforge', method: 'PUT', uri: "https://authors.curseforge.com/_api/projects/description/$curseforgeid",
-         secret: 'CURSEFORGE_SESSION', cookie: 'CobaltSession', fields: { String text -> [description: text, descriptionType: 5] }]
+         headers: [:], cookies: [CobaltSession: 'CURSEFORGE_SESSION', AuthorsUser: 'CURSEFORGE_AUTHORS_USER'],
+         fields: { String text -> [description: text, descriptionType: 5] }]
 ].each { Map page ->
-    def secret = providers.environmentVariable(page.secret)
+    // EVERY HEADER AND COOKIE TAKES ITS VALUE FROM THE SECRET IT NAMES
+    Map<String, String> secrets = page.headers + page.cookies
+    def values = secrets.collectEntries { name, secret -> [name, providers.environmentVariable(secret)] }
     tasks.register("sync${page.store}Description") {
         group = 'publishing'
         description = "Replaces the $page.store project description with README.md"
         doLast {
-            if (!secret.present) throw new GradleException("$page.secret is not set")
-            def uri = URI.create(page.uri)
-            def cookies = new CookieManager()
-            def client = HttpClient.newBuilder().cookieHandler(cookies).build()
-            def request = HttpRequest.newBuilder(uri).header('User-Agent', userAgent).timeout(Duration.ofMinutes(1))
-            if (page.header) request.header(page.header, secret.get())
-            if (page.cookie) {
-                // VERSION 0 SENDS THE PLAIN name=value FORM BROWSERS USE
-                def session = new HttpCookie(page.cookie, secret.get())
-                session.version = 0
-                session.path = '/'
-                session.secure = true
-                cookies.cookieStore.add(uri, session)
-                // CURSEFORGE ALSO WANTS THE AuthorsUser COOKIE THAT ITS FIRST ANSWER HANDS OUT, SO A READ GOES FIRST
-                client.send(request.copy().GET().build(), HttpResponse.BodyHandlers.discarding())
-            }
+            def missing = secrets.findAll { name, secret -> !values[name].present }.values()
+            if (missing) throw new GradleException("Missing ${missing.join(', ')}")
             def body = JsonOutput.toJson(page.fields.call(readme.get().replace('\r\n', '\n')))
-            def response = client.send(request.header('Content-Type', 'application/json')
-                    .method(page.method, HttpRequest.BodyPublishers.ofString(body)).build(), HttpResponse.BodyHandlers.ofString())
+            def request = HttpRequest.newBuilder(URI.create(page.uri))
+                    .header('Content-Type', 'application/json')
+                    .header('User-Agent', userAgent)
+                    .timeout(Duration.ofMinutes(1))
+                    .method(page.method, HttpRequest.BodyPublishers.ofString(body))
+            page.headers.each { name, secret -> request.header(name, values[name].get()) }
+            if (page.cookies) request.header('Cookie', page.cookies.collect { name, secret -> "$name=${values[name].get()}" }.join('; '))
+            def response = HttpClient.newHttpClient().send(request.build(), HttpResponse.BodyHandlers.ofString())
             int status = response.statusCode()
             // AN EXPIRED SESSION OR A TOKEN WITHOUT WRITE ACCESS ANSWERS 401 OR 403
-            def reason = status in [401, 403] ? "; renew $page.secret" : ''
+            def reason = status in [401, 403] ? "; renew ${secrets.values().join(' or ')}" : ''
             if (status >= 300) throw new GradleException("$page.store refused the description with $status$reason: ${response.body().take(500)}")
             logger.lifecycle("$page.store description replaced with README.md")
         }
