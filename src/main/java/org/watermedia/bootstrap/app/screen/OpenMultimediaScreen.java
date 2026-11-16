@@ -32,9 +32,6 @@ import org.watermedia.tools.ThreadTool;
 
 import java.awt.Color;
 import java.awt.Font;
-import java.awt.Toolkit;
-import java.awt.datatransfer.Clipboard;
-import java.awt.datatransfer.DataFlavor;
 import java.io.File;
 import java.net.URI;
 import java.util.ArrayList;
@@ -382,15 +379,11 @@ public class OpenMultimediaScreen extends BaseScreen {
     // ==========================================================================
 
     private void pasteFromClipboard() {
-        try {
-            final Clipboard clipboard = Toolkit.getDefaultToolkit().getSystemClipboard();
-            if (clipboard.isDataFlavorAvailable(DataFlavor.stringFlavor)) {
-                this.field.value(((String) clipboard.getData(DataFlavor.stringFlavor)).trim().replace("\"", ""));
-                this.ensurePreviewMRL();
-            }
-        } catch (final Exception ignored) {
-            // A BUSY CLIPBOARD OR A FLAVOR ERROR KEEPS THE URL ALREADY TYPED
-        }
+        // AN EMPTY OR UNREADABLE CLIPBOARD KEEPS THE URL ALREADY TYPED
+        final String pasted = AppContext.clipboard().trim().replace("\"", "");
+        if (pasted.isEmpty()) return;
+        this.field.value(pasted);
+        this.ensurePreviewMRL();
     }
 
     private void reloadPreviewMRL() {

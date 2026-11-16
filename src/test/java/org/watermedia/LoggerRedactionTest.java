@@ -108,6 +108,16 @@ public class LoggerRedactionTest {
                 assertEquals("Header Authorization: Bearer ********", capture.events().get(1).getMessage().getFormattedMessage());
             }
         }
+
+        @Test
+        @DisplayName("Redacts a bare token pair and keeps the token parameter of a link")
+        void redactsBareTokens() {
+            try (final LogCapture capture = new LogCapture(WaterMedia.ID)) {
+                WaterMedia.LOGGER.warn(IT, "Config line {} read for {}", "token = \"private-token\"", URI.create("https://api.test/media/7?token=nested"));
+                assertEquals("Config line token = ******** read for https://api.test/media/7?token=nested",
+                        capture.events().get(0).getMessage().getFormattedMessage());
+            }
+        }
     }
 
     @Nested

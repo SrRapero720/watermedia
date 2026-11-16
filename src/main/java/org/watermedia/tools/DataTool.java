@@ -25,7 +25,12 @@ public final class DataTool {
     private static final Pattern SESSION_TRIPLE = Pattern.compile("(?i)\\btoken:[^\\s:]+(?::[0-9a-fA-F-]+)?");
     private static final Pattern AUTH_HEADER = Pattern.compile("(?i)(authorization\\s*[:=]\\s*(?:[a-z]+\\s+)?)(\\S+)");
     private static final Pattern COOKIE_HEADER = Pattern.compile("(?i)((?:set-)?cookie\\s*[:=]\\s*)([^\\r\\n]+)");
+    private static final Pattern UPLOAD_HEADER = Pattern.compile("(?i)(x-watermedia-token[ \\t]*[:=][ \\t]*)[^\\r\\n]+"); // NetworkAPI.X_WATERMEDIA_TOKEN
     private static final Pattern SECRET_KV = Pattern.compile("(?i)(\"?\\b(?:access[_-]?token|session[_-]?token|sessionId|auth[_-]?token|refresh[_-]?token|id[_-]?token|client[_-]?secret|secret|password|passwd|pwd|api[_-]?key|apikey)\\b\"?\\s*[:=]\\s*\"?)([^\\s\"',&}]+)");
+    // A BARE token KEY OF A CONFIG FILE (token = "x", network.token=x), WITH ITS WHOLE QUOTED VALUE; LINK PARAMETERS
+    // (?token=) AND COMPOUND KEYS (nextPageToken, page_token, token_type) STAY READABLE. THE POSSESSIVE ++ KEEPS A
+    // LONG QUOTED VALUE ITERATIVE: A GREEDY GROUP RECURSES ONCE PER CHARACTER AND OVERFLOWS THE STACK
+    private static final Pattern BARE_TOKEN = Pattern.compile("(?i)((?<![\\w?&-])token[ \\t]*=[ \\t]*)(?:\"(?:[^\"\\\\\\r\\n]|\\\\.)++\"|'[^'\\r\\n]+'|[\"']?[^\\s\"',&}]+)");
     private static final String SECRET_MASK = "********";
 
     private DataTool() {}
@@ -179,7 +184,9 @@ public final class DataTool {
         out = LAUNCH_ARG.matcher(out).replaceAll("$1" + SECRET_MASK);
         out = AUTH_HEADER.matcher(out).replaceAll("$1" + SECRET_MASK);
         out = COOKIE_HEADER.matcher(out).replaceAll("$1" + SECRET_MASK);
+        out = UPLOAD_HEADER.matcher(out).replaceAll("$1" + SECRET_MASK);
         out = SECRET_KV.matcher(out).replaceAll("$1" + SECRET_MASK);
+        out = BARE_TOKEN.matcher(out).replaceAll("$1" + SECRET_MASK);
         return SESSION_TRIPLE.matcher(out).replaceAll("token:" + SECRET_MASK);
     }
 

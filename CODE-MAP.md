@@ -3,7 +3,8 @@
 Reference map of this repository for agents. Read it before every task and keep it current: when a task changes
 behavior, API, layout or rules, update the matching section (never leave it describing the old code).
 Mapped on 2026-10-30 against version `3.0.0` (`RELEASE`); counts (files, latches, throw sites) are as of that date.
-Homologation wave of 2026-11-01 (dividers, member order, nested single-owner types, no dashes) folded in.
+Homologation wave of 2026-11-01 (dividers, member order, nested single-owner types, no dashes) and the app upload-logs
+revamp of 2026-11-16 (issue title and description, `TextArea`, clipboard helpers, config copies) folded in.
 Symbol names are exact; line numbers are omitted on purpose.
 Legend: ⚠ gotcha or hard rule, ↪ reuse pointer ("to do X use Y").
 
@@ -163,7 +164,7 @@ The generic version of these rules lives in AGENTS.md → "Code pattern"; this i
 | Path | Content |
 |---|---|
 | `src/main/java/org/watermedia/` | `WaterMedia` (entry), `WaterMediaConfig` (TOML spec), `api/` (public API), `bootstrap/` (loader entry points, launcher, app), `tools/` (internal utilities) |
-| `src/main/resources/` | `META-INF/mods.toml`, `META-INF/neoforge.mods.toml`, `fabric.mod.json`, `pack.mcmeta`, `icon.png`, `pack.png`, `assets/watermedia/{shaders,font,textures,sounds,catalog}`, `META-INF/licenses/javacpp-LICENSE.txt` |
+| `src/main/resources/` | `META-INF/mods.toml`, `META-INF/neoforge.mods.toml`, `fabric.mod.json`, `pack.mcmeta`, `icon.png`, `pack.png`, `assets/watermedia/{shaders,font,textures,sounds,catalog}`, `META-INF/licenses/{javacpp,jetbrainsmono}-LICENSE.txt` |
 | `src/test/java/org/watermedia/` | Tests mirroring the main packages, child-JVM probes (`*Probe.java` + `*ProcessTest`), `test/support` helpers; `src/test/resources` fixtures (`pentest/` hostile corpus); `src/test/tools/GeneratePngReference.java` |
 | `binaries/` | Included build of "WaterMedia: Binaries": `src/main/java/org/watermedia/binaries` (module + provisioning), `src/main/resources/libs/ffmpeg-*.zip`, `libs/ffmpeg-<ver>.jar`, `tools/` (rebuild and verification scripts), own `gradle.properties`, `CHANGELOG.md`, `.github/workflows` |
 | `modloaders/` | Compile-only stubs of Forge/NeoForge/Fabric loader classes (bodies throw "Stub!"), never shipped |
@@ -981,9 +982,13 @@ requested, and SVG yields RGBA when RGBA is requested (everything else is conver
 ### `tools` (internal, used by Binaries)
 - `DataTool`: byte reads (`startsWith`, `u16/u24/u32`, `megabytes`), lenient parsing (`parseInt/Long/Double`, `uri`,
   `expiry`, `equalsIgnoreCase`, `equalsAnyIgnoreCase`, `similarity` Jaro-Winkler), `redact(String)` (links stay
-  whole; masks URI passwords, JWTs, `--accessToken`, `Authorization`, cookies, secret key/values, `token:x:y`),
+  whole; masks URI passwords, JWTs, `--accessToken`/`--session`, `Authorization`, cookies (any `...cookie` key, so
+  `biliBiliCookie` too), the rest of an `X-WaterMedia-Token` line, secret key/values, a bare `token` key of a config
+  file (`token = "x"`, `network.token=x`, a quoted value whole; possessive, so a long value never overflows the
+  stack) while `?token=` link parameters and compound keys (`nextPageToken`, `token_type`) stay, and `token:x:y`),
   `sha256(byte[])`, pixels (`yuvToBgra`, `bgraToBuffer`, `blendOver`, `premultiply`, `orient`), scaling (`scalable`,
-  `scaleArea`).
+  `scaleArea`). ⚠ A new secret shape goes into `redact` only: the loggers and the app's log upload (config copies
+  included) both mask through it.
 - `FFTool`: `Pixels(format, bits)` record + `BGRA`, `pixels(avPixFmt)`, `avPixelFormat(PixelFormat)`, `sampleType(av)`,
   `avSampleFormat(SampleType)`, `error(code)`, `failure(op, code)` → `IOException`, `isNull`, `string`,
   `parseVersion`, `vulkanBindings()`, `bundled()` (natives from Binaries), TLS (`startTLS()` verifies the patched
@@ -1019,17 +1024,66 @@ requested, and SVG yields RGBA when RGBA is requested (everything else is conver
   player, disposes text/assets, destroys the window and rebuilds everything on the new backend.
 - `AppContext`: window/input state (logical `mouseX/Y` = physical / `uiScale`), services (`catalog`, `media`, `sound`,
   `assets`, `upload`, `cleanup`), `execute(Runnable)` (render-thread queue + wake), `requestRender()`,
-  `releaseAsync(name, runnable)` + `awaitPlayerRelease()` (blocking teardown off the render thread), `showError(...)`.
+  `releaseAsync(name, runnable)` + `awaitPlayerRelease()` (blocking teardown off the render thread), `showError(...)`,
+  static `clipboard()` (the text, or "" when empty, busy or headless) and `clipboard(String)` (true once copied).
+  ↪ They are the app's only clipboard door (pastes in `OpenMultimediaScreen` and `TextArea`; copies in
+  `MRLSelectorScreen` and `LogUploader`); only the launcher's Swing `BootstrapWindow` keeps its own AWT copy.
 - `AppConfig` (WaterConfig spec `app`, `config/app.properties`): `engine` (VULKAN default), `scale` (0 = auto, else 1..3
   step 0.25), `crt`, `sound`; `apply(ctx)` applies live and triggers an engine swap only when the preference changed.
 - Services: `Assets` (icon, banner, duck frames via AWT ImageIO before codecs exist; glow textures), `WinFrame` (Win32
-  custom frame: caption hit-test, snap, DPI reclamp), `LogUploader` (only when launched inside a `mods` folder: scans
-  `latest.log`, crash reports, app log, `hs_err`; redacts with `DataTool.redact`; uploads to `api.mclo.gs`; copies a
-  GitHub issue body with `SystemInfo.alerts()/summary()`), `SystemInfo`, `CacheCleaner` (`WaterMedia.tmp()/cache`),
-  `ClickSound` (own OpenAL device, `duck.ogg`), `MediaSession` (selected group/MRL/source/quality/player,
+  custom frame: caption hit-test, snap, DPI reclamp), the dialog services `LogUploader` (+ `SystemInfo`) and
+  `CacheCleaner` (below), `ClickSound` (own OpenAL device, `duck.ogg`), `MediaSession` (selected group/MRL/source/quality/player,
   `releasePlayer()` async), `MediaCatalog` (`assets/watermedia/catalog/uris.json`, `iptv.json`; `debug` entries only when
   DEBUG logging), nested `AppContext.ErrorState`, `ScreenManager` (`register`, `navigate(name)` without a stack, mounting over an `under()` screen through
   `RootScreen.mountUnder`, `releaseMediaAll`).
+- Dialog services `ctx.upload` (`LogUploader`) and `ctx.cleanup` (`CacheCleaner`, scan and wipe of
+  `WaterMedia.tmp()/cache`): public volatile state (`visible`, `working`, `done`, `error`, `stage`, own fields) that
+  `HomeScreen.onUpdate` binds every frame; `step()` (from `WaterMediaApp.navigateAction`) runs the next stage on a
+  `ThreadTool.thread` worker that ends with the repaint callback. ⚠ `step()` checks `working` before `visible`, so a
+  dialog reopened mid-stage shows that stage instead of resetting it under a second worker.
+- `LogUploader` (dialog stages SCAN/UPLOAD/ISSUE = `stage` 1..3; workers `LogUploader-Scan`, `-Upload`, `-Report`,
+  `-Submit`):
+  - Gate: `AVAILABLE = WORKDIR_IS_MODS || DEV` opens the dialog (else the home tile reads `LOCKED`); `DEV` is a run
+    whose classes load from a directory (IDE or tests); `WORKDIR_IS_MODS` only picks the layout `scan(cwd, inMods)`
+    reads. ⚠ Nothing is simulated in a dev run: uploads reach mclo.gs and the issue page opens in the real browser.
+  - Sessions: a hidden dialog at `stage == 3 && !issueOpened` reopens as it was (uploads, report, texts) instead of
+    rescanning, which would paste the same files again; any other hidden dialog starts a fresh session (scan).
+  - `scan`: inside `mods` the game files sit one level up and the app files in the CWD; a dev run reads both from the
+    CWD (`run/` in IntelliJ) and the jars from `<cwd>/mods`. Rows are `FileEntry(name, label, path)` (the label names
+    the report line): `latest.log`, newest `crash-reports/*.txt`, newest `hs_err_pid*` of the instance and the CWD,
+    `logs/watermedia-app.log`, the config copies `<instance>/config/watermedia.toml` (game) and
+    `<cwd>/<WaterConfig.getPath()>/watermedia.toml` (app; one "Config" row when both paths match) and
+    `app.properties`. A found row reads `READY`, or `TOO LARGE` past 10 MiB or 25 000 lines; a missing one `NOT FOUND`.
+    It also keeps the lowercased `*.jar` names (`jars`) for the suspected mods and the extension alerts.
+  - `upload`: each uploadable row is read with a lenient UTF-8 decoder, masked by `DataTool.redact` and `maskUser`
+    (`readContent`) and POSTed as a form to `https://api.mclo.gs/1/log` through `NetRequest.httpsOnly()`.
+  - `maskUser(text, home)` hides only the user folder of home paths before anything is published (uploads and
+    `body()`): `USER_PATH` (a drive path under `Users`, `/home/x` and `/Users/x` outside a link), `HOME_PATH`
+    (`homePath(user.home)`: the real home with any separator, for names with spaces or other folders; `null` without
+    a parent folder) and the `USERNAME=` line of an `hs_err` environment. Local logs keep their paths whole.
+  - ISSUE: CONTINUE starts `report()` (`SystemInfo.read(jars)`, seconds of PowerShell queries) while the user types
+    `title` (`TITLE_LIMIT_CHARS` 80) and `description` (`DESCRIPTION_LIMIT_CHARS` 2000); `ready()` turns true when it
+    lands. A failed read sets `error`, and the stage 3 `step()` reads the report again while it is missing (the RETRY
+    button); with a report it submits only under a non-blank title. `submit()` composes `body(description, info, jars,
+    files)` (description, `## Alerts`, `## Suspected mods` from the `SUSPECT_MODS` ids inside jar names, `## Files` as
+    `label: url` or `N/A`, `## Environment` with the SW codecs folded in `<details>`, `## System Properties`), copies it
+    with `AppContext.clipboard(body)` and browses `issueUrl(title, body)`: the body rides in the link only while the
+    encoded link fits `URL_LIMIT_CHARS` (8000), else `PASTE_NOTE` ("Paste the report here."); a refused long link
+    retries once with the short one while the clipboard holds the report. A failure sets `error`, plus `browserFailed`
+    when it came from the browser (the clipboard alone fails before the browser is tried). `title`/`description`
+    outlive a closed dialog and clear on the first session after `issueOpened`.
+  - ⚠ Error codes are pending and wholly commented out, each spot under `// PENDING: ERROR CODES ARE NOT LOGGED YET`:
+    the `codes` field (`ConcurrentSkipListSet`), its `clear()` in the session reset, the `wm_err:(\d{4})` matcher in
+    `upload()` and the `## Error codes` section in `body()`; no live scanner and no tests remain. Uncommenting needs
+    the library to log `wm_err:NNNN` markers, a last `Set<String> codes` parameter on `body()` (which `submit()` and the
+    `LogUploaderTest` callers pass), the `Set`, `ConcurrentSkipListSet`, `Matcher` and `Pattern` imports, and new tests.
+- `SystemInfo`: package-private record `(alerts, environment, codecs, system)` built by `read(jars)` on the report
+  worker, once per gathered report. Alerts: NVIDIA Threaded Optimization (Windows, GL), FFmpeg load failure, and
+  `extensionAlerts(jars)` for `watermedia-youtube-extension`/`watermedia-platform-extension` jars (case, `-` and `_`
+  ignored). `environment`/`system` are Markdown list lines; `codecs` is the sorted FFmpeg SW decoders, or null while
+  FFmpeg is not loaded; the "Extensions:" line of `environment` lists the `AppBootstrap.Extension` SPI providers,
+  not jars.
+  ↪ Tests build the record by hand to compose bodies.
 
 ### 12.2 Render stack (`app/render`)
 - `RenderSystem` (static facade): `Engine {OPENGL, VULKAN}`, `chooseEngine`, `applyWindowHints`, `attach(window)`,
@@ -1056,20 +1110,35 @@ requested, and SVG yields RGBA when RGBA is requested (everything else is conver
   `weight`, decor (`background`, `border`, `radius`, `glow`, `shadow`), flags; final pipeline `measure` → `layout` →
   `draw`; hooks `onMeasure` (set `contentWidth/Height`), `onLayout`, `onDraw`, `onUpdate`, `onPress/onDrag/onRelease`;
   dispatch `dispatchClick/Hover/Press/Scroll/Key/Char`, `textInputActive()`, `clearFocus()`; `invalidate()` →
-  `ctx.requestRender()`. ⚠ `ctx` is null until attached; guard text measuring.
+  `ctx.requestRender()`. ⚠ `ctx` is null until attached; guard text measuring. ⚠ `Group` routes keys and chars, and
+  answers `textInputActive()`, through hidden children too: a pane that hides blurs its inputs (`clearFocus()`, as
+  `HomeScreen.ReportPane` does on its visibility edges).
 - Containers: `Group<T>` (children, reverse-order dispatch), `Parent.column()/row()` (weights, `spacing`),
   `ParentFrame` (overlay by gravity), `ParentScroll` (+ package-private `ScrollState` momentum), `Box`.
 - `Canvas` (the only draw surface): alpha/clip stacks, `fill`, `fillRound`, `stroke`, `glow`, `shadow`, gradients,
   `line`, `cube`, `image(textureId, ...)`, `mediaImage(long handle, ...)` (player frames), `icon(name, ...)`
-  (`PixelIcon` masks), single-line `text*` through `TextRenderer` (AWT glyph atlas, JetBrains Mono, no SDF/wrapping),
-  `live(Consumer)` + `raise()` for painters over a cached tree.
+  (`PixelIcon` masks), single-line `text*` through `TextRenderer` (AWT glyph atlas; JetBrains Mono SemiBold as plain
+  and ExtraBold as bold from `AppTheme.FONT_PLAIN`/`FONT_BOLD`, Consolas fallback; one glyph per `char`, so surrogate
+  pairs cannot show; no SDF/wrapping), `live(Consumer)` + `raise()` for painters over a cached tree.
 - Widgets: `Text`, `Button` (+ static `render`/`width` for hand layout), `IconButton`, `Icon`, `Image`, `Badge`,
   `KeyChip`, `StatusSquare`/`StatusText`, `SectionHead`, `ProgressBar`, `SeekBar`, `Switch`, `CheckBox`,
-  `SegmentedControl`, `Stepper`, `TextField` (append-at-end editing only; paste lives in `OpenMultimediaScreen`),
-  `Spinner`, `Dropdown` (ATTACH popup or DIALOG), `Dialog` (modal scrim + bands; ⚠ clicks in panel dead space reach the
-  scrim unless `panel().consumeTouch(true)`), `ListView<D>` (virtualized when `rowHeight > 0`) + `ListRow`,
-  `VideoSurface` (aspect-fits `ctx.media.player.texture()`). Tokens: `Theme` (spacing, heights, glow/shadow),
-  `AppTheme` (colours, type ramp, `alpha(color, a)` cache), `Spacing`, `Gravity`.
+  `SegmentedControl`, `Stepper`, `TextField` (single line, append-at-end editing only; it binds no CTRL+V:
+  `OpenMultimediaScreen` binds CTRL+V and a PASTE button that replace its value), `TextArea` (multi-line: soft wrap,
+  caret by click, arrows, HOME/END and CTRL word moves, ENTER breaks the line, own CTRL+V through `insert`, scrolls to
+  the caret; CTRL+ENTER (decided on the press), TAB and ESC reach the screen; `singleLine(true)` keeps one paragraph,
+  every break set, pasted or held turning into a space, and never consumes ENTER (the issue title); ⚠ no selection,
+  copy, cut or undo, BMP only), `Spinner`, `Dropdown` (ATTACH popup or DIALOG), `Dialog` (modal scrim + bands; an
+  ENTER/ESC release that no child took, press included, runs `onPrimary`/`onDismiss`; `Panel.onMeasure` measures the
+  title, header and footer bands first and offers the content only the height they leave, minus `PANEL_AIR` over and
+  under the panel; ⚠ clicks in panel dead space reach the scrim unless `panel().consumeTouch(true)`), `ListView<D>`
+  (virtualized when `rowHeight > 0`; an overflowing list reserves a scrollbar channel of the bar width plus
+  `Theme.SPACE_XS` of air (less a right padding), so its rows end clear of the bar: `rowWidth`, natural rows measured
+  again by `measureNaturalRows`) + `ListRow`, `VideoSurface` (aspect-fits
+  `ctx.media.player.texture()`). ↪ Content taller than a dialog can offer must scroll or shrink by itself: a `ListView`
+  at `WRAP_CONTENT` height clips to the offer and scrolls, while fixed-height content is never squeezed and leaves the
+  window. ⚠ `value(v)` of `TextField`/`TextArea` never fires `onChange` (typing and `TextArea.insert` do). Tokens:
+  `Theme` (spacing, heights, glow/shadow), `AppTheme` (colours, `FONT_PLAIN`/`FONT_BOLD` font resources, type ramp,
+  `alpha(color, a)` cache), `Spacing`, `Gravity`.
 - Conventions for a new widget: `public final class X extends Element<X>`, fluent setters returning `this`, never
   override `measure/layout/draw`, draw only through `Canvas`, animations `invalidate()` from `onUpdate` until done,
   act on key RELEASE for ENTER/ESC and swallow the paired release.
@@ -1077,11 +1146,12 @@ requested, and SVG yields RGBA when RGBA is requested (everything else is conver
 ### 12.4 Screens (`app/screen`)
 - `Screen extends Group<Screen>`: lazy `build()`, `overlay()` for dialogs (`showDialog/hideDialog`), hooks `onEnter`,
   `onExit`, `keybinds()` (⚠ return constant lists of the nested `Screen.Keybind(key, label)`), `continuous()` (⚠ true
-  repaints every frame), `under()`,
-  `releaseMedia()`; screens that override `dispatchKey` call `super` first and act on `GLFW_RELEASE`. `RootScreen` hosts `Background`,
-  `TitleBar`, the center slot, `KeybindsBar`, global dialogs; renders/composites the tree and routes input.
+  repaints every frame; a screen holding text inputs ORs `textInputActive()` into it, or the caret stops blinking),
+  `under()`, `releaseMedia()`; screens that override `dispatchKey` call `super` first and act on `GLFW_RELEASE`.
+  `RootScreen` hosts `Background`, `TitleBar`, the center slot, `KeybindsBar`, global dialogs; renders/composites the
+  tree and routes input.
 - `HomeScreen` (`enum Action {OPEN_MULTIMEDIA, UPLOAD_LOGS, CLEANUP, SETTINGS, REGION_SELECTOR, MRL_SELECTOR, PLAYER,
-  EXIT, BACK}` is the navigation vocabulary; catalog tiles create every group MRL with `PlayerAPI.mrl`),
+  EXIT, BACK}` is the navigation vocabulary; catalog tiles create every group MRL with `PlayerAPI.mrl`; dialogs below),
   `OpenMultimediaScreen` (URL/path vs search by `loadable(text)`; metadata preview MRL; `PlatformAPI.search`
   dropdown with thumbnail players; 30 s load wait), `MRLSelectorScreen` (group list with status, filter, thumbnail
   players for visible rows via `Previews`, reload of regenerable MRLs), `RegionSelectorScreen` (IPTV regions →
@@ -1091,6 +1161,21 @@ requested, and SVG yields RGBA when RGBA is requested (everything else is conver
   reflectively, autosave on `WaterMedia-ConfigSave`, `SaveMachine` states; only the App spec has a live applier),
   `LoadingScreen` (reads `WaterMedia.loading()/step()/steps()`), `TitleBar`, `Header`, `KeybindsBar`, `Background`,
   `CrtOverlay`, `Previews` (MRL status label/colour, thumbnail release through `ctx.releaseAsync`).
+- `HomeScreen` dialogs: the upload and cleanup `Dialog`s stay mounted on the overlay and only follow `ctx.upload`/
+  `ctx.cleanup` in `onUpdate`; the primary buttons reach `step()` through `navigator.accept(Action.UPLOAD_LOGS|CLEANUP)`
+  (the cleanup CLOSE hides the dialog itself). Upload (`Stepper` SCAN/UPLOAD/ISSUE, one `UPLOAD_PANEL_W` width):
+  stages 1..2 show the file `ListView` of `FileRow`s at one `UPLOAD_ROW_H` (every row on SCAN, only candidates and
+  failures on UPLOAD), which clips to what the dialog offers and scrolls; a plain ENTER uploads or continues there.
+  Stage 3 shows the nested `ReportPane`: title (a `singleLine` `TextArea`, `TITLE_LIMIT_CHARS`), description
+  `TextArea` (`DESCRIPTION_LIMIT_CHARS`), live `n/limit` counters (amber at the limit) and the `ReportStrip` line from
+  `HomeScreen.ReportStatus.of(working, ready, titled, opened, copied, browserFailed, error)` (`REPORT_FAILED` while
+  the report is missing after a failed read, `ALL_FAILED` when clipboard and browser both failed). `ReportPane` focuses
+  the title when it shows and blurs both boxes when it hides, and owns every ENTER of the stage so the dialog never
+  submits on a plain one: only CTRL+ENTER (decided on the press, opened on the release) or the button submits; a
+  plain ENTER breaks a description line, moves from the title to the description, or with nothing focused focuses the
+  title; TAB swaps the boxes on press. The primary reads "OPEN ISSUE" (needs a title) or "RETRY" after a failed
+  report (needs nothing). `ReportPane.onMeasure` gives the title one line and the description 8 lines down to 2 from
+  the height the dialog offers.
 - Threading: all screen code on the render thread; background work via `ThreadTool.thread` returns through
   `ctx.execute`/`ctx.requestRender`; MRL callbacks may only request a render.
 
@@ -1195,9 +1280,15 @@ System properties: `watermedia.engine`, `watermedia.app` (child JVM flag), `wate
   `HeadlessGFXEngineTest`, `AWTEngineTest`, `JFXEngineTest`, `SFXEngineTest`, `ALCapabilitiesTest`, `ALSinkTest`, `SpatialAudioTest`;
   util `HttpHeadersTest`, `NetRequestTest`, `MediaTypeTest`, `MediaQualityTest`, `PixelFormatTest`, `MathUtilTest`,
   `MathEasesTest`; bootstrap `AppBootstrapDependenciesTest`, `DefensiveCheckTest`, app `AppConfigTest`,
-  `FramePlanTest`, `CanvasLiveTest`, `ListRowTest`, `ListViewInteractionTest`, `SpinnerTest`, `TextFieldTest`,
-  `RenderEngineBatchTest`, `RenderEngineCacheTest`, `VulkanRenderBackendTest`; tools `DataToolTest`, `IOToolTest`,
-  `JSONToolTest`, `M3UToolTest`, `ThreadToolTest`.
+  `FramePlanTest`, `LogUploaderTest` (stages with the stage 3 resume and the report retry, both scan layouts in a
+  `@TempDir`, masked reads, body, link limit), `SystemInfoTest` (extension alerts), `HomeScreenTest` (`IssueKeys`,
+  `EarlierKeys`, `Status`: a windowless `HomeScreen` whose navigator only records the fired `Action`s, so nothing is
+  scanned, uploaded or opened), `CanvasLiveTest`, `DialogTest` (panel height against the bands), `ListRowTest`,
+  `ListViewInteractionTest` (+ `ScrollbarChannel`), `SpinnerTest`, `TextFieldTest`, `TextAreaTest` (+ `SingleLine`;
+  headless through the package-private `TextArea.metrics` hook), `RenderEngineBatchTest`, `RenderEngineCacheTest`,
+  `VulkanRenderBackendTest`; tools `DataToolTest`, `IOToolTest`, `JSONToolTest`, `M3UToolTest`, `ThreadToolTest`.
+  ⚠ `LogUploaderTest` expects a test JVM that loads classes from a directory (`LogUploader.DEV`), and its stage cases
+  scan the real working directory and read the real system (`SystemInfo.read`).
 - Support helpers (`org.watermedia.test.support`): `Fixtures` (resource paths and constants `MP4_H264`, `PNG_STATIC`,
   `GIF_ANIMATED`, ...; `readAll`, `fileUri`, `wav` (plain, or WAVE_FORMAT_EXTENSIBLE with a channel mask), `tone`,
   `level`, `dubbed` (tagged multi-stream Matroska), `segment` (HLS-ready Matroska), `webm`), `MediaBootstrap` (`client()`, `ffmpegAvailable()` one shared
@@ -1227,9 +1318,11 @@ System properties: `watermedia.engine`, `watermedia.app` (child JVM flag), `wate
   `gray|nv|yuv3|yuva|yuyv.frag` (`GLEngine`, GLSL 150 core), `opengl/ui.*`, `opengl/sdf.*` (`OpenGLRenderBackend`),
   `vulkan/convert.comp`, `vulkan/ycbcr.comp` (`VKEngine`, GLSL 450, shaderc at runtime), `vulkan/ui.*`, `vulkan/sdf.*`
   (`VulkanRenderBackend`). No precompiled SPIR-V; `#include` resolves against the shaders root via `IOTool.shader`.
-- `font/jetbrainsmono-{reg,bld}.ttf` (`TextRenderer`), `textures/banner.png`, `textures/duck/00..07.png`, `sounds/duck.ogg`
-  (`Assets`, `ClickSound`), `catalog/uris.json` (groups of `{name, uris[]}`), `catalog/iptv.json` (`{generatedAt,
-  channels[]}`) (`MediaCatalog`), root `icon.png`/`pack.png`, `META-INF/licenses/javacpp-LICENSE.txt`.
+- `font/jetbrainsmono-{semibold,extrabold}.ttf` (`TextRenderer` through `AppTheme.FONT_PLAIN`/`FONT_BOLD`),
+  `textures/banner.png`, `textures/duck/00..07.png`, `sounds/duck.ogg` (`Assets`, `ClickSound`), `catalog/uris.json`
+  (groups of `{name, uris[]}`), `catalog/iptv.json` (`{generatedAt, channels[]}`) (`MediaCatalog`), root
+  `icon.png`/`pack.png`, `META-INF/licenses/javacpp-LICENSE.txt` and `jetbrainsmono-LICENSE.txt` (SIL OFL 1.1, the
+  bundled font).
 - Binaries resources: `libs/ffmpeg-{windows,linux,linux-arm64,macos,macos-arm64}.zip`, `META-INF/botguard-pins.properties`,
   `META-INF/ffmpeg-manifest.properties` (from `tools/`), 11 license texts under `META-INF/licenses/`, loader metadata.
 - IntelliJ run configuration `WaterMedia App`: main `org.watermedia.bootstrap.AppBootstrap`, working dir `run/`,
@@ -1275,8 +1368,10 @@ System properties: `watermedia.engine`, `watermedia.app` (child JVM flag), `wate
 - Platform notes: mature gates only where the service exposes a flag; `WaterPlatform.local` allows `..`; Sendvid/yt-dlp
   resolves can hold a loader thread for 60/120 s; Twitch persisted-query hashes rotate.
 - App notes: no Vulkan validation layers; `PlayerScreen` not restored after a hot swap; `TextField` has no caret
-  movement/selection; `HomeScreen.Action.SETTINGS` navigates only with DEBUG logging (`WaterMediaApp.navigateAction`);
-  stale `config/watermedia.toml` in the repo.
+  movement/selection; `TextArea` has no selection, copy, cut or undo; the log upload's `wm_err` error-code scanner is
+  wholly commented out in `LogUploader` (PENDING markers, §12.1) because the library logs no such codes yet;
+  `HomeScreen.Action.SETTINGS` navigates only with DEBUG logging (`WaterMediaApp.navigateAction`); stale
+  `config/watermedia.toml` in the repo.
 - Library notes: `NetworkCache` sweeps `.part` files once per start (no timer); `GLEngine.drainOne` clears `pending`
   without a lock (possible lost frame, unverified); `AppBootstrap` libs dir is shared per tmpdir; FFmpeg generations are
   never pruned.

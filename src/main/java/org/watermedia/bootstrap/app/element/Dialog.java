@@ -21,6 +21,8 @@ import static org.lwjgl.glfw.GLFW.GLFW_RELEASE;
 public final class Dialog extends Group<Dialog> {
 
     private static final int TITLE_BAND_H = 48;
+    // SPACE KEPT FREE OVER AND UNDER A PANEL WHOSE CONTENT ADAPTS TO THE WINDOW HEIGHT
+    private static final int PANEL_AIR = Theme.SPACE_MD;
     private static final Spacing BAND_PAD = Spacing.hv(Theme.SPACE_XL, Theme.SPACE_MD);
     private static final int CUBE = 8;
     private static final int FADE_MS = 180;
@@ -303,10 +305,12 @@ public final class Dialog extends Group<Dialog> {
                 width = Math.min(width, innerAvailWidth);
             }
             this.contentWidth = width;
-            this.contentHeight = this.stretch(Dialog.this.titleBand, width, innerAvailHeight)
+            // THE CONTENT IS OFFERED ONLY THE HEIGHT THE OTHER BANDS AND THE AIR AROUND THE PANEL LEAVE, SO A LIST OR A TEXT
+            // BOX IN IT SCROLLS INSTEAD OF PUSHING THE PANEL OUT OF THE WINDOW; CONTENT OF A FIXED HEIGHT IS UNAFFECTED
+            final int bands = this.stretch(Dialog.this.titleBand, width, innerAvailHeight)
                     + this.stretch(Dialog.this.headerBand, width, innerAvailHeight)
-                    + this.stretch(Dialog.this.contentCol, width, innerAvailHeight)
                     + this.stretch(Dialog.this.footerBand, width, innerAvailHeight);
+            this.contentHeight = bands + this.stretch(Dialog.this.contentCol, width, Math.max(0, innerAvailHeight - bands - PANEL_AIR * 2));
         }
 
         @Override

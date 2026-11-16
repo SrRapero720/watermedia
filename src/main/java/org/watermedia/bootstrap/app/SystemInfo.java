@@ -31,46 +31,49 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /** WaterMedia, FFmpeg, OS, CPU, GPU and JVM facts for the issue report; a fact that cannot be read reads "unknown". */
-final class SystemInfo {
-    private SystemInfo() {}
+record SystemInfo(List<String> alerts, String environment, List<String> codecs, String system) {
+    // EXTENSION MODS THAT CHANGE HOW PLATFORMS RESOLVE, WORTH AN ALERT WHEN THEIR JAR SITS IN THE MODS FOLDER
+    private static final List<String> EXTENSIONS = List.of("watermedia-youtube-extension", "watermedia-platform-extension");
 
     // ==========================================================================
     // INTERNAL API
     // ==========================================================================
-    // MARKDOWN LIST OF THE PROBLEMS DETECTED ON THIS MACHINE, OR A "None detected" LINE
-    static String alerts() {
+    // READS THIS MACHINE ON A WORKER (THE POWERSHELL QUERIES TAKE SECONDS): environment AND system ARE MARKDOWN LIST
+    // LINES, codecs IS null WHILE FFMPEG IS NOT LOADED
+    static SystemInfo read(final List<String> jars) {
         final List<String> alerts = new ArrayList<>();
         final String nvidia = nvidiaThreadedOptimizationAlert();
         if (nvidia != null) alerts.add(nvidia);
-        if (CodecsAPI.ffmpegError())
-            alerts.add("FFmpeg failed to load: media playback is unavailable. See the attached logs for the native load error.");
-        if (alerts.isEmpty()) return "- None detected\n";
-        final StringBuilder sb = new StringBuilder();
-        for (final String a: alerts) sb.append("- ").append(a).append('\n');
-        return sb.toString();
+        if (CodecsAPI.ffmpegError()) alerts.add("FFmpeg failed to load");
+        alerts.addAll(extensionAlerts(jars));
+        return new SystemInfo(alerts,
+                "- WaterMedia: " + WaterMedia.VERSION + " (" + RenderSystem.engineVersionLabel() + ")\n" +
+                        "- Binaries: " + binariesVersion() + "\n" +
+                        "- FFmpeg: " + ffmpegVersion() + "\n" +
+                        "- FFmpeg HW accel: " + ffmpegHwAccel() + "\n" +
+                        "- Extensions: " + detectedExtensions() + "\n",
+                ffmpegSoftwareCodecs(),
+                "- OS: " + osInfo() + "\n" +
+                        "- CPU: " + cpuInfo() + "\n" +
+                        "- GPU: " + gpuInfo() + "\n" +
+                        "- RAM (JVM max): " + Runtime.getRuntime().maxMemory() / 1_024 / 1_024 + " MB\n" +
+                        "- RAM (system): " + systemRam() + "\n" +
+                        "- Java: " + System.getProperty("java.version") + " (" + System.getProperty("java.vendor") + ")\n" +
+                        "- Java Home: " + System.getProperty("java.home") + "\n" +
+                        "- FFmpeg Path: " + ffmpegPath() + "\n" +
+                        "- FFmpeg Loaded: " + CodecsAPI.ffmpegLoaded() + "\n" +
+                        "- User Dir: " + System.getProperty("user.dir") + "\n");
     }
 
-    // THE "Environment" AND "System Properties" MARKDOWN SECTIONS OF THE REPORT
-    static String summary() {
-        final Runtime rt = Runtime.getRuntime();
-        return "## Environment\n" +
-                "- WaterMedia: " + WaterMedia.VERSION + " (" + RenderSystem.engineVersionLabel() + ")\n" +
-                "- Binaries: " + binariesVersion() + "\n" +
-                "- FFmpeg: " + ffmpegVersion() + "\n" +
-                "- FFmpeg HW accel: " + ffmpegHwAccel() + "\n" +
-                "- FFmpeg codecs (SW): " + ffmpegSoftwareCodecs() + "\n" +
-                "- Extensions: " + detectedExtensions() + "\n\n" +
-                "## System Properties\n" +
-                "- OS: " + osInfo() + "\n" +
-                "- CPU: " + cpuInfo() + "\n" +
-                "- GPU: " + gpuInfo() + "\n" +
-                "- RAM (JVM max): " + rt.maxMemory() / 1_024 / 1_024 + " MB\n" +
-                "- RAM (system): " + systemRam() + "\n" +
-                "- Java: " + System.getProperty("java.version") + " (" + System.getProperty("java.vendor") + ")\n" +
-                "- Java Home: " + System.getProperty("java.home") + "\n" +
-                "- FFmpeg Path: " + ffmpegPath() + "\n" +
-                "- FFmpeg Loaded: " + CodecsAPI.ffmpegLoaded() + "\n" +
-                "- User Dir: " + System.getProperty("user.dir") + "\n";
+    // ONE ALERT PER EXTENSION WITH A JAR AMONG THE NAMES; CASE AND THE SEPARATOR (-, _ OR NONE) DO NOT COUNT
+    static List<String> extensionAlerts(final List<String> jars) {
+        final List<String> alerts = new ArrayList<>();
+        for (final String id: EXTENSIONS) {
+            final String key = id.replace("-", "");
+            if (jars.stream().anyMatch(jar -> jar.toLowerCase(Locale.ROOT).replace("-", "").replace("_", "").contains(key)))
+                alerts.add("`" + id + "` is installed");
+        }
+        return alerts;
     }
 
     // ==========================================================================
@@ -116,10 +119,10 @@ final class SystemInfo {
         }
     }
 
-    private static String ffmpegSoftwareCodecs() {
-        // SOFTWARE DECODERS OF THIS BUILD; THE SET VARIES BY OS/ARCH, SO IT SHOWS WHETHER A CODEC IS MISSING FROM
-        // THE PLATFORM BUILD
-        if (!CodecsAPI.ffmpegLoaded()) return "not loaded";
+    private static List<String> ffmpegSoftwareCodecs() {
+        // SORTED SOFTWARE DECODERS OF THIS BUILD, OR null WHEN THEY CANNOT BE LISTED; THE SET VARIES BY OS/ARCH, SO IT
+        // SHOWS WHETHER A CODEC IS MISSING FROM THE PLATFORM BUILD
+        if (!CodecsAPI.ffmpegLoaded()) return null;
         try {
             final TreeSet<String> names = new TreeSet<>();
             try (final PointerPointer<Pointer> opaque = new PointerPointer<>(1L)) {
@@ -136,9 +139,9 @@ final class SystemInfo {
                     if (s != null && !s.isBlank()) names.add(s);
                 }
             }
-            return names.isEmpty() ? "none" : String.join(", ", names);
+            return List.copyOf(names);
         } catch (final Throwable t) {
-            return "unknown";
+            return null;
         }
     }
 
@@ -182,12 +185,8 @@ final class SystemInfo {
                     "$p=Get-Process -Id " + pid + "; $m=$p.Modules|?{$_.ModuleName -ieq 'nvoglv64.dll'}|select -First 1; "
                             + "if($m){$b=[int64]$m.BaseAddress;$e=$b+$m.ModuleMemorySize;"
                             + "($p.Threads|?{$a=[int64]$_.StartAddress;$a -ge $b -and $a -lt $e}).Count}else{'nomodule'}");
-            if (out == null) return null;
-            final int workers = DataTool.parseInt(out, -1);
-            if (workers > 0)
-                return "NVIDIA \"Threaded Optimization\" appears ENABLED (" + workers + " GL worker thread(s) inside nvoglv64.dll). "
-                        + "It is a known cause of OpenGL crashes/stutter with LWJGL; turn it Off in "
-                        + "NVIDIA Control Panel > Manage 3D Settings > Threaded Optimization.";
+            if (DataTool.parseInt(out, -1) > 0)
+                return "Threaded Optimization is on: turn it off in the NVIDIA Control Panel";
         } catch (final Throwable ignored) {}
         return null;
     }

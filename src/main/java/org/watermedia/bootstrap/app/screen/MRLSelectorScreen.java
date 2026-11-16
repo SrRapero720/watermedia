@@ -31,8 +31,6 @@ import org.watermedia.tools.ThreadTool;
 
 import java.awt.Color;
 import java.awt.Font;
-import java.awt.Toolkit;
-import java.awt.datatransfer.StringSelection;
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -721,10 +719,7 @@ public final class MRLSelectorScreen extends BaseScreen {
                     .size(154, 38)
                     .onClick(b -> {
                         final MediaCatalog.TestURI sel = MRLSelectorScreen.this.selectedUri();
-                        if (sel != null) {
-                            Toolkit.getDefaultToolkit().getSystemClipboard().setContents(new StringSelection(sel.uri()), null);
-                            MRLSelectorScreen.this.ctx.sound.play();
-                        }
+                        if (sel != null && AppContext.clipboard(sel.uri())) MRLSelectorScreen.this.ctx.sound.play();
                     });
             this.playBtn = new Button("PLAY").icon("play").subText("ENTER")
                     .accent(AppTheme.GREEN).textColor(AppTheme.GREEN)

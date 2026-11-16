@@ -23,6 +23,7 @@ import org.watermedia.bootstrap.app.element.SectionHead;
 import org.watermedia.bootstrap.app.element.Stepper;
 import org.watermedia.bootstrap.app.element.StatusSquare;
 import org.watermedia.bootstrap.app.element.Text;
+import org.watermedia.bootstrap.app.element.TextArea;
 import org.watermedia.bootstrap.app.element.Theme;
 import org.watermedia.bootstrap.app.ui.AppTheme;
 import org.watermedia.bootstrap.app.ui.Gravity;
@@ -48,13 +49,13 @@ import static org.lwjgl.glfw.GLFW.*;
 public class HomeScreen extends BaseScreen {
     private static final Marker IT = MarkerManager.getMarker(HomeScreen.class.getSimpleName());
 
+    // ONE ROW HEIGHT FOR THE SCAN AND THE UPLOAD: THE NAME WITH THE PROGRESS BAR UNDER IT TAKES ABOUT 31 PX, AND SEVEN
+    // ROWS FIT A 1280x720 WINDOW WITHOUT SCROLLING
     private static final int UPLOAD_ROW_H = 52;
-    private static final int UPLOAD_ROW_DETAIL_H = 58;
     private static final int UPLOAD_PANEL_PAD = 14;
+    // ONE WIDTH FOR EVERY STAGE: ITS TITLE BOX (830 PX INSIDE) SHOWS A TITLE AT THE 80 CHARACTER LIMIT ON ONE ROW
+    private static final int UPLOAD_PANEL_W = 890;
     private static final int CLEANUP_ROW_H = 58;
-    private static final int REPO_ROW_H = Theme.ROW_MD;
-    // VIEWPORT OF THREE MOD CARDS AND THEIR TWO 8px GAPS
-    private static final int REPO_LIST_H = REPO_ROW_H * 3 + 8 * 2;
 
     // ACTION TILE FILLS
     private static final Color TILE_BG_DISABLED = new Color(15, 20, 36, 148);
@@ -62,16 +63,16 @@ public class HomeScreen extends BaseScreen {
     private static final Color TILE_BG_EXIT_SEL = new Color(66, 18, 28, 235);
     private static final Color TILE_BG_SEL = new Color(AppTheme.BG_2.getRed(), 34, 66, 235);
 
-    // ACCENT PALETTES, STATIC SO THE PER-TILE AND PER-CARD DRAWS NEVER ALLOCATE
+    // ACCENT PALETTE, STATIC SO THE PER-TILE DRAWS NEVER ALLOCATE
     private static final Color[] CATEGORY_PALETTE = {AppTheme.NEON, AppTheme.CYAN, AppTheme.AMBER, AppTheme.GREEN, AppTheme.NEON_LIGHT};
-    private static final Color[] REPO_PALETTE = {AppTheme.AMBER, AppTheme.CYAN, AppTheme.NEON_LIGHT, AppTheme.NEON};
 
     // FOOTER KEYBINDS: CONSTANTS SO THE PER-FRAME keybinds() POLL OF KeybindsBar ALLOCATES NOTHING
     private static final List<Keybind> KEYS_UPLOAD_REPORT = List.of(
-            new Keybind("UP/DOWN", "Repository"), new Keybind("ENTER", "Submit"), new Keybind("ESC", "Close"));
-    private static final List<Keybind> KEYS_UPLOAD = List.of(
-            new Keybind("ENTER", "Continue"), new Keybind("ESC", "Cancel"));
-    private static final List<Keybind> KEYS_CLEANUP = List.of(
+            new Keybind("TAB", "Field"), new Keybind("CTRL+ENTER", "Open issue"), new Keybind("ESC", "Close"));
+    private static final List<Keybind> KEYS_UPLOAD_SCAN = List.of(
+            new Keybind("ENTER", "Upload"), new Keybind("ESC", "Cancel"));
+    // THE UPLOAD STAGE (NOTHING IS LEFT TO CANCEL ONCE THE FILES GO UP) AND THE CLEANUP DIALOG SHARE ONE LIST
+    private static final List<Keybind> KEYS_CONTINUE = List.of(
             new Keybind("ENTER", "Continue"), new Keybind("ESC", "Close"));
     private static final List<Keybind> KEYS_MENU = List.of(
             new Keybind("ARROWS", "Navigate"), new Keybind("ENTER", "Select"), new Keybind("ESC", "Exit"));
@@ -95,15 +96,11 @@ public class HomeScreen extends BaseScreen {
     private ListView<LogUploader.FileEntry> fileList;
     private Parent filesPanel;
     private ReportPane reportPane;
-    private ListView<RepoTarget> repoList;
-    private Text noMods;
     private Button uploadCancel;
     private Button uploadPrimary;
     private Button cleanupCancel;
     private Button cleanupPrimary;
     private List<LogUploader.FileEntry> uploadRows = List.of();
-    private List<RepoTarget> repoTargets = List.of();
-    private int repoSelected;
 
     // CACHE-SIZE LABEL FOR THE CLEANUP ENTRY, COMPUTED OFF THE RENDER THREAD (Files.walk BLOCKS ON LARGE
     // CACHES); rebuildMenu() READS THE LAST PUBLISHED VALUE AND cacheWalking COALESCES OVERLAPPING WALKS
@@ -153,14 +150,16 @@ public class HomeScreen extends BaseScreen {
 
     @Override
     public List<Keybind> keybinds() {
-        if (this.ctx.upload.visible) return this.ctx.upload.stage >= 3 ? KEYS_UPLOAD_REPORT : KEYS_UPLOAD;
-        if (this.ctx.cleanup.visible) return KEYS_CLEANUP;
+        if (this.ctx.upload.visible)
+            return this.ctx.upload.stage >= 3 ? KEYS_UPLOAD_REPORT : this.ctx.upload.stage == 2 ? KEYS_CONTINUE : KEYS_UPLOAD_SCAN;
+        if (this.ctx.cleanup.visible) return KEYS_CONTINUE;
         return KEYS_MENU;
     }
 
     @Override
     public boolean continuous() {
-        return this.ctx.backendsLoading || this.ctx.upload.working || this.ctx.cleanup.working;
+        // LOADING AND WORKER PROGRESS, AND THE CARET BLINK OF THE ISSUE INPUTS
+        return this.ctx.backendsLoading || this.ctx.upload.working || this.ctx.cleanup.working || this.textInputActive();
     }
 
     // ==========================================================================
@@ -194,48 +193,34 @@ public class HomeScreen extends BaseScreen {
         if (this.uploadDialog.visible() != up.visible || this.cleanupDialog.visible() != this.ctx.cleanup.visible) this.invalidate();
 
         this.uploadDialog.visible(up.visible)
-                .title(up.done ? "SUCCESS" : "UPLOAD LOG FILES")
                 .accent(up.done ? AppTheme.GREEN : AppTheme.CYAN)
-                .panelWidth(Math.min(report ? 900 : 890, this.ctx.logicalWidth() - 48));
+                .panelWidth(Math.min(UPLOAD_PANEL_W, this.ctx.logicalWidth() - 48));
         this.filesPanel.visible(!report);
         this.reportPane.visible(report);
 
         if (up.visible && !report) {
-            final int rowH = up.stage >= 2 ? UPLOAD_ROW_DETAIL_H : UPLOAD_ROW_H;
-            this.fileList.rowHeight(rowH);
-            final List<LogUploader.FileEntry> rows = this.visibleUploadFiles();
+            // SCAN SHOWS EVERY FILE, UPLOAD ONLY THE CANDIDATES AND THE FAILURES
+            final List<LogUploader.FileEntry> rows = new ArrayList<>();
+            for (final LogUploader.FileEntry entry: up.files)
+                if (up.stage <= 1 || (entry.present && entry.valid) || "FAILED".equals(entry.state) || "READ ERROR".equals(entry.state)) rows.add(entry);
             // ROWS ARE REBUILT ONLY WHEN MEMBERSHIP CHANGES; ROW CONTENT BINDS ITSELF EVERY FRAME
             if (!rows.equals(this.uploadRows)) {
                 this.uploadRows = rows;
                 this.fileList.items(rows);
             }
-            // AN EMPTY SCAN KEEPS ONE BLANK ROW OF PANEL HEIGHT
-            this.fileList.height(rows.isEmpty() ? rowH : WRAP_CONTENT);
+            // AN EMPTY SCAN KEEPS ONE BLANK ROW; A LIST TALLER THAN WHAT THE DIALOG OFFERS CLIPS TO THAT AND SCROLLS
+            this.fileList.height(rows.isEmpty() ? UPLOAD_ROW_H : WRAP_CONTENT);
         }
 
-        if (up.visible && report) {
-            final List<RepoTarget> targets = this.uploadRepoTargets();
-            if (!targets.equals(this.repoTargets)) {
-                this.repoTargets = targets;
-                this.repoList.items(targets.subList(1, targets.size()));
-            }
-            final boolean mods = targets.size() > 1;
-            this.repoList.visible(mods);
-            this.noMods.visible(!mods);
-        } else if (!this.repoTargets.isEmpty()) {
-            // OUTSIDE THE REPORT STAGE THE REPO PICKER STATE IS DORMANT, RESET SO IT STARTS FRESH
-            this.repoTargets = List.of();
-            this.repoSelected = 0;
-            this.repoList.items(List.of()).selection(-1);
-        }
-
-        this.uploadCancel.label(up.done ? "CLOSE" : "CANCEL");
+        // A REPORT THAT FAILED TO GATHER TURNS THE ISSUE BUTTON INTO ITS RETRY, WHICH NEEDS NO TITLE
+        final boolean retry = report && !up.working && !up.ready();
+        // NOTHING CAN BE CANCELLED ONCE THE FILES WENT UP: FROM THE UPLOAD STAGE ON THE BUTTON ONLY CLOSES
+        this.uploadCancel.label(up.stage <= 1 ? "CANCEL" : "CLOSE");
         final boolean upEnabled = this.uploadPrimaryEnabled();
-        final String upLabel = up.stage <= 1 ? "UPLOAD TO MCLO.GS" : up.stage == 2 ? "GENERATE REPORT"
-                : "OPEN " + this.selectedRepo().name().toUpperCase(Locale.ROOT);
         final Color upColor = !upEnabled ? AppTheme.TEXT_FAINT : up.done || up.uploadsDone ? AppTheme.GREEN : AppTheme.CYAN;
-        this.uploadPrimary.label(upLabel)
-                .icon(upLabel.startsWith("UPLOAD") ? "upload" : upLabel.startsWith("OPEN") ? "link" : upLabel.startsWith("GENERATE") ? "check" : "")
+        this.uploadPrimary.label(up.stage <= 1 ? "UPLOAD TO MCLO.GS" : up.stage == 2 ? "CONTINUE" : retry ? "RETRY" : "OPEN ISSUE")
+                .subText(report ? "CTRL+ENTER" : "ENTER")
+                .icon(up.stage <= 1 ? "upload" : up.stage == 2 ? "check" : retry ? "reload" : "link")
                 .accent(upColor).textColor(upColor)
                 .enabled(upEnabled);
 
@@ -265,6 +250,7 @@ public class HomeScreen extends BaseScreen {
                 .active(step -> this.ctx.upload.stage == step && !this.ctx.upload.done);
 
         this.fileList = new ListView<LogUploader.FileEntry>()
+                .rowHeight(UPLOAD_ROW_H)
                 .rowFactory(this::uploadRow)
                 .selectionColor(null)
                 .hoverColor(null);
@@ -276,39 +262,16 @@ public class HomeScreen extends BaseScreen {
                 .border(AppTheme.STROKE_BRIGHT, 1f)
                 .width(MAX_PARENT);
 
-        // STAGE 3 REPORT PANE: CLIPBOARD STRIP, WATERMEDIA HERO, SUSPECTED-MOD LIST WITH SUBMIT BUTTONS
-        this.repoList = new ListView<RepoTarget>()
-                .rowFactory((repo, i) -> new RepoCard(repo, i + 1))
-                .rowHeight(REPO_ROW_H)
-                .spacing(8)
-                .selectionColor(null)
-                .hoverColor(null)
-                .scrollbarWidth(4);
-        this.repoList.size(MAX_PARENT, REPO_LIST_H).margin(new Spacing(6, 0, 0, 0));
-        this.noMods = new Text("No known suspect mods detected in this instance; submit to WaterMedia above.")
-                .color(AppTheme.TEXT_FAINT);
-        this.noMods.width(MAX_PARENT).margin(new Spacing(10, 0, 0, 0)).visible(false);
         this.reportPane = new ReportPane();
-        this.reportPane.width(MAX_PARENT);
-        this.reportPane
-                .add(new CopyStrip().size(MAX_PARENT, 30))
-                .add(new RepoHero().size(MAX_PARENT, 104).margin(new Spacing(14, 0, 0, 0)))
-                .add(Parent.row().spacing(14)
-                        .add(new Text("SUSPECTED MODS").bold(true).scale(AppTheme.TEXT_BUTTON).color(AppTheme.NEON))
-                        .add(new Text("SUBMIT TO THE MATCHING REPOSITORY").scale(AppTheme.TEXT_SUBTITLE)
-                                .color(AppTheme.TEXT_FAINT).gravity(Gravity.CENTER))
-                        .margin(new Spacing(16, 0, 0, 0)))
-                .add(this.repoList)
-                .add(this.noMods);
 
-        this.uploadCancel = new Button("CANCEL").subText("ESC")
+        this.uploadCancel = new Button("CANCEL").subText("ESC").icon("x")
                 .accent(AppTheme.STROKE_BRIGHT).textColor(AppTheme.TEXT);
         this.uploadCancel.size(170, Theme.BUTTON_LG).onClick(b -> this.closeUpload());
         this.uploadPrimary = new Button().subText("ENTER");
         this.uploadPrimary.height(Theme.BUTTON_LG).onClick(b -> this.uploadPrimaryAction());
 
         return new Dialog()
-                .title("UPLOAD LOG FILES")
+                .title("UPLOAD LOGS")
                 .header(strip)
                 .content(this.filesPanel)
                 .content(this.reportPane)
@@ -335,7 +298,6 @@ public class HomeScreen extends BaseScreen {
             row.twoLine = this.ctx.cleanup.stage == 2 && this.ctx.cleanup.working;
             row.name.text(count == 1 ? "1 FILE" : count + " FILES")
                     .color(count > 0 ? AppTheme.TEXT : AppTheme.TEXT_SOFT);
-            row.url.visible(false);
             row.bar.visible(row.twoLine)
                     .progress(MathUtil.clamp(this.ctx.cleanup.progress, 0, 100) / 100f);
             row.size.text(this.ctx.cleanup.sizeLabel);
@@ -375,7 +337,7 @@ public class HomeScreen extends BaseScreen {
         this.entertainment.clear();
 
         this.actions.add(new MenuEntry("Play media", "ENTER", Action.OPEN_MULTIMEDIA, -1));
-        this.actions.add(new MenuEntry("Upload Logs", LogUploader.WORKDIR_IS_MODS ? "U" : "LOCKED", Action.UPLOAD_LOGS, -1));
+        this.actions.add(new MenuEntry("Upload Logs", LogUploader.AVAILABLE ? "U" : "LOCKED", Action.UPLOAD_LOGS, -1));
         this.actions.add(new MenuEntry("Cleanup cache", this.cacheLabel, Action.CLEANUP, -1));
         if (WaterMedia.LOGGER.isDebugEnabled()) this.actions.add(new MenuEntry("Settings", "S", Action.SETTINGS, -1));
         this.actions.add(new MenuEntry("Exit", "ESC", Action.EXIT, -1));
@@ -383,7 +345,7 @@ public class HomeScreen extends BaseScreen {
         if (this.ctx.catalog.uriGroups != null) {
             for (int i = 0; i < this.ctx.catalog.uriGroups.length; i++) {
                 final MediaCatalog.URIGroup group = this.ctx.catalog.uriGroups[i];
-                this.mediaTests.add(new MenuEntry(group.name(), group.uris().length + " samples", null, i));
+                this.mediaTests.add(new MenuEntry(group.name(), group.uris().length == 1 ? "1 sample" : group.uris().length + " samples", null, i));
             }
         }
         if (!this.ctx.catalog.customTests.isEmpty()) {
@@ -422,7 +384,7 @@ public class HomeScreen extends BaseScreen {
     }
 
     private boolean actionEnabled(final MenuEntry entry) {
-        if (entry.action() == Action.UPLOAD_LOGS) return LogUploader.WORKDIR_IS_MODS;
+        if (entry.action() == Action.UPLOAD_LOGS) return LogUploader.AVAILABLE;
         if (entry.action() == Action.SETTINGS) return WaterMedia.LOGGER.isDebugEnabled();
         return true;
     }
@@ -512,10 +474,6 @@ public class HomeScreen extends BaseScreen {
     }
 
     private void uploadPrimaryAction() {
-        if (this.ctx.upload.stage >= 3) {
-            this.submitRepo(this.selectedRepo(), this.repoSelected);
-            return;
-        }
         if (!this.uploadPrimaryEnabled()) return;
         this.navigator.accept(Action.UPLOAD_LOGS);
         this.ctx.sound.play();
@@ -523,63 +481,13 @@ public class HomeScreen extends BaseScreen {
 
     private boolean uploadPrimaryEnabled() {
         if (this.ctx.upload.working) return false;
+        // THE ISSUE NEEDS A TITLE AND THE RETRY OF ITS REPORT NOTHING; THE EARLIER STAGES A FILE TO SEND, THEN ONE THAT WENT UP
+        if (this.ctx.upload.stage > 2) return !this.ctx.upload.ready() || !this.ctx.upload.title.isBlank();
         // RUNS ON EVERY UPDATE PASS, SO PLAIN LOOPS INSTEAD OF STREAMS
-        if (this.ctx.upload.stage > 2) return true;
         final boolean scan = this.ctx.upload.stage <= 1;
         for (final LogUploader.FileEntry entry: this.ctx.upload.files)
-            if (scan ? entry.present : entry.uploaded) return true;
+            if (scan ? entry.present && entry.valid : entry.uploaded) return true;
         return false;
-    }
-
-    private List<LogUploader.FileEntry> visibleUploadFiles() {
-        // SCAN SHOWS EVERY FILE, UPLOAD THE CANDIDATES AND THE FAILURES, THE REPORT ONLY THE UPLOADED ONES
-        final List<LogUploader.FileEntry> files = new ArrayList<>();
-        for (final LogUploader.FileEntry entry: this.ctx.upload.files) {
-            if (this.ctx.upload.stage <= 1) {
-                files.add(entry);
-            } else if (this.ctx.upload.stage == 2) {
-                if ((entry.present && entry.valid) || "FAILED".equals(entry.state) || "READ ERROR".equals(entry.state)) files.add(entry);
-            } else if (entry.uploaded) {
-                files.add(entry);
-            }
-        }
-        return files;
-    }
-
-    private List<RepoTarget> uploadRepoTargets() {
-        final String wmUrl = this.ctx.upload.issueUrl != null ? this.ctx.upload.issueUrl : "https://github.com/" + LogUploader.REPO + "/issues/new";
-        final List<RepoTarget> repos = new ArrayList<>();
-        repos.add(new RepoTarget("WaterMedia", LogUploader.REPO, wmUrl, AppTheme.GREEN));
-        // ONLY THE SUSPECT MODS WHOSE JAR THE UPLOAD SCAN FOUND; THE ACCENT FOLLOWS THE CATALOG POSITION
-        int idx = 0;
-        for (final LogUploader.SuspectMod mod: LogUploader.SUSPECT_MODS) {
-            if (this.ctx.upload.suspectModIds.contains(mod.id()))
-                repos.add(new RepoTarget(mod.name(), mod.slug(), mod.url(), REPO_PALETTE[idx % REPO_PALETTE.length]));
-            idx++;
-        }
-        return repos;
-    }
-
-    private RepoTarget selectedRepo() {
-        final List<RepoTarget> repos = this.repoTargets.isEmpty() ? this.uploadRepoTargets() : this.repoTargets;
-        return repos.get(MathUtil.clamp(this.repoSelected, 0, repos.size() - 1));
-    }
-
-    private void submitRepo(final RepoTarget repo, final int index) {
-        this.repoSelected = index;
-        this.ctx.upload.repoUrl = repo.url();
-        this.navigator.accept(Action.UPLOAD_LOGS);
-        this.ctx.sound.play();
-    }
-
-    private void moveRepoSelection(final int delta) {
-        final List<RepoTarget> targets = this.repoTargets.isEmpty() ? this.uploadRepoTargets() : this.repoTargets;
-        this.repoSelected = MathUtil.clamp(this.repoSelected + delta, 0, targets.size() - 1);
-        // DRIVE THE LIST SELECTION SO THE PICKED MOD CARD (TARGETS 1..n) STAYS INSIDE THE SCROLL VIEWPORT
-        if (this.repoSelected >= 1) this.repoList.moveSelection(this.repoSelected - 1 - Math.max(0, this.repoList.selectedIndex()));
-        else this.repoList.selection(-1);
-        this.ctx.sound.play();
-        this.invalidate();
     }
 
     // ROW FACTORY FOR THE UPLOAD FILE LIST: EACH ROW SELF-BINDS TO ITS LIVE ENTRY EVERY FRAME
@@ -589,11 +497,9 @@ public class HomeScreen extends BaseScreen {
         row.binder(r -> {
             final int stage = this.ctx.upload.stage;
             final boolean errored = "FAILED".equals(entry.state) || "READ ERROR".equals(entry.state);
-            final boolean linked = stage >= 3 && entry.uploaded && !entry.url.isBlank();
             final int pct = MathUtil.clamp(entry.progress, 0, 100);
-            row.twoLine = linked || (stage == 2 && entry.present && entry.valid && !errored);
+            row.twoLine = stage == 2 && entry.present && entry.valid && !errored;
             row.name.text(entry.name).color(entry.present ? AppTheme.TEXT : AppTheme.TEXT_SOFT);
-            row.url.visible(linked).text(entry.url);
             row.bar.visible(stage == 2 && entry.present).progress(pct / 100f);
             row.size.text(entry.sizeLabel);
             final String tag = stage == 2 && errored
@@ -650,19 +556,24 @@ public class HomeScreen extends BaseScreen {
     // ==========================================================================
 
     private static Color uploadStateColor(final LogUploader.FileEntry entry) {
-        if (entry.uploaded || "READ OK".equals(entry.state)) return AppTheme.GREEN;
+        if (entry.uploaded || "READY".equals(entry.state)) return AppTheme.GREEN;
         if ("UPLOADING".equals(entry.state)) return AppTheme.NEON_LIGHT;
-        if ("INVALID".equals(entry.state)) return AppTheme.AMBER;
+        if ("TOO LARGE".equals(entry.state)) return AppTheme.AMBER;
         if ("FAILED".equals(entry.state) || "READ ERROR".equals(entry.state)) return AppTheme.RED;
         return entry.present ? AppTheme.TEXT_FAINT : AppTheme.RED;
     }
 
     private static StatusSquare.Status uploadStatus(final LogUploader.FileEntry entry) {
-        if (entry.uploaded || "READ OK".equals(entry.state)) return StatusSquare.Status.OK;
+        if (entry.uploaded || "READY".equals(entry.state)) return StatusSquare.Status.OK;
         if ("UPLOADING".equals(entry.state)) return StatusSquare.Status.PENDING;
-        if ("INVALID".equals(entry.state)) return StatusSquare.Status.WARN;
+        if ("TOO LARGE".equals(entry.state)) return StatusSquare.Status.WARN;
         if ("FAILED".equals(entry.state) || "READ ERROR".equals(entry.state)) return StatusSquare.Status.ERROR;
         return entry.present ? StatusSquare.Status.OFF : StatusSquare.Status.ERROR;
+    }
+
+    // LIVE "n/limit" COUNTER OF AN INPUT, AMBER ONCE THE LIMIT IS REACHED
+    private static void count(final Text counter, final int length, final int limit) {
+        counter.text(length + "/" + limit).color(length >= limit ? AppTheme.AMBER : AppTheme.TEXT_FAINT);
     }
 
     // ==========================================================================
@@ -981,12 +892,14 @@ public class HomeScreen extends BaseScreen {
     // UPLOAD-LOGS TOOLTIP, SHOWN WHILE ITS TILE IS SELECTED AND THE DIALOG IS CLOSED; IT IGNORES INPUT SO
     // THE TILES UNDER IT KEEP THEIR HOVER AND CLICKS
     private final class UploadTip extends Element<UploadTip> {
-        private static final int BOX_H = 82;
         private static final int NOTCH_H = 10;
-        private static final boolean BLOCKED = !LogUploader.WORKDIR_IS_MODS;
-        private static final String TITLE = BLOCKED ? "NO MC CONTEXT" : "SENDS LOGS TO MCLO.GS";
-        private static final String LINE_1 = BLOCKED ? "Upload logs is blocked outside" : "Reads logs/latest.log and crash reports,";
-        private static final String LINE_2 = BLOCKED ? "the Minecraft mods folder." : "then uploads.";
+        private static final boolean BLOCKED = !LogUploader.AVAILABLE;
+        private static final String TITLE = BLOCKED ? "NO MINECRAFT INSTANCE" : "FOR A BUG REPORT";
+        // THE BOX IS AS WIDE AND AS TALL AS ITS TEXT: THE LOCKED TIP SAYS ALL IT HAS TO IN ONE LINE
+        private static final String[] LINES = BLOCKED
+                ? new String[] { "Run the app from its mods folder." }
+                : new String[] { "Uploads logs, crash reports and configs,", "then opens the issue page." };
+        private static final int BOX_H = 42 + 20 * LINES.length;
 
         @Override
         protected void onUpdate() {
@@ -997,9 +910,9 @@ public class HomeScreen extends BaseScreen {
         @Override
         protected void onMeasure(final int innerAvailWidth, final int innerAvailHeight) {
             final TextRenderer text = HomeScreen.this.ctx.text;
-            final int desiredW = Math.max(text.width(TITLE, AppTheme.TEXT_BUTTON),
-                    Math.max(text.width(LINE_1, AppTheme.TEXT_BODY), text.width(LINE_2, AppTheme.TEXT_BODY))) + 24;
-            this.contentWidth = MathUtil.clamp(desiredW, 340, Math.max(120, innerAvailWidth - 24));
+            int desiredW = text.widthBold(TITLE, AppTheme.TEXT_BUTTON);
+            for (final String line: LINES) desiredW = Math.max(desiredW, text.width(line, AppTheme.TEXT_BODY));
+            this.contentWidth = Math.min(desiredW + 24, Math.max(120, innerAvailWidth - 24));
             this.contentHeight = BOX_H + NOTCH_H;
         }
 
@@ -1029,8 +942,7 @@ public class HomeScreen extends BaseScreen {
                 canvas.fill(x + 23 - half, y - 2 * (k + 1), half * 2, 2, color);
             }
             canvas.text(TITLE, x + 12, y + 12, color, AppTheme.TEXT_BUTTON, true);
-            canvas.text(LINE_1, x + 12, y + 36, AppTheme.TEXT_SOFT, AppTheme.TEXT_BODY, false);
-            canvas.text(LINE_2, x + 12, y + 56, AppTheme.TEXT_SOFT, AppTheme.TEXT_BODY, false);
+            for (int i = 0; i < LINES.length; i++) canvas.text(LINES[i], x + 12, y + 36 + 20 * i, AppTheme.TEXT_SOFT, AppTheme.TEXT_BODY, false);
         }
     }
 
@@ -1038,14 +950,14 @@ public class HomeScreen extends BaseScreen {
     // NESTED TYPES: DIALOG BUILDING BLOCKS
     // ==========================================================================
 
-    private record RepoTarget(String name, String slug, String url, Color accent) {}
-
-    // ONE FILE OR SUMMARY ROW: STATUS PIP, NAME (WITH THE URL OR A PROGRESS BAR UNDER IT), SIZE AND STATE BADGE; A
+    // ONE FILE OR SUMMARY ROW: STATUS PIP, NAME (WITH A PROGRESS BAR UNDER IT WHILE IT WORKS), SIZE AND STATE BADGE; A
     // ListRow WHOSE ONLY ADDITION IS THIS TWO-LINE LAYOUT OF LIVE ELEMENTS, BOUND EVERY FRAME BY ITS BINDER
     private static final class FileRow extends ListRow {
+        private static final int BAR_H = 6;
+        private static final int BAR_GAP = 10;
+
         private final StatusSquare pip = new StatusSquare();
         private final Text name = new Text();
-        private final Text url = new Text().color(AppTheme.CYAN).scale(AppTheme.TEXT_SUBTITLE);
         private final ProgressBar bar = new ProgressBar().accent(AppTheme.NEON_LIGHT);
         private final Text size = new Text().color(AppTheme.TEXT_FAINT).scale(AppTheme.TEXT_SUBTITLE);
         private final Badge tag = new Badge();
@@ -1053,10 +965,9 @@ public class HomeScreen extends BaseScreen {
 
         private FileRow() {
             this.pip.size(10, 10);
-            this.url.visible(false);
             this.bar.visible(false);
             this.separatorFrom(28).separator(false);
-            this.add(this.pip).add(this.name).add(this.url).add(this.bar).add(this.size).add(this.tag);
+            this.add(this.pip).add(this.name).add(this.bar).add(this.size).add(this.tag);
         }
 
         @Override
@@ -1064,10 +975,8 @@ public class HomeScreen extends BaseScreen {
             this.pip.measure(10, 10);
             final int nameW = Math.max(40, innerAvailWidth - 28 - 190);
             this.name.width(nameW).measure(nameW, 20);
-            final int urlW = Math.max(40, innerAvailWidth - 40);
-            this.url.width(urlW).measure(urlW, 16);
             final int barW = Math.max(120, innerAvailWidth - 124);
-            this.bar.width(barW).measure(barW, 6);
+            this.bar.width(barW).measure(barW, BAR_H);
             this.size.width(140).measure(140, 16);
             this.tag.measure(200, 26);
             this.contentWidth = innerAvailWidth;
@@ -1081,229 +990,193 @@ public class HomeScreen extends BaseScreen {
             final int w = this.innerWidth();
             final int h = this.innerHeight();
             this.pip.layout(x + 4, y + Math.max(0, (h - 10) / 2));
-            // TWO-LINE MODE CENTERS THE NAME IN THE TOP 28px BAND, WITH THE URL/PROGRESS BAR UNDERNEATH
-            final int nameY = this.twoLine
-                    ? y + Math.max(0, (28 - this.name.measuredHeight()) / 2)
-                    : y + Math.max(0, (h - this.name.measuredHeight()) / 2);
+            // TWO-LINE MODE STACKS THE NAME OVER THE PROGRESS BAR AND CENTERS THAT BLOCK, SO IT SHARES ONE AXIS WITH THE PIP
+            // AND THE BADGE
+            final int nameH = this.name.measuredHeight();
+            final int nameY = y + Math.max(0, (h - (this.twoLine ? nameH + BAR_GAP + BAR_H : nameH)) / 2);
             this.name.layout(x + 28, nameY);
-            this.url.layout(x + 28, y + 28);
-            this.bar.layout(x + 28, y + 31);
+            this.bar.layout(x + 28, nameY + nameH + BAR_GAP);
             final int sizeY = this.twoLine ? nameY : y + Math.max(0, (h - this.size.measuredHeight()) / 2);
             this.size.layout(x + w - 180, sizeY);
             this.tag.layout(x + w - this.tag.measuredWidth(), y + Math.max(0, (h - this.tag.measuredHeight()) / 2));
         }
     }
 
-    // REPORT PANE: HOSTS THE CLIPBOARD STRIP, HERO AND MOD LIST, AND OWNS THE STAGE-3 UP/DOWN KEYS
-    // (RUNNING BEFORE THE DIALOG'S OWN ESC/ENTER FALLBACK)
+    // STAGE 3 PANE: THE TITLE AND DESCRIPTION BOXES UNDER THEIR LIVE COUNTERS, THEN THE STATUS STRIP. IT BINDS ITSELF TO
+    // ctx.upload EVERY FRAME AND OWNS THE FOCUS AND EVERY ENTER OF THE STAGE, SO THE DIALOG NEVER SUBMITS ON A PLAIN ONE
     private final class ReportPane extends Parent {
+        private static final int HEAD_H = 20;
+        private static final int HEAD_GAP = 6;
+        private static final int STRIP_H = 30;
+        private static final int BOX_PAD = 8;
+        private static final int MAX_LINES = 8;
+        private static final int MIN_LINES = 2;
+        // HEIGHT OF EVERYTHING BUT THE TEXT LINES: BOTH HEADS, THE STRIP, THE FOUR GAPS, THE EXTRA GAP OVER THE SECOND
+        // HEAD AND THE PADDING OF BOTH BOXES
+        private static final int FIXED_H = HEAD_H * 2 + STRIP_H + Theme.SPACE_SM * 4 + HEAD_GAP + BOX_PAD * 4;
+
+        private final Text titleLabel = new Text("TITLE").bold(true).scale(AppTheme.TEXT_BUTTON).height(HEAD_H);
+        private final Text titleCount = new Text().scale(AppTheme.TEXT_SUBTITLE).gravity(Gravity.RIGHT).weight(1f).height(HEAD_H);
+        private final TextArea title = new TextArea().singleLine(true).maxLength(LogUploader.TITLE_LIMIT_CHARS)
+                .placeholder("Short summary").padding(Spacing.hv(10, BOX_PAD));
+        private final Text descriptionLabel = new Text("DESCRIPTION").bold(true).scale(AppTheme.TEXT_BUTTON).height(HEAD_H);
+        private final Text descriptionCount = new Text().scale(AppTheme.TEXT_SUBTITLE).gravity(Gravity.RIGHT).weight(1f).height(HEAD_H);
+        private final TextArea description = new TextArea().maxLength(LogUploader.DESCRIPTION_LIMIT_CHARS)
+                .placeholder("What happened and how to repeat it").padding(Spacing.hv(10, BOX_PAD));
+        // THE PANE SHOWED ON THE LAST FRAME; ITS EDGES GIVE AND TAKE THE FOCUS
+        private boolean shown;
+        // WHAT THE PRESS OF THE LAST ENTER MADE OF THE WHOLE KEYSTROKE, AS CTRL MAY LIFT AND THE FOCUS MOVE BEFORE ITS
+        // REPEATS AND RELEASE: A SUBMIT (WITH CTRL), OR A LINE BREAK OF THE DESCRIPTION THAT HELD THE FOCUS
+        private boolean submitting;
+        private boolean breaking;
+
         private ReportPane() {
             super(Orientation.VERTICAL);
+            this.spacing(Theme.SPACE_SM).width(MAX_PARENT);
+            this.title.onChange(value -> {
+                HomeScreen.this.ctx.upload.title = value;
+                count(this.titleCount, value.length(), LogUploader.TITLE_LIMIT_CHARS);
+            });
+            this.description.onChange(value -> {
+                HomeScreen.this.ctx.upload.description = value;
+                count(this.descriptionCount, value.length(), LogUploader.DESCRIPTION_LIMIT_CHARS);
+            });
+            count(this.titleCount, 0, LogUploader.TITLE_LIMIT_CHARS);
+            count(this.descriptionCount, 0, LogUploader.DESCRIPTION_LIMIT_CHARS);
+            this.add(Parent.row().width(MAX_PARENT).add(this.titleLabel).add(this.titleCount))
+                    .add(this.title)
+                    .add(Parent.row().width(MAX_PARENT).margin(new Spacing(HEAD_GAP, 0, 0, 0))
+                            .add(this.descriptionLabel).add(this.descriptionCount))
+                    .add(this.description)
+                    .add(new ReportStrip().size(MAX_PARENT, STRIP_H));
         }
 
         @Override
         public boolean dispatchKey(final int key, final int action) {
-            if (!this.visible) return false;
-            if (action == GLFW_RELEASE && (key == GLFW_KEY_UP || key == GLFW_KEY_DOWN)) {
-                HomeScreen.this.moveRepoSelection(key == GLFW_KEY_UP ? -1 : 1);
-                return true;
+            if (!this.shown) return false;
+            final boolean enter = key == GLFW_KEY_ENTER || key == GLFW_KEY_KP_ENTER;
+            if (enter && action == GLFW_PRESS) {
+                this.submitting = HomeScreen.this.ctx.ctrlDown && !HomeScreen.this.ctx.altDown;
+                this.breaking = !this.submitting && this.description.focused();
             }
-            return super.dispatchKey(key, action);
+            // THE FOCUSED BOX GOES FIRST, BUT AN ENTER ONLY WHEN IT BREAKS A DESCRIPTION LINE: THE REPEATS OF ONE THAT
+            // MOVED THE FOCUS MUST NOT BREAK LINES IN THE BOX IT JUST FOCUSED
+            if ((!enter || this.breaking) && super.dispatchKey(key, action)) return true;
+            if (enter) {
+                // NO ENTER REACHES THE DIALOG, WHICH WOULD OPEN THE ISSUE ON A PLAIN ONE: ONLY CTRL+ENTER DOES, ON ITS RELEASE
+                if (this.submitting && action == GLFW_RELEASE) HomeScreen.this.uploadPrimaryAction();
+                if (this.submitting || this.breaking || action != GLFW_PRESS) return true;
+            } else if (key != GLFW_KEY_TAB || action != GLFW_PRESS) {
+                return key == GLFW_KEY_TAB;
+            }
+            // A PLAIN ENTER OUTSIDE THE DESCRIPTION AND TAB MOVE THE FOCUS ON THEIR PRESS: FROM THE TITLE TO THE
+            // DESCRIPTION, ELSE TO THE TITLE
+            final boolean toTitle = !this.title.focused();
+            this.title.focused(toTitle);
+            this.description.focused(!toTitle);
+            this.invalidate();
+            return true;
+        }
+
+        @Override
+        protected void onUpdate() {
+            final LogUploader up = HomeScreen.this.ctx.upload;
+            // KEYS REACH HIDDEN CHILDREN TOO, SO THE BOXES HOLD THE FOCUS ONLY WHILE THE PANE SHOWS, STARTING AT THE TITLE
+            final boolean showing = up.visible && this.visible;
+            if (showing != this.shown) {
+                this.shown = showing;
+                this.clearFocus();
+                this.title.focused(showing);
+            }
+            if (!showing) return;
+
+            // THE UPLOADER OWNS BOTH TEXTS: A NEW SESSION AFTER AN OPENED ISSUE CLEARS THEM, AND THE BOXES FOLLOW
+            final String title = up.title;
+            final String description = up.description;
+            if (!title.equals(this.title.value())) {
+                this.title.value(title);
+                count(this.titleCount, title.length(), LogUploader.TITLE_LIMIT_CHARS);
+            }
+            if (!description.equals(this.description.value())) {
+                this.description.value(description);
+                count(this.descriptionCount, description.length(), LogUploader.DESCRIPTION_LIMIT_CHARS);
+            }
+
+            final Color accent = up.done ? AppTheme.GREEN : AppTheme.CYAN;
+            this.titleLabel.color(accent);
+            this.descriptionLabel.color(accent);
+            this.title.accent(accent);
+            this.description.accent(accent);
+        }
+
+        @Override
+        protected void onMeasure(final int innerAvailWidth, final int innerAvailHeight) {
+            // THE TITLE BOX IS ONE LINE HIGH; THE DESCRIPTION HAS 8 LINES AND GIVES THEM UP, DOWN TO 2, WHEN THE DIALOG
+            // OFFERS LESS HEIGHT
+            final TextRenderer text = HomeScreen.this.ctx.text;
+            final int line = text == null ? 0 : text.lineHeight(AppTheme.TEXT_BODY);
+            final int lines = line == 0 ? MIN_LINES : MathUtil.clamp((innerAvailHeight - FIXED_H - line) / line, MIN_LINES, MAX_LINES);
+            this.title.height(line + BOX_PAD * 2);
+            this.description.height(lines * line + BOX_PAD * 2);
+            super.onMeasure(innerAvailWidth, innerAvailHeight);
         }
     }
 
-    // CLIPBOARD CONFIRMATION STRIP: GREEN "COPIED" OR MUTED "UNAVAILABLE", RESOLVED LIVE PER DRAW
-    private final class CopyStrip extends Element<CopyStrip> {
+    // STAGE 3 STATUS STRIP: ONE SHORT LINE WITH ITS ICON AND TINT, RESOLVED PER DRAW FROM THE UPLOADER FLAGS
+    private final class ReportStrip extends Element<ReportStrip> {
         @Override
         protected void onDraw(final Canvas canvas) {
-            final boolean copied = HomeScreen.this.ctx.upload.issueCopied;
+            final LogUploader up = HomeScreen.this.ctx.upload;
+            final ReportStatus status = ReportStatus.of(up.working, up.ready(), !up.title.isBlank(), up.issueOpened, up.issueCopied,
+                    up.browserFailed, up.error);
             final int x = this.left;
             final int y = this.top;
             final int w = this.measuredWidth;
             final int h = this.measuredHeight;
-            canvas.fill(x, y, w, h, AppTheme.alpha(copied ? AppTheme.GREEN : AppTheme.BG_2, copied ? 26 : 164));
-            canvas.stroke(x, y, w, h, copied ? AppTheme.GREEN : AppTheme.STROKE_BRIGHT, 1f);
-            PixelIcon.draw(copied ? "check" : "copy", x + 12, y + (h - 14) / 2, 14,
-                    copied ? AppTheme.GREEN : AppTheme.TEXT_FAINT);
-            final String msg = copied
-                    ? "Report template copied to clipboard: paste it into the issue body"
-                    : "Clipboard copy unavailable: write the report manually";
-            canvas.text(canvas.text().truncateToWidth(msg, w - 44, AppTheme.TEXT_BODY), x + 34,
+            canvas.fill(x, y, w, h, status.tint == null ? AppTheme.alpha(AppTheme.BG_2, 164) : AppTheme.alpha(status.tint, 26));
+            canvas.stroke(x, y, w, h, status.tint == null ? AppTheme.STROKE_BRIGHT : status.tint, 1f);
+            canvas.icon(status.icon, x + 12, y + (h - 14) / 2, 14, status.tint == null ? AppTheme.TEXT_FAINT : status.tint);
+            canvas.text(canvas.text().truncateToWidth(status.line, w - 44, AppTheme.TEXT_BODY), x + 34,
                     y + Math.max(0, (h - canvas.textHeight(AppTheme.TEXT_BODY, false)) / 2),
-                    copied ? AppTheme.TEXT : AppTheme.TEXT_SOFT, AppTheme.TEXT_BODY, false);
+                    status.tint == null ? AppTheme.TEXT_SOFT : AppTheme.TEXT, AppTheme.TEXT_BODY, false);
         }
     }
 
-    // WATERMEDIA HERO BANNER (PRIMARY REPORT TARGET): LOGO, PRIMARY BADGE, COPY AND ITS SUBMIT BUTTON;
-    // CLICKS ROUTE BY COORDINATE: THE SUBMIT BOX FIRES THE REPO ACTION, THE BODY ONLY SELECTS
-    private final class RepoHero extends Element<RepoHero> {
-        private static final int PAD = 14;
-        private int submitX;
-        private int submitY;
-        private boolean submitHover;
+    // WHAT THE STAGE 3 STRIP SHOWS: ITS LINE, ITS ICON AND ITS TINT (null FOR THE MUTED LOOK). AFTER A FAILED SUBMIT IT
+    // TELLS WHAT FAILED AND WHETHER THE REPORT AT LEAST REACHED THE CLIPBOARD, FROM WHERE IT CAN BE PASTED BY HAND
+    enum ReportStatus {
+        PREPARING("Preparing report...", "info", null),
+        REPORT_FAILED("Report failed. Retry", "warn", AppTheme.RED),
+        OPENING("Opening...", "info", null),
+        BROWSER_FAILED("Browser failed. Report copied", "warn", AppTheme.RED),
+        ALL_FAILED("Clipboard and browser failed", "warn", AppTheme.RED),
+        CLIPBOARD_FAILED("Clipboard failed. Retry", "warn", AppTheme.RED),
+        UNTITLED("Title required", "info", null),
+        OPENED("Opened. Report copied", "check", AppTheme.GREEN),
+        OPENED_UNCOPIED("Opened", "check", AppTheme.GREEN),
+        READY("Ready", "info", null);
 
-        @Override
-        protected void onLayout() {
-            this.submitX = this.left + this.measuredWidth - PAD - 150;
-            this.submitY = this.top + this.measuredHeight - PAD - 32;
+        private final String line;
+        private final String icon;
+        private final Color tint;
+
+        ReportStatus(final String line, final String icon, final Color tint) {
+            this.line = line;
+            this.icon = icon;
+            this.tint = tint;
         }
 
-        private boolean inSubmit(final double mx, final double my) {
-            return mx >= this.submitX && mx < this.submitX + 150 && my >= this.submitY && my < this.submitY + 32;
-        }
-
-        @Override
-        public boolean dispatchClick(final double mx, final double my) {
-            if (!this.visible || !this.enabled || !this.contains(mx, my)) return false;
-            if (this.inSubmit(mx, my) && !HomeScreen.this.repoTargets.isEmpty()) {
-                HomeScreen.this.submitRepo(HomeScreen.this.repoTargets.get(0), 0);
-            } else if (HomeScreen.this.repoSelected != 0) {
-                // THE BODY ONLY SELECTS; THE SUBMIT BUTTON OPENS THE ISSUE TRACKER
-                HomeScreen.this.repoSelected = 0;
-                HomeScreen.this.ctx.sound.play();
-                this.invalidate();
-            }
-            return true;
-        }
-
-        @Override
-        public boolean dispatchHover(final double mx, final double my) {
-            final boolean inside = this.visible && this.enabled && this.contains(mx, my);
-            this.hovered = inside;
-            this.submitHover = inside && this.inSubmit(mx, my);
-            return inside;
-        }
-
-        @Override
-        public void clearHover() {
-            super.clearHover();
-            this.submitHover = false;
-        }
-
-        @Override
-        protected void onDraw(final Canvas canvas) {
-            if (HomeScreen.this.repoTargets.isEmpty()) return;
-            final RepoTarget repo = HomeScreen.this.repoTargets.get(0);
-            final boolean selected = HomeScreen.this.repoSelected == 0;
-            final int x = this.left;
-            final int y = this.top;
-            final int w = this.measuredWidth;
-            final int h = this.measuredHeight;
-            canvas.glow(x, y, w, h, 0f, AppTheme.GREEN, selected ? 0.26f : 0.12f);
-            canvas.fill(x, y, w, h, AppTheme.alpha(AppTheme.GREEN, selected ? 30 : 18));
-            canvas.stroke(x, y, w, h, AppTheme.GREEN, selected ? 2f : 1.5f);
-            canvas.fill(x, y, 4, h, AppTheme.GREEN);
-
-            // PACK.PNG LOGO: SQUARE, ASPECT-PRESERVED, CENTERED IN ITS BOX; TEXTURE ID READ PER DRAW
-            final int logoBox = h - PAD * 2;
-            final int logoX = x + PAD + 8;
-            final var assets = HomeScreen.this.ctx.assets;
-            if (assets.iconId > 0 && assets.iconWidth > 0 && assets.iconHeight > 0) {
-                final float s = Math.min((float) logoBox / assets.iconWidth, (float) logoBox / assets.iconHeight);
-                final int lw = (int) (assets.iconWidth * s);
-                final int lh = (int) (assets.iconHeight * s);
-                canvas.image(assets.iconId, logoX + (logoBox - lw) / 2f, y + PAD + (logoBox - lh) / 2f, lw, lh, null);
-            }
-
-            final int textX = logoX + logoBox + 20;
-            final int textRight = x + w - PAD;
-            // PRIMARY BADGE TOP-RIGHT
-            final int badgeW = canvas.textWidth("PRIMARY", AppTheme.TEXT_SUBTITLE, false) + 20;
-            canvas.fill(textRight - badgeW, y + PAD, badgeW, 20, AppTheme.alpha(AppTheme.GREEN, 40));
-            canvas.stroke(textRight - badgeW, y + PAD, badgeW, 20, AppTheme.GREEN, 1f);
-            canvas.text("PRIMARY", textRight - badgeW + 10,
-                    y + PAD + Math.max(0, (20 - canvas.textHeight(AppTheme.TEXT_SUBTITLE, false)) / 2),
-                    AppTheme.GREEN, AppTheme.TEXT_SUBTITLE, false);
-
-            // TEXT: EACH LINE CLAMPED SO IT NEVER SPILLS PAST THE BADGE, THE BUTTON OR THE HERO EDGE
-            canvas.text(canvas.text().truncateToWidth("SUBMIT A BUG REPORT ON WATERMEDIA ISSUE TRACKER",
-                            textRight - badgeW - 12 - textX, AppTheme.TEXT_BUTTON, Font.BOLD),
-                    textX, y + 16, AppTheme.GREEN, AppTheme.TEXT_BUTTON, true);
-            canvas.text(canvas.text().truncateToWidth("AND, if a listed mod is the suspect, also file it in that mod's repo below.",
-                            textRight - textX, AppTheme.TEXT_BODY),
-                    textX, y + 40, AppTheme.TEXT_SOFT, AppTheme.TEXT_BODY, false);
-            canvas.text(canvas.text().truncateToWidth(repo.slug(), this.submitX - 12 - textX, AppTheme.TEXT_SUBTITLE),
-                    textX, y + 64, AppTheme.TEXT_FAINT, AppTheme.TEXT_SUBTITLE, false);
-
-            // SUBMIT: SHARED DESIGN-SYSTEM BUTTON LOOK; ACTIVE WHEN SELECTED OR ITS BOX IS HOVERED
-            Button.render(canvas, this.submitX, this.submitY, 150, 32,
-                    "SUBMIT", "", "link", 12, AppTheme.GREEN, AppTheme.GREEN, false,
-                    selected || this.submitHover, true);
-        }
-    }
-
-    // ONE SUSPECTED-MOD CARD IN THE REPORT LIST: ACCENT STRIPE, NAME/SLUG AND ITS OWN SUBMIT BUTTON
-    private final class RepoCard extends Element<RepoCard> {
-        private final RepoTarget repo;
-        private final int targetIdx; // INDEX INTO repoTargets (1..n, 0 IS THE HERO)
-        private int submitX;
-        private int submitY;
-        private boolean submitHover;
-
-        private RepoCard(final RepoTarget repo, final int targetIdx) {
-            this.repo = repo;
-            this.targetIdx = targetIdx;
-        }
-
-        @Override
-        protected void onLayout() {
-            this.submitX = this.left + this.measuredWidth - 138;
-            this.submitY = this.top + (this.measuredHeight - 32) / 2;
-        }
-
-        private boolean inSubmit(final double mx, final double my) {
-            return mx >= this.submitX && mx < this.submitX + 122 && my >= this.submitY && my < this.submitY + 32;
-        }
-
-        @Override
-        public boolean dispatchClick(final double mx, final double my) {
-            if (!this.visible || !this.enabled || !this.contains(mx, my)) return false;
-            if (this.inSubmit(mx, my)) {
-                HomeScreen.this.submitRepo(this.repo, this.targetIdx);
-            } else if (HomeScreen.this.repoSelected != this.targetIdx) {
-                // CARD BODY ONLY SELECTS; THE SUBMIT BUTTON OPENS THE ISSUE TRACKER
-                HomeScreen.this.repoSelected = this.targetIdx;
-                HomeScreen.this.ctx.sound.play();
-                this.invalidate();
-            }
-            return true;
-        }
-
-        @Override
-        public boolean dispatchHover(final double mx, final double my) {
-            final boolean inside = this.visible && this.enabled && this.contains(mx, my);
-            this.hovered = inside;
-            this.submitHover = inside && this.inSubmit(mx, my);
-            return inside;
-        }
-
-        @Override
-        public void clearHover() {
-            super.clearHover();
-            this.submitHover = false;
-        }
-
-        @Override
-        protected void onDraw(final Canvas canvas) {
-            final boolean sel = HomeScreen.this.repoSelected == this.targetIdx;
-            final Color accent = this.repo.accent();
-            final int x = this.left;
-            final int y = this.top;
-            final int w = this.measuredWidth;
-            final int h = this.measuredHeight;
-            canvas.fill(x, y, w, h, sel ? AppTheme.alpha(accent, 30) : AppTheme.alpha(AppTheme.BG_2, 210));
-            canvas.stroke(x, y, w, h, sel ? accent : AppTheme.STROKE_BRIGHT, sel ? 2f : 1f);
-            if (sel) canvas.glow(x, y, w, h, 0f, accent, 0.18f);
-            canvas.fill(x, y, 4, h, accent);
-            // SQUARE STATUS PIP IN THE CARD ACCENT
-            canvas.fill(x + 16, y + (h - 10) / 2, 10, 10, accent);
-            canvas.glow(x + 16, y + (h - 10) / 2, 10, 10, 0f, accent, 0.5f);
-            canvas.text(this.repo.name().toUpperCase(Locale.ROOT), x + 36, y + 12,
-                    sel ? accent : AppTheme.TEXT, AppTheme.TEXT_BUTTON, true);
-            canvas.text(this.repo.slug(), x + 36, y + 32, AppTheme.TEXT_FAINT, AppTheme.TEXT_SUBTITLE, false);
-            Button.render(canvas, this.submitX, this.submitY, 122, 32,
-                    "SUBMIT", "", "link", 12, accent, accent, false,
-                    sel || this.submitHover, true);
+        // THE FIRST THAT APPLIES, IN THE ORDER OF THE CONSTANTS: THE REPORT WORKER OR ITS FAILURE, THE SUBMIT WORKER OR
+        // ITS FAILURE (THE CLIPBOARD ALONE FAILS BEFORE THE BROWSER IS TRIED), WHAT THE SUBMIT STILL NEEDS, THEN ITS RESULT
+        static ReportStatus of(final boolean working, final boolean ready, final boolean titled, final boolean opened,
+                               final boolean copied, final boolean browserFailed, final boolean error) {
+            if (!ready) return working || !error ? PREPARING : REPORT_FAILED;
+            if (working) return OPENING;
+            if (error && browserFailed) return copied ? BROWSER_FAILED : ALL_FAILED;
+            if (error) return CLIPBOARD_FAILED;
+            if (!titled) return UNTITLED;
+            if (opened) return copied ? OPENED : OPENED_UNCOPIED;
+            return READY;
         }
     }
 }

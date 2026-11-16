@@ -178,11 +178,12 @@ The WATERMeDIA jar is also a desktop media player. With Java 17 or newer install
 
 Something broke in your game? Open the app from your Minecraft `mods` folder and pick **Upload Logs** (`U`):
 
-1. It finds your `latest.log`, the newest crash report and the newest JVM crash file (`hs_err_pid`).
-2. It hides tokens, passwords and login data, then uploads the files to [mclo.gs](https://mclo.gs).
-3. It copies a ready report to your clipboard. Choose where to send it, WATERMeDIA or the mod you suspect
-   (FancyMenu, WaterFrames, WaterVision or LittleFrames, when installed), and paste it into the issue page that
-   opens.
+1. It finds your `latest.log`, the newest crash report, the newest JVM crash file (`hs_err_pid`) and your WATERMeDIA
+   config files.
+2. It hides tokens, passwords, login data and your user name in folder paths, then uploads the files to
+   [mclo.gs](https://mclo.gs).
+3. Write a title and tell what happened. The issue page opens with the report already filled in, and a copy stays
+   in your clipboard in case the page comes up empty.
 
 Files over 10 MB or 25,000 lines don't upload, so share those by hand. You can always send `logs/latest.log` and the
 `crash-reports` folder from your game folder on [GitHub Issues](https://github.com/SrRapero720/watermedia/issues) or

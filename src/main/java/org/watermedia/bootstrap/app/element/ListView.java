@@ -34,6 +34,8 @@ public final class ListView<D> extends Group<ListView<D>> {
     private int windowSlot;
     // INNER HEIGHT OF THE LAST LAYOUT; update() PICKS ITS WINDOW WITH IT BEFORE THE NEXT LAYOUT RUNS
     private int viewport;
+    // WIDTH EVERY ROW GETS: THE INNER WIDTH, WITHOUT THE SCROLLBAR AND THE AIR BEFORE IT WHILE THE ROWS OVERFLOW
+    private int rowWidth;
 
     public ListView<D> items(final List<D> data) {
         this.items.clear();
@@ -157,30 +159,30 @@ public final class ListView<D> extends Group<ListView<D>> {
 
     @Override
     protected void onMeasure(final int innerAvailWidth, final int innerAvailHeight) {
+        // ROWS THAT OVERFLOW END A FEW PX BEFORE THE SCROLLBAR, SO THE BAR NEVER TOUCHES OR COVERS THEM; A RIGHT PADDING
+        // THAT WIDE ALREADY KEEPS THEM APART
+        final int channel = Math.max(0, this.scrollbarWidth + Theme.SPACE_XS - this.padding.right());
         if (this.rowHeight > 0) {
             int count = 0;
             for (final Element<?> row: this.rows) if (row.visible) count++;
             this.totalHeight = count * this.rowHeight + this.spacing * Math.max(0, count - 1);
+            this.rowWidth = this.totalHeight > innerAvailHeight ? Math.max(0, innerAvailWidth - channel) : innerAvailWidth;
             for (final Element<?> row: this.children) {
                 if (!row.visible) continue;
-                row.measure(innerAvailWidth, this.rowHeight);
+                row.measure(this.rowWidth, this.rowHeight);
                 row.measuredHeight = this.rowHeight;
             }
             this.contentWidth = this.rows.isEmpty() ? 0 : innerAvailWidth;
             this.contentHeight = Math.min(this.totalHeight, innerAvailHeight);
             return;
         }
-        int used = 0;
-        int maxW = 0;
-        int visibleCount = 0;
-        for (final Element<?> row: this.children) {
-            if (!row.visible) continue;
-            visibleCount++;
-            row.measure(innerAvailWidth, ScrollState.UNBOUNDED);
-            used += row.measuredHeight;
-            maxW = Math.max(maxW, row.measuredWidth);
+        // NATURAL ROWS MEASURE AT THE FULL WIDTH FIRST AND, ONLY WHEN THEY OVERFLOW, AGAIN WITHOUT THE CHANNEL
+        this.rowWidth = innerAvailWidth;
+        int maxW = this.measureNaturalRows();
+        if (channel > 0 && this.totalHeight > innerAvailHeight) {
+            this.rowWidth = Math.max(0, innerAvailWidth - channel);
+            maxW = this.measureNaturalRows() + channel;
         }
-        this.totalHeight = used + this.spacing * Math.max(0, visibleCount - 1);
         this.contentWidth = maxW;
         this.contentHeight = Math.min(this.totalHeight, innerAvailHeight);
     }
@@ -198,7 +200,7 @@ public final class ListView<D> extends Group<ListView<D>> {
                 // A ROW THAT JOINS HERE (FIRST FRAME, RESIZE) MISSED THIS FRAME'S UPDATE PASS, SO IT BINDS BEFORE IT DRAWS
                 if (this.windowFrom + i < oldFrom || this.windowFrom + i >= oldTo) row.update();
                 if (!row.visible) continue;
-                row.measure(this.innerWidth(), this.rowHeight);
+                row.measure(this.rowWidth, this.rowHeight);
                 row.measuredHeight = this.rowHeight;
             }
         }
@@ -266,6 +268,22 @@ public final class ListView<D> extends Group<ListView<D>> {
         }
         // NATURAL-HEIGHT ROWS ARE ALWAYS ALL CHILDREN; FIXED-HEIGHT ROWS JOIN THROUGH window()
         if (this.rowHeight <= 0) for (final Element<?> row: this.rows) this.add(row);
+    }
+
+    // MEASURES EVERY NATURAL-HEIGHT ROW AT rowWidth, SUMS THEM INTO totalHeight AND RETURNS THE WIDEST ONE
+    private int measureNaturalRows() {
+        int used = 0;
+        int maxW = 0;
+        int visibleCount = 0;
+        for (final Element<?> row: this.children) {
+            if (!row.visible) continue;
+            visibleCount++;
+            row.measure(this.rowWidth, ScrollState.UNBOUNDED);
+            used += row.measuredHeight;
+            maxW = Math.max(maxW, row.measuredWidth);
+        }
+        this.totalHeight = used + this.spacing * Math.max(0, visibleCount - 1);
+        return maxW;
     }
 
     private boolean window() {

@@ -3,6 +3,10 @@ package org.watermedia.bootstrap.app;
 import org.watermedia.bootstrap.app.ui.TextRenderer;
 import org.watermedia.tools.ThreadTool;
 
+import java.awt.Toolkit;
+import java.awt.datatransfer.Clipboard;
+import java.awt.datatransfer.DataFlavor;
+import java.awt.datatransfer.StringSelection;
 import java.util.Queue;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.Executor;
@@ -136,6 +140,27 @@ public final class AppContext implements Executor {
             ThreadTool.sleep(2);
         }
         this.processExecutor();
+    }
+
+    /** Returns the text in the system clipboard, or an empty string when it holds none or cannot be read. */
+    public static String clipboard() {
+        try {
+            final Clipboard clipboard = Toolkit.getDefaultToolkit().getSystemClipboard();
+            if (clipboard.isDataFlavorAvailable(DataFlavor.stringFlavor)) return (String) clipboard.getData(DataFlavor.stringFlavor);
+        } catch (final Exception busy) {
+            // A BUSY CLIPBOARD, A FLAVOR ERROR OR A HEADLESS JVM READS AS EMPTY
+        }
+        return "";
+    }
+
+    /** Copies the text to the system clipboard and returns whether it got there. */
+    public static boolean clipboard(final String text) {
+        try {
+            Toolkit.getDefaultToolkit().getSystemClipboard().setContents(new StringSelection(text), null);
+            return true;
+        } catch (final Exception busy) {
+            return false;
+        }
     }
 
     /** Shows the global error dialog. */

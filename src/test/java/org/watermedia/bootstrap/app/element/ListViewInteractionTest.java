@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.watermedia.bootstrap.app.ui.Gravity;
+import org.watermedia.bootstrap.app.ui.Spacing;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -219,6 +220,69 @@ public class ListViewInteractionTest {
             list.onSelect((item, index) -> activations.add(item));
             assertTrue(list.dispatchClick(20, 60));
             assertEquals(List.of("item300"), activations);
+        }
+    }
+
+    @Nested
+    @DisplayName("Scrollbar channel")
+    class ScrollbarChannel {
+
+        @Test
+        @DisplayName("rows that overflow end 4 px before the scrollbar, also the ones that join while scrolling")
+        void overflowingRowsLeaveTheChannel() {
+            final List<String> items = new ArrayList<>();
+            for (int i = 0; i < 20; i++) items.add("item" + i);
+            final ListView<String> list = new ListView<String>().rowHeight(40).scrollbarWidth(4)
+                    .rowFactory((item, index) -> new Box()).items(items).size(200, 80);
+            list.measure(200, 80);
+            list.layout(10, 10);
+            final List<Element<?>> first = new ArrayList<>(list.children());
+            assertFalse(first.isEmpty());
+            for (final Element<?> row: first) assertEquals(192, row.measuredWidth(), "the 4 px bar and 4 px of air come off");
+
+            // THE LAYOUT, NOT THE MEASURE, SIZES THE ROWS THAT ENTER THE WINDOW AFTER THE SCROLL
+            list.selection(0).moveSelection(19);
+            list.layout(10, 10);
+            assertFalse(list.children().isEmpty());
+            for (final Element<?> row: list.children()) {
+                assertFalse(first.contains(row), "a row of the first window is still a child");
+                assertEquals(192, row.measuredWidth());
+            }
+        }
+
+        @Test
+        @DisplayName("rows that fit keep the full width, and a right padding counts toward the bar and its air")
+        void fittingRowsKeepTheWidth() {
+            final ListView<String> fits = new ListView<String>().rowHeight(40).rowFactory((item, index) -> new Box())
+                    .items(List.of("first", "second")).size(200, 80);
+            fits.measure(200, 80);
+            fits.layout(0, 0);
+            for (final Element<?> row: fits.children()) assertEquals(200, row.measuredWidth());
+
+            final ListView<String> padded = list(new ArrayList<>()).padding(new Spacing(0, 6, 0, 0));
+            padded.measure(200, 80);
+            padded.layout(0, 0);
+            for (final Element<?> row: padded.children()) assertEquals(190, row.measuredWidth(), "the padding holds the 6 px bar, the air still comes off");
+
+            padded.padding(new Spacing(0, 10, 0, 0));
+            padded.measure(200, 80);
+            padded.layout(0, 0);
+            for (final Element<?> row: padded.children()) assertEquals(190, row.measuredWidth(), "the inner width, with nothing more taken off");
+        }
+
+        @Test
+        @DisplayName("rows of their own height give up the channel only when they overflow")
+        void naturalRows() {
+            final ListView<String> list = new ListView<String>().rowFactory((item, index) -> new Box().height(40))
+                    .items(List.of("first", "second", "third")).size(200, 80);
+            list.measure(200, 80);
+            list.layout(0, 0);
+            for (final Element<?> row: list.children()) assertEquals(190, row.measuredWidth());
+
+            list.height(120);
+            list.measure(200, 120);
+            list.layout(0, 0);
+            for (final Element<?> row: list.children()) assertEquals(200, row.measuredWidth());
         }
     }
 

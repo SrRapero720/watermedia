@@ -77,6 +77,37 @@ public class DataToolTest {
             assertEquals("", DataTool.redact(""));
             assertNull(DataTool.redact(null));
         }
+
+        @Test
+        @DisplayName("redact masks the bare token key and the cookie of a config copy, and the upload header")
+        void redactConfigs() {
+            // THE SHAPES WATERCONFIG WRITES: INDENTED TOML PAIRS UNDER A TABLE AND DOTTED PROPERTIES KEYS
+            assertEquals("[network]\n  # The token clients present to the file server\n  token = ********\n  timeout = 15000\n\n[platforms]\n  biliBiliCookie = ********\n",
+                    DataTool.redact("[network]\n  # The token clients present to the file server\n  token = \"abc123\"\n  timeout = 15000\n\n[platforms]\n  biliBiliCookie = \"SESSDATA=xyz\"\n"));
+            assertEquals("# WATERMeDIA standalone app preferences\nengine=VULKAN\nnetwork.token=********\nplatforms.biliBiliCookie=********\n",
+                    DataTool.redact("# WATERMeDIA standalone app preferences\nengine=VULKAN\nnetwork.token=abc123\nplatforms.biliBiliCookie=SESSDATA\\=xyz\n"));
+            assertEquals("token = ********", DataTool.redact("token = \"my server, 2026 \\\"quoted\\\"\""), "a quoted value is masked whole, escapes included");
+            assertEquals("token = ********", DataTool.redact("token = 'my server, 2026'"));
+            assertEquals("TOKEN=******** next", DataTool.redact("TOKEN=abc123 next"));
+            assertEquals("token = ********", DataTool.redact("token = \"abc"), "an unterminated value is masked too");
+            assertEquals("token:********", DataTool.redact("token:deadbeef:0123-4567"), "the session triple keeps its own shape");
+            // THE UPLOAD HEADER OF THE FILE SERVER CARRIES THE SAME TOKEN; ITS VALUE MAY HOLD SPACES, SO THE LINE GOES WHOLE
+            assertEquals("X-WaterMedia-Token: ********\r\nAccept: */*", DataTool.redact("X-WaterMedia-Token: my server, 2026\r\nAccept: */*"));
+            assertEquals("sent x-watermedia-token=********", DataTool.redact("sent x-watermedia-token=abc123"));
+            for (final String empty: new String[] { "token = \"\"", "network.token=\nengine=VULKAN\n" })
+                assertEquals(empty, DataTool.redact(empty), "an empty value has nothing to mask");
+        }
+
+        @Test
+        @DisplayName("redact keeps compound token keys and link parameters, and long token values never overflow the stack")
+        void redactTokenBounds() {
+            final String kept = "nextPageToken=CAUQAA page_token=xyz page-token=xyz token_type=bearer tokens=3 "
+                    + "\"nextPageToken\": \"CAUQAA\" https://api.test/list?token=abc&token=def unexpected token: }";
+            assertEquals(kept, DataTool.redact(kept));
+            // A GREEDY GROUP RECURSES ONCE PER CHARACTER OF THE VALUE, SO THESE RUNS WOULD THROW StackOverflowError
+            for (final String run: new String[] { "token = \"" + "a".repeat(80_000) + "\"", "token = \"" + "a".repeat(80_000), "token=\"" + "\\\\".repeat(40_000) })
+                assertEquals("********", assertTimeoutPreemptively(Duration.ofSeconds(2), () -> DataTool.redact(run)).replaceFirst("token ?= ?", ""));
+        }
     }
 
     @Nested
