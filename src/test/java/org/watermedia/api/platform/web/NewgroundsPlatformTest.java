@@ -116,7 +116,7 @@ public class NewgroundsPlatformTest {
                     "https://www.newgrounds.com/art/view/luwano", "https://www.newgrounds.com/portal/view/abc")) {
                 final PlatformException thrown = assertThrows(PlatformException.class, () -> this.platform.resolve(URI.create(url)), url);
                 assertFalse(thrown instanceof MatureContentException, url);
-                assertTrue(thrown.getMessage().startsWith(NewgroundsPlatform.NAME + ": Unsupported URL"), thrown.getMessage());
+                assertTrue(thrown.getMessage().startsWith(NewgroundsPlatform.NAME + ": (wm_err:2020) Failed to resolve "), thrown.getMessage());
             }
         }
     }

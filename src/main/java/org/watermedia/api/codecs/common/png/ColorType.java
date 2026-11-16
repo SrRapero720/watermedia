@@ -1,5 +1,8 @@
 package org.watermedia.api.codecs.common.png;
 
+import org.watermedia.WaterMedia;
+import org.watermedia.tools.DataTool;
+
 /**
  * PNG Color Types as defined in the PNG specification.
  *
@@ -21,7 +24,7 @@ public enum ColorType {
      * @throws IllegalArgumentException if value is out of range (not 0-6)
      */
     public static ColorType of(final int value) {
-        if (value < 0 || value >= VALUES.length) throw new IllegalArgumentException("Invalid PNG color type: " + value);
+        if (value < 0 || value >= VALUES.length) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_PNG_COLORTYPE_VALUE) + "Failed to resolve the PNG color type due to invalid value: " + value);
         return VALUES[value];
     }
 }

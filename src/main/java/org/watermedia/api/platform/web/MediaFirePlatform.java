@@ -2,6 +2,7 @@ package org.watermedia.api.platform.web;
 
 import org.apache.logging.log4j.Marker;
 import org.apache.logging.log4j.MarkerManager;
+import org.watermedia.WaterMedia;
 import org.watermedia.api.platform.*;
 import org.watermedia.api.util.MediaType;
 import org.watermedia.api.util.HttpHeaders;
@@ -40,7 +41,7 @@ public final class MediaFirePlatform implements Platform {
         if (path == null || !path.startsWith("/file/")) throw PlatformException.unsupported(NAME, uri);
 
         try (final NetRequest req = new NetRequest(uri).accept("text/html").send()) {
-            if (req.statusCode() != 200) throw new PlatformException(NAME, "Page request for " + uri + " returned HTTP " + req.statusCode());
+            if (req.statusCode() != 200) throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_MEDIAFIRE_PAGE_STATUS) + "Failed to request the page " + uri + " due to HTTP " + req.statusCode());
 
             final String html = req.text();
             final Matcher popsokMatcher = PATTERN_POPSOK.matcher(html);
@@ -56,10 +57,10 @@ public final class MediaFirePlatform implements Platform {
                 link = new String(Base64.getDecoder().decode(dataScrambledMatcher.group(1)), StandardCharsets.UTF_8);
                 LOGGER.debug(IT, "MediaFire resolved direct link via scrambled attribute: {}", link);
             } else {
-                throw new PlatformException(NAME, "Download link not found in page (private, removed, or markup changed): " + uri);
+                throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_MEDIAFIRE_LINK_MISSING) + "Failed to resolve the download link due to a missing link in page (private, removed, or markup changed): " + uri);
             }
             final URI downloadUri = DataTool.uri(link);
-            if (downloadUri == null) throw new PlatformException(NAME, "Download link '" + link + "' is not a web URL: " + uri);
+            if (downloadUri == null) throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_MEDIAFIRE_LINK_NOT_WEB) + "Failed to resolve the download link '" + link + "' due to a non-web URL: " + uri);
 
             final var entry = new Source(MediaType.UNKNOWN, null, null,
                     HttpHeaders.defaults(uri),
@@ -69,7 +70,7 @@ public final class MediaFirePlatform implements Platform {
         } catch (final PlatformException e) {
             throw e;
         } catch (final IOException | RuntimeException e) {
-            throw new PlatformException(NAME, "Failed to resolve " + uri, e);
+            throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_MEDIAFIRE_RESOLVE) + "Failed to resolve " + uri, e);
         }
     }
 }

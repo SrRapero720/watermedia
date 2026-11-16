@@ -1,6 +1,8 @@
 package org.watermedia.api.codecs.readers.webp.lossless;
 
+import org.watermedia.WaterMedia;
 import org.watermedia.api.codecs.CodecException;
+import org.watermedia.tools.DataTool;
 
 import static org.watermedia.WaterMedia.LOGGER;
 import static org.watermedia.api.codecs.readers.webp.lossless.VP8LosslessDecoder.IT;
@@ -43,12 +45,12 @@ final class HuffmanDecoder {
         final int is8Bits = reader.read(1);
 
         final int sym0 = reader.read(1 + 7 * is8Bits);
-        if (sym0 >= alphabetSize) throw new CodecException("Simple code symbol out of range: " + sym0);
+        if (sym0 >= alphabetSize) throw new CodecException(DataTool.errCode(WaterMedia.ERR_VP8L_HUFFMAN_SYMBOL_0) + "Failed to read the VP8L simple code due to symbol out of range: " + sym0);
 
         int sym1 = 0;
         if (numSymbols == 2) {
             sym1 = reader.read(8);
-            if (sym1 >= alphabetSize) throw new CodecException("Simple code symbol out of range: " + sym1);
+            if (sym1 >= alphabetSize) throw new CodecException(DataTool.errCode(WaterMedia.ERR_VP8L_HUFFMAN_SYMBOL_1) + "Failed to read the VP8L simple code due to symbol out of range: " + sym1);
         }
 
         LOGGER.trace(IT, "readSimpleCode: alphabetSize={}, numSymbols={}, is8Bits={}, sym0={}, sym1={}",
@@ -76,7 +78,7 @@ final class HuffmanDecoder {
             LOGGER.trace(IT, "  lengthNBits={}, lengthBits={}, maxSymbol={}", lengthNBits, lengthBits, maxSymbol);
             if (maxSymbol > alphabetSize) {
                 LOGGER.trace(IT, "  ERROR: maxSymbol={} > alphabetSize={}", maxSymbol, alphabetSize);
-                throw new CodecException("Max symbol exceeds alphabet size");
+                throw new CodecException(DataTool.errCode(WaterMedia.ERR_VP8L_HUFFMAN_MAX_SYMBOL) + "Failed to read the VP8L prefix code due to max symbol over the alphabet size");
             }
         } else {
             maxSymbol = alphabetSize;
@@ -103,21 +105,21 @@ final class HuffmanDecoder {
                 final int extraBits = reader.read(2);
                 final int repeat = 3 + extraBits;
                 if (symbol + repeat > alphabetSize)
-                    throw new CodecException("Repeat code overflow: symbol=" + symbol + ", repeat=" + repeat + ", alphabetSize=" + alphabetSize);
+                    throw new CodecException(DataTool.errCode(WaterMedia.ERR_VP8L_HUFFMAN_REPEAT_CODE) + "Failed to read the VP8L prefix code due to repeat code overflow: symbol=" + symbol + ", repeat=" + repeat + ", alphabetSize=" + alphabetSize);
                 for (int i = 0; i < repeat; i++) codeLengths[symbol++] = prevCodeLen;
             } else if (code == 17) {
                 // REPEAT ZERO (SHORT)
                 final int extraBits = reader.read(3);
                 final int repeat = 3 + extraBits;
                 if (symbol + repeat > alphabetSize)
-                    throw new CodecException("Repeat zero overflow: symbol=" + symbol + ", repeat=" + repeat + ", alphabetSize=" + alphabetSize);
+                    throw new CodecException(DataTool.errCode(WaterMedia.ERR_VP8L_HUFFMAN_ZERO_SHORT) + "Failed to read the VP8L prefix code due to repeat zero overflow: symbol=" + symbol + ", repeat=" + repeat + ", alphabetSize=" + alphabetSize);
                 symbol += repeat;
             } else if (code == 18) {
                 // REPEAT ZERO (LONG)
                 final int extraBits = reader.read(7);
                 final int repeat = 11 + extraBits;
                 if (symbol + repeat > alphabetSize)
-                    throw new CodecException("Repeat zero overflow: symbol=" + symbol + ", repeat=" + repeat + ", alphabetSize=" + alphabetSize);
+                    throw new CodecException(DataTool.errCode(WaterMedia.ERR_VP8L_HUFFMAN_ZERO_LONG) + "Failed to read the VP8L prefix code due to repeat zero overflow: symbol=" + symbol + ", repeat=" + repeat + ", alphabetSize=" + alphabetSize);
                 symbol += repeat;
             }
         }

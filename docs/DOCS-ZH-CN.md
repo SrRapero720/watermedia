@@ -269,6 +269,8 @@ Forge、NeoForge 和 Fabric 会在以下版本的客户端和专用服务器上�
 - 会重复出现的问题（缓冲区过短、布局被拒绝、回调失败、上传被拒绝）在每个引擎、播放器、
   服务器或缓存中只在第一次出现时记录。过慢的迭代会被计数，并在结束时汇报一次。
 - _FFmpeg_ 仍会把它自己的日志写到错误输出，不经过项目日志记录器及其机密过滤器。
+- 每条异常消息和每行错误日志都带有形如 `(wm_err:0720)` 的代码。每个代码都是一个 `WaterMedia.ERR_*` 常量，对应 WATERMeDIA 中的一处位置，
+  报告问题时请附上它；应用的 **Upload Logs** 会列出找到的代码。
 - `-Dwatermedia.glchecks=true` 会在上传帧时开启 OpenGL 错误检查。
 
 `src/test/java/org/watermedia/ApiGuideExample.java`

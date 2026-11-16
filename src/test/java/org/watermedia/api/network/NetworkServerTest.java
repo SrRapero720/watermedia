@@ -87,7 +87,7 @@ public class NetworkServerTest {
             NetworkServer.start(0, directory);
             throw new AssertionError("Another process acquired the live storage directory");
         } catch (final IOException occupied) {
-            if (!occupied.getMessage().contains("storage is already in use")) throw occupied;
+            if (!occupied.getMessage().contains("storage already in use")) throw occupied;
         }
         if (!Files.exists(directory.resolve("watermedia/files/.upload-Live1234/partial.bin")))
             throw new AssertionError("The competing process deleted a live upload");

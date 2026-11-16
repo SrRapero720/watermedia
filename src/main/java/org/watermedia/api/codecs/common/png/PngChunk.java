@@ -1,6 +1,8 @@
 package org.watermedia.api.codecs.common.png;
 
+import org.watermedia.WaterMedia;
 import org.watermedia.api.codecs.CodecException;
+import org.watermedia.tools.DataTool;
 
 import java.io.EOFException;
 import java.io.IOException;
@@ -21,19 +23,19 @@ public record PngChunk(int length, int type, byte[] data, int crc) {
     /** Reads a complete chunk from the buffer position, advancing past it. */
     public static PngChunk read(final ByteBuffer buffer) throws IOException {
         try {
-            if (buffer.remaining() < 8) throw new EOFException("Unexpected EOF while reading chunk header");
+            if (buffer.remaining() < 8) throw new EOFException(DataTool.errCode(WaterMedia.ERR_PNG_CHUNK_HEADER_BUFFER) + "Failed to read the chunk header due to truncated data");
             final int length = buffer.getInt();
             // THE PNG LENGTH FIELD IS UNSIGNED, SO 0x80000000 READS BACK NEGATIVE; REPORT THE RAW VALUE
-            if (length < 0) throw new CodecException("Invalid chunk length: " + Integer.toUnsignedString(length));
+            if (length < 0) throw new CodecException(DataTool.errCode(WaterMedia.ERR_PNG_CHUNK_LENGTH_BUFFER) + "Failed to read the chunk due to invalid length: " + Integer.toUnsignedString(length));
             // LONG MATH: length+4 OVERFLOWS int FOR length >= 0x7FFFFFFC, BYPASSING THE EOF CHECK INTO A ~2GB ALLOC
-            if (buffer.remaining() < (long) length + 4) throw new EOFException("Unexpected EOF while reading chunk data");
+            if (buffer.remaining() < (long) length + 4) throw new EOFException(DataTool.errCode(WaterMedia.ERR_PNG_CHUNK_DATA_BUFFER) + "Failed to read the chunk data due to truncated data");
             final int type = buffer.getInt();
             final byte[] data = new byte[length];
             buffer.get(data, 0, length);
             final int crc = buffer.getInt();
             return new PngChunk(length, type, data, crc);
         } catch (final BufferUnderflowException e) {
-            throw new EOFException("Unexpected EOF while reading chunk");
+            throw new EOFException(DataTool.errCode(WaterMedia.ERR_PNG_CHUNK_TRUNCATED) + "Failed to read the chunk due to truncated data");
         }
     }
 
@@ -41,7 +43,7 @@ public record PngChunk(int length, int type, byte[] data, int crc) {
     public static PngChunk read(final ByteBuffer buffer, final int expectedType) throws IOException {
         // THE TYPE COMES FROM FILE DATA, SO A MISMATCH IS A CODEC ERROR AND NOT A CALLER BUG
         final PngChunk chunk = read(buffer);
-        if (chunk.type() != expectedType) throw new CodecException("Expected " + typeName(expectedType) + " chunk, got " + chunk.typeName());
+        if (chunk.type() != expectedType) throw new CodecException(DataTool.errCode(WaterMedia.ERR_PNG_CHUNK_TYPE) + "Failed to read the chunk due to unexpected type: expected " + typeName(expectedType) + ", got " + chunk.typeName());
         return chunk;
     }
 
@@ -52,15 +54,15 @@ public record PngChunk(int length, int type, byte[] data, int crc) {
     public static PngChunk read(final InputStream in) throws IOException {
         final int length = readIntBE(in);
         // THE PNG LENGTH FIELD IS UNSIGNED, SO 0x80000000 READS BACK NEGATIVE; REPORT THE RAW VALUE
-        if (length < 0) throw new CodecException("Invalid chunk length: " + Integer.toUnsignedString(length));
+        if (length < 0) throw new CodecException(DataTool.errCode(WaterMedia.ERR_PNG_CHUNK_LENGTH_STREAM) + "Failed to read the chunk due to invalid length: " + Integer.toUnsignedString(length));
         // NO STREAM LENGTH IS KNOWN HERE, SO A HARD SANITY CAP STOPS A ~2GB ALLOC FROM 4 ATTACKER BYTES
-        if (length > MAX_CHUNK_BYTES) throw new CodecException("PNG chunk too large: " + length + " bytes (max " + MAX_CHUNK_BYTES + ")");
+        if (length > MAX_CHUNK_BYTES) throw new CodecException(DataTool.errCode(WaterMedia.ERR_PNG_CHUNK_SIZE) + "Failed to read the chunk due to excessive size: " + length + " bytes (max " + MAX_CHUNK_BYTES + ")");
         final int type = readIntBE(in);
         final byte[] data = new byte[length];
         int read = 0;
         while (read < length) {
             final int n = in.read(data, read, length - read);
-            if (n < 0) throw new EOFException("Unexpected EOF while reading chunk data (" + read + "/" + length + ")");
+            if (n < 0) throw new EOFException(DataTool.errCode(WaterMedia.ERR_PNG_CHUNK_DATA_STREAM) + "Failed to read the chunk data due to truncated data: " + read + "/" + length + " bytes");
             read += n;
         }
         final int crc = readIntBE(in);
@@ -130,7 +132,7 @@ public record PngChunk(int length, int type, byte[] data, int crc) {
         final int b2 = in.read();
         final int b3 = in.read();
         final int b4 = in.read();
-        if ((b1 | b2 | b3 | b4) < 0) throw new EOFException("Unexpected EOF while reading chunk header");
+        if ((b1 | b2 | b3 | b4) < 0) throw new EOFException(DataTool.errCode(WaterMedia.ERR_PNG_CHUNK_HEADER_STREAM) + "Failed to read the chunk header due to truncated data");
         return (b1 << 24) | (b2 << 16) | (b3 << 8) | b4;
     }
 

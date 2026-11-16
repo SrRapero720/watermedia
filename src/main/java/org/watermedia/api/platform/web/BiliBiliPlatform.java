@@ -4,6 +4,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import org.apache.logging.log4j.Marker;
 import org.apache.logging.log4j.MarkerManager;
+import org.watermedia.WaterMedia;
 import org.watermedia.WaterMediaConfig;
 import org.watermedia.api.platform.*;
 import org.watermedia.api.util.MediaType;
@@ -78,7 +79,7 @@ public final class BiliBiliPlatform implements Platform {
         } catch (final PlatformException e) {
             throw e;
         } catch (final IOException | RuntimeException e) {
-            throw new PlatformException(NAME, "Failed to resolve " + link, e);
+            throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_BILIBILI_RESOLVE) + "Failed to resolve " + link, e);
         }
     }
 
@@ -114,7 +115,7 @@ public final class BiliBiliPlatform implements Platform {
             if (partName != null && partName.equals(title)) partName = null;
             LOGGER.debug(IT, "BiliBili multi-part video ({} parts), selected part {} (cid={})", pages.size(), index + 1, cid);
         }
-        if (cid <= 0) throw new PlatformException(NAME, "Video '" + bvid + "' reports no cid for part " + page);
+        if (cid <= 0) throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_BILIBILI_CID_MISSING) + "Failed to resolve video '" + bvid + "' due to no cid for part " + page);
 
         final JsonObject playData = fetchJson(String.format(VIDEO_PLAYURL_API, bvid, cid), "data");
 
@@ -148,7 +149,7 @@ public final class BiliBiliPlatform implements Platform {
         final JsonArray episodes = arr(result, "episodes");
 
         if (epId == null) {
-            if (episodes == null || episodes.isEmpty()) throw new PlatformException(NAME, "No episodes found for season " + ssId);
+            if (episodes == null || episodes.isEmpty()) throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_BILIBILI_SEASON_EMPTY) + "Failed to resolve season " + ssId + " due to no episodes");
 
             final Matcher pageMatcher = PAGE_PATTERN.matcher(url);
             final int page = pageMatcher.find() ? DataTool.parseInt(pageMatcher.group(1), 0) : 0;
@@ -172,12 +173,12 @@ public final class BiliBiliPlatform implements Platform {
                 break;
             }
         }
-        if (cid == null) throw new PlatformException(NAME, "Episode ep" + epId + " not found in season");
+        if (cid == null) throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_BILIBILI_EPISODE_MISSING) + "Failed to resolve episode ep" + epId + " due to missing episode in season");
 
         final JsonObject playResult = fetchJson(String.format(BANGUMI_PLAYURL_API, epId, cid), "result");
 
         if (intOr(playResult, "is_preview", 0) == 1)
-            throw new PlatformException(NAME, "Content requires premium membership (VIP)");
+            throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_BILIBILI_VIP_REQUIRED) + "Failed to resolve the content due to required premium membership (VIP)");
 
         final String fullTitle = seasonTitle == null ? epTitle : epTitle == null ? seasonTitle : seasonTitle + " - " + epTitle;
         final URI thumbnail = epCover != null ? epCover : DataTool.uri(str(result, "cover"));
@@ -193,9 +194,9 @@ public final class BiliBiliPlatform implements Platform {
         LOGGER.debug(IT, "BiliBili resolving live room {}", roomId);
 
         final JsonObject playInfo = fetchJson(String.format(LIVE_PLAY_INFO_API, roomId), "data");
-        if (intOr(playInfo, "live_status", 0) != 1) throw new PlatformException(NAME, "Live room " + roomId + " is offline");
+        if (intOr(playInfo, "live_status", 0) != 1) throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_BILIBILI_LIVE_OFFLINE) + "Failed to resolve live room " + roomId + ", it is offline");
         final String realRoomId = str(playInfo, "room_id");
-        if (realRoomId == null) throw new PlatformException(NAME, "Live room " + roomId + " reports no room_id");
+        if (realRoomId == null) throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_BILIBILI_LIVE_NO_ROOM_ID) + "Failed to resolve live room " + roomId + " due to no room_id");
         final long uid = longOr(playInfo, "uid", 0L);
 
         // TITLE, COVER AND AUTHOR ARE BEST-EFFORT: THE STREAM PLAYS WITHOUT THEM
@@ -225,7 +226,7 @@ public final class BiliBiliPlatform implements Platform {
 
         final JsonArray durl = arr(fetchJson(String.format(LIVE_PLAYURL_API, realRoomId, bestQn), "data"), "durl");
         final URI stream = durl == null || durl.isEmpty() ? null : DataTool.uri(str(obj(durl.get(0)), "url"));
-        if (stream == null) throw new PlatformException(NAME, "Live room " + realRoomId + " returned no usable stream URL (qn=" + bestQn + ")");
+        if (stream == null) throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_BILIBILI_LIVE_NO_STREAM) + "Failed to resolve live room " + realRoomId + " due to no usable stream URL (qn=" + bestQn + ")");
 
         final Metadata metadata = new Metadata(title, null, null, 0, author);
         final var entry = new Source(MediaType.VIDEO, thumbnail, metadata, headers(),
@@ -267,7 +268,7 @@ public final class BiliBiliPlatform implements Platform {
                             List.of(new Quality(flat, 0, 0)), null, null));
         }
 
-        throw new PlatformException(NAME, "API response carries no playable streams (neither DASH nor DURL) for '" + metadata.title() + "'");
+        throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_BILIBILI_NO_STREAMS) + "Failed to resolve the streams due to no playable streams (neither DASH nor DURL) for '" + metadata.title() + "'");
     }
 
     // ==========================================================================
@@ -371,11 +372,11 @@ public final class BiliBiliPlatform implements Platform {
         if (code != 0) {
             if (code == -412) fingerprint = null;
             final String message = str(json, "message");
-            throw new PlatformException(NAME, "API error: " + (message != null ? message : "code " + code));
+            throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_BILIBILI_API_ERROR) + "Failed to call the API due to error: " + (message != null ? message : "code " + code));
         }
 
         final JsonObject data = obj(json, dataKey);
-        if (data == null) throw new PlatformException(NAME, "API returned no '" + dataKey + "' field");
+        if (data == null) throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_BILIBILI_API_NO_DATA) + "Failed to read the API response due to no '" + dataKey + "' field");
         return data;
     }
 
@@ -399,7 +400,7 @@ public final class BiliBiliPlatform implements Platform {
             final JsonObject data = obj(WebRequests.fetchJson(NAME, request, JsonObject.class), "data");
             final String buvid3 = str(data, "b_3");
             final String buvid4 = str(data, "b_4");
-            if (buvid3 == null) throw new PlatformException(NAME, "Fingerprint API returned no buvid3");
+            if (buvid3 == null) throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_BILIBILI_BUVID3_MISSING) + "Failed to obtain the fingerprint due to no buvid3");
             cookie = buvid4 == null ? "buvid3=" + buvid3 : "buvid3=" + buvid3 + "; buvid4=" + buvid4;
             fingerprint = cookie;
             LOGGER.debug(IT, "BiliBili fetched the device fingerprint cookie");

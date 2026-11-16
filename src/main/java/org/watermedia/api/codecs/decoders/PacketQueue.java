@@ -2,6 +2,8 @@ package org.watermedia.api.codecs.decoders;
 
 import org.bytedeco.ffmpeg.avcodec.AVPacket;
 import org.bytedeco.ffmpeg.global.avcodec;
+import org.watermedia.WaterMedia;
+import org.watermedia.tools.DataTool;
 
 import java.util.ArrayDeque;
 
@@ -25,7 +27,7 @@ final class PacketQueue {
 
     /** Creates a queue whose {@link #put(AVPacket)} blocks once {@code maxBytes} are queued; {@code Long.MAX_VALUE} lifts the limit. */
     public PacketQueue(final long maxBytes) {
-        if (maxBytes <= 0) throw new IllegalArgumentException("Packet queue byte limit must be positive");
+        if (maxBytes <= 0) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_PACKETQUEUE_BYTE_LIMIT) + "Failed to create the packet queue due to non-positive byte limit");
         this.maxBytes = maxBytes;
     }
 

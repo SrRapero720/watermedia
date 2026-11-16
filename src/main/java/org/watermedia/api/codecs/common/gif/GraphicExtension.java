@@ -1,5 +1,6 @@
 package org.watermedia.api.codecs.common.gif;
 
+import org.watermedia.WaterMedia;
 import org.watermedia.api.codecs.CodecException;
 import org.watermedia.tools.DataTool;
 
@@ -21,14 +22,14 @@ public record GraphicExtension(
     /** Reads the {@value #BODY_SIZE}-byte body after the introducer and label at the buffer position, advancing past it; delay is in centiseconds. */
     public static GraphicExtension read(final ByteBuffer buffer) throws CodecException {
         // VALIDATION LIVES HERE: A RECORD CANONICAL CONSTRUCTOR CANNOT THROW CodecException
-        if (buffer.remaining() < BODY_SIZE) throw new CodecException("Truncated GIF graphic control extension");
+        if (buffer.remaining() < BODY_SIZE) throw new CodecException(DataTool.errCode(WaterMedia.ERR_GIF_GRAPHIC_TRUNCATED) + "Failed to read the GIF graphic control extension due to truncated data");
         final int at = buffer.position();
         // BLOCK SIZE AND TERMINATOR ARE FIXED BY THE SPEC. SKIPPING THEM MAKES THIS PARSER ACCEPT FILES
         // A STRICTER ONE REJECTS, AND TWO PARSERS DISAGREEING OVER ONE FILE IS A VALIDATION BYPASS
         final int blockSize = buffer.get(at) & 0xFF;
-        if (blockSize != 4) throw new CodecException("Invalid GCE block size: " + blockSize + " (must be 4)");
+        if (blockSize != 4) throw new CodecException(DataTool.errCode(WaterMedia.ERR_GIF_GRAPHIC_BLOCK_SIZE) + "Failed to read the GIF graphic control extension due to invalid block size: " + blockSize + " (expected 4)");
         final int terminator = buffer.get(at + 5) & 0xFF;
-        if (terminator != 0) throw new CodecException("Invalid GCE block terminator: " + terminator + " (must be 0)");
+        if (terminator != 0) throw new CodecException(DataTool.errCode(WaterMedia.ERR_GIF_GRAPHIC_TERMINATOR) + "Failed to read the GIF graphic control extension due to invalid block terminator: " + terminator + " (expected 0)");
 
         final int packedFields = buffer.get(at + 1) & 0xFF;
         buffer.position(at + BODY_SIZE);

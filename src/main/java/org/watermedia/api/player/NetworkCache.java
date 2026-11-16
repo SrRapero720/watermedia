@@ -2,6 +2,7 @@ package org.watermedia.api.player;
 
 import org.apache.logging.log4j.Marker;
 import org.apache.logging.log4j.MarkerManager;
+import org.watermedia.WaterMedia;
 import org.watermedia.WaterMediaConfig;
 import org.watermedia.api.util.NetRequest;
 import org.watermedia.api.util.HttpHeaders;
@@ -212,12 +213,12 @@ final class NetworkCache {
         } catch (final InterruptedException e) {
             if (abort != null) abort.abort();
             Thread.currentThread().interrupt();
-            throw new InterruptedIOException("Interrupted waiting for a media cache download");
+            throw new InterruptedIOException(DataTool.errCode(WaterMedia.ERR_CACHE_WAIT_INTERRUPTED) + "Failed to wait for the media cache download due to interruption");
         } catch (final ExecutionException e) {
             if (e.getCause() instanceof final IOException failure) throw failure;
             if (e.getCause() instanceof final RuntimeException failure) throw failure;
             if (e.getCause() instanceof final Error failure) throw failure;
-            throw new IOException("Media cache download failed", e.getCause());
+            throw new IOException(DataTool.errCode(WaterMedia.ERR_CACHE_DOWNLOAD) + "Failed to download the media for the cache", e.getCause());
         }
     }
 
@@ -232,19 +233,19 @@ final class NetworkCache {
         try (req) {
             final int status = req.statusCode();
             if (status != HttpURLConnection.HTTP_OK && status != HttpURLConnection.HTTP_PARTIAL)
-                throw new IOException("HTTP " + status + " for " + uri);
+                throw new IOException(DataTool.errCode(WaterMedia.ERR_CACHE_HTTP_STATUS) + "Failed to download the media due to HTTP status " + status + ": " + uri);
             final long contentLength = req.contentLength();
             if (contentLength > maxBytes)
-                throw new IOException("Media source exceeds cache limit (" + contentLength + " > " + maxBytes + " bytes): " + uri);
+                throw new IOException(DataTool.errCode(WaterMedia.ERR_CACHE_LIMIT_EXCEEDED) + "Failed to download the media due to exceeded cache limit: " + contentLength + " > " + maxBytes + " bytes, " + uri);
             if (bounded && (contentLength < 0 || req.header("icy-metaint") != null || req.header("icy-name") != null))
-                throw new IOException("Unbounded media source is not cacheable: " + uri);
+                throw new IOException(DataTool.errCode(WaterMedia.ERR_CACHE_UNBOUNDED) + "Failed to cache the media due to unbounded source: " + uri);
             final byte[] bytes;
             try (final InputStream in = req.inputStream()) {
                 bytes = IOTool.readLimited(in, maxBytes, contentLength, 0L);
             }
             // A CONNECTION THAT CLOSES EARLY READS AS A CLEAN END: A SHORT BODY MUST NEVER REACH THE CALLER OR THE CACHE
             if (contentLength >= 0 && bytes.length != contentLength)
-                throw new IOException("Truncated media body (" + bytes.length + " of " + contentLength + " bytes): " + uri);
+                throw new IOException(DataTool.errCode(WaterMedia.ERR_CACHE_TRUNCATED_BODY) + "Failed to download the media due to truncated body: " + bytes.length + " of " + contentLength + " bytes, " + uri);
             return new CachedBytes(bytes, req.contentType(), false, expiry(req));
         }
     }
@@ -320,7 +321,7 @@ final class NetworkCache {
             final int version = in.readInt();
             final int count = in.readInt();
             if (magic != MAGIC || version != VERSION || count < 0 || count > (Files.size(store.indexPath) - 12) / ENTRY_MIN_BYTES)
-                throw new IOException("Unsupported media cache index");
+                throw new IOException(DataTool.errCode(WaterMedia.ERR_CACHE_INDEX_FORMAT) + "Failed to load the media cache index due to unsupported format");
             final long now = System.currentTimeMillis();
             for (int i = 0; i < count; i++) {
                 final byte[] hash = new byte[HASH_BYTES];
@@ -336,7 +337,7 @@ final class NetworkCache {
                     store.totalBytes += size;
                 }
             }
-            if (in.read() != -1) throw new IOException("Trailing media cache index bytes");
+            if (in.read() != -1) throw new IOException(DataTool.errCode(WaterMedia.ERR_CACHE_INDEX_TRAILING) + "Failed to load the media cache index due to trailing bytes");
         } catch (final IOException | RuntimeException failure) {
             // CACHE FILES ARE DERIVED DATA; OBSOLETE INDEX FORMATS ARE DROPPED, NOT MIGRATED.
             store.index.clear();
@@ -456,7 +457,7 @@ final class NetworkCache {
         // RUNS THE TRANSFER ON THE WORKER, REACHABLE BY abort() ONLY WHILE IT RUNS
         <T> T run(final Callable<T> work) throws Exception {
             synchronized (this) {
-                if (this.aborted) throw new InterruptedIOException("Media cache download abandoned before it started");
+                if (this.aborted) throw new InterruptedIOException(DataTool.errCode(WaterMedia.ERR_CACHE_START_ABANDONED) + "Failed to start the media cache download, it was abandoned before it started");
                 this.worker = Thread.currentThread();
             }
             try {

@@ -3,8 +3,9 @@
 Reference map of this repository for agents. Read it before every task and keep it current: when a task changes
 behavior, API, layout or rules, update the matching section (never leave it describing the old code).
 Mapped on 2026-10-30 against version `3.0.0` (`RELEASE`); counts (files, latches, throw sites) are as of that date.
-Homologation wave of 2026-11-01 (dividers, member order, nested single-owner types, no dashes) and the app upload-logs
-revamp of 2026-11-16 (issue title and description, `TextArea`, clipboard helpers, config copies) folded in.
+Homologation wave of 2026-11-01 (dividers, member order, nested single-owner types, no dashes), the app upload-logs
+revamp of 2026-11-16 (issue title and description, `TextArea`, clipboard helpers, config copies) and the error codes
+wave of 2026-11-16 (`wm_err` registry) folded in.
 Symbol names are exact; line numbers are omitted on purpose.
 Legend: ⚠ gotcha or hard rule, ↪ reuse pointer ("to do X use Y").
 
@@ -130,9 +131,9 @@ The generic version of these rules lives in AGENTS.md → "Code pattern"; this i
     `HuffmanDecoder`) and `VP8LossyDecoder.IT` (used by `VP8BoolDecoder`).
   - Modules are the classes themselves: `WaterMediaConfig`, `WaterMediaBinaries`, `NetworkAPI`, `CodecsAPI` and
     `PlayerAPI` extend `WaterMedia.Module`, guard a public constructor with `private static final AtomicBoolean
-    LOADED` (`compareAndSet(false, true)` or ISE "X is already loaded") and override `protected start(...)` in their
-    `INTERNAL API` box. Utility classes are `final` with `private X() {}` (e.g. `DataTool`, `PlatformAPI`,
-    `RenderSystem`).
+    LOADED` (`compareAndSet(false, true)` or a coded ISE "Failed to load X, it is already loaded"; Binaries keeps an
+    uncoded "X is already loaded") and override `protected start(...)` in their `INTERNAL API` box. Utility classes are
+    `final` with `private X() {}` (e.g. `DataTool`, `PlatformAPI`, `RenderSystem`).
 - Shared counters are guarded by the owning state monitor; read them under the lock and log outside it.
 - Logging
   - `api` and `tools` static-import `LOGGER` from `WaterMedia`; `bootstrap/app` uses `WaterMedia.LOGGER` qualified;
@@ -148,6 +149,22 @@ The generic version of these rules lives in AGENTS.md → "Code pattern"; this i
   from platform handlers, `IOException` with the operation and native reason (`FFTool.failure(op, code)`).
   - Records validate in static `read()`/`validate()`/`convert()` methods (PNG/GIF chunks, `PlayerState.read`,
     `DdsHeader.read`) because canonical constructors cannot throw `CodecException`.
+- Error messages (owner rule, 2026-11-16): every exception or error built, `LOGGER.error` and `ThreadTool.safeCall`
+  message of `src/main/java` reads `DataTool.errCode(WaterMedia.ERR_X) + "Failed to <verb> <object>"`, then
+  optionally ` due to <cause>`, `: <values>` and `, <hint>` (`ERR_SERVER_STOP_BUSY` prints `(wm_err:0720) Failed to
+  stop the file server due to active file uploads, try again!`). Inside `WaterMedia.java` the constant goes
+  unqualified, inside `DataTool` the call is `errCode(WaterMedia.ERR_X)`; never a numeric literal.
+  - One constant per site, never shared: a new site declares a new `ERR_*` in the block of its class (§15).
+  - Names are `ERR_` + the class prefix + the cause in a few words (`ERR_SERVER_NO_TOKEN`). Prefixes are fixed per
+    class; read them from the class block (`ERR_CORE_` `WaterMedia`, `ERR_DATA_` `DataTool`, `ERR_REQUEST_`
+    `NetRequest`, `ERR_NETWORK_` `NetworkAPI`, `ERR_SERVER_` `NetworkServer`, `ERR_PLAYER_` `MediaPlayer`,
+    `ERR_<PLATFORM>_` per web handler with shared shapes `_RESOLVE`, `_PAGE_STATUS`, `_MATURE`, `ERR_PNG_<CHUNK>_`
+    for the chunk classes with `_TYPE`, `_LENGTH`, `ERR_LAUNCHER_` `AppBootstrap`, `ERR_APP_<AREA>_` for the app).
+    A `_LOG` suffix marks some `LOGGER.error` constants, such as the log beside a throw of the same event
+    (`ERR_CORE_LOAD_MODULE_LOG` next to `ERR_CORE_LOAD_MODULE`); most log constants carry none.
+  - `PlatformException(NAME, msg)` keeps its platform prefix, so the code follows it; `PlatformException.unsupported`
+    is one site inside the factory; `safeCall` only forwards its caller's coded message; `LOGGER.warn/info/debug`
+    carry no code.
 - Trivially similar one-line members are grouped without blank lines; comments go inside the method body or trailing a
   constant, never between another comment and a Javadoc.
 - Javadoc: one line (`/** Returns|Creates|Reads ... */`) by default; multi-line `@param`/`@return`/`@throws` only for
@@ -303,6 +320,10 @@ Package map (`src/main/java/org/watermedia`):
 ### `WaterMedia` (`org/watermedia/WaterMedia.java`): static process state and module walker (no instances)
 - Constants `ID="watermedia"`, `NAME`, `VERSION=IOTool.jarVersion()` ("unknown" from class folders), `USER_AGENT`,
   `BROWSER_AGENT` (Chrome UA whose major grows every two weeks), `LOGGER=logger(ID)`.
+- Error codes: `ERR_UNKNOWN = 0` and one `public static final int ERR_*` per error site of the core, declared after
+  the default paths (registry and layout in §15). They are compile-time constants, so javac inlines them: a site
+  never loads or initializes `WaterMedia`, and `AppBootstrap`, `IOTool` and `DataTool` keep no reference to it (the
+  launcher runs before Log4j exists, see `AppBootstrap` below).
 - `start(String name, Path tmp, Path cwd, boolean clientSide)` (static synchronized): throws `IllegalStateException`
   if called from an owned worker thread (`ThreadTool.workerThread()`) or twice, `IllegalArgumentException` on a blank
   name. Defaults: `tmp` → `<java.io.tmpdir>/watermedia`, `cwd` → current directory. Constructs the hardcoded module
@@ -310,9 +331,9 @@ Package map (`src/main/java/org/watermedia`):
   is visible) → `new NetworkAPI()` → `new CodecsAPI()` → `new PlayerAPI()` (all constructed before the first start;
   a refused construction throws raw, before `started`), writes the static environment (`name`, `tmp`, `cwd`,
   `clientSide`, `steps`), sets the volatile `started` flag, then runs every `module.start(name, tmp, cwd,
-  clientSide)` on the calling thread; `loading()` is the class simple name. `Exception | LinkageError` → ERROR log +
-  `IllegalStateException("WaterMedia module X failed")`. ⚠ No stop/unload exists; a failed start cannot be retried
-  in-process.
+  clientSide)` on the calling thread; `loading()` is the class simple name. `Exception | LinkageError` → ERROR log
+  (`ERR_CORE_LOAD_MODULE_LOG`) + `IllegalStateException` "Failed to load WaterMedia module X" (`ERR_CORE_LOAD_MODULE`).
+  ⚠ No stop/unload exists; a failed start cannot be retried in-process.
 - Memory model: the environment and `steps` are plain write-once statics published by the volatile `started` write;
   every reader checks `started` first (`requireStarted()`, `steps()`, `loaded()`), ⚠ keep that order. `loading`
   (module name) and `done` stay volatile because the app splash polls them while `start` holds the class lock.
@@ -350,11 +371,12 @@ Package map (`src/main/java/org/watermedia`):
   `WaterMedia.start("Forge"|"NeoForge", null, null, dist.isClient())`; NeoForge resolves the dist through
   `FMLLoader.getCurrent().getDist()` (FML 10+) with a reflective fallback to the static `getDist()` (FML ≤ 9).
 - `FabricBootstrap.onInitialize()`: `DefensiveCheck.run(gameDir)`; a client without mod `watermedia_binaries` throws
-  `IllegalStateException("WaterMedia: Binaries is required on Minecraft clients")`; `WaterMedia.start("Fabric", null,
-  gameDir, client)`.
-- A failure of `WaterMedia.start` is wrapped in `RuntimeException("Failed to start WaterMedia for <loader>")`; the
-  TLauncher check and the Fabric Binaries check run before it and throw their own `IllegalStateException`. Binaries
-  ships empty twin bootstraps so loaders recognize its jar as a mod.
+  `IllegalStateException` "Failed to start WaterMedia, WaterMedia: Binaries is required on Minecraft clients"
+  (`ERR_FABRIC_BINARIES_MISSING`); `WaterMedia.start("Fabric", null, gameDir, client)`.
+- A failure of `WaterMedia.start` is wrapped in a `RuntimeException` "Failed to start WaterMedia for <loader>: <cause
+  message>" (`ERR_FABRIC_START`, `ERR_FORGE_START`, `ERR_NEOFORGE_START`); the TLauncher check and the Fabric Binaries
+  check run before it and throw their own `IllegalStateException`. Binaries ships empty twin bootstraps so loaders
+  recognize its jar as a mod.
 - `DefensiveCheck.run(Path gameDir)`: TLauncher refusal on hard evidence only (mod ids `tlskincape`/
   `tlauncher_custom_cape_skin`, `org.tlauncher.*` classes across all class loaders, mixin resources, thread names and
   stack frames, JVM arguments/properties matched by `SIGNATURE`, up to `PARENT_DEPTH=5` parent processes) →
@@ -461,11 +483,12 @@ requested, and SVG yields RGBA when RGBA is requested (everything else is conver
 - `PngReader` (PNG 3rd edition + APNG): constructor `scan()` (frame count/delays/repeat from `acTL`/`fcTL` without CRC),
   `parseUntilFirstFrame()`, skips the default image when `fcTL` precedes it, allocates the ARGB canvas. `decode()`
   collects `IDAT`/`fdAT` until the next `fcTL`/`IEND`, inflates with a reused `Inflater` (expected size gate →
-  "Compressed image data exceeds expected size"), unfilters (None/Sub/Up/Average/Paeth, Adam7), converts depths
-  1/2/4/8/16 (16 → 8), applies gamma LUT (`gAMA`/`sRGB`/`cICP`, only when it differs from 2.2), optional bKGD flatten
-  (`codecs.png.useBKGDChunk`), APNG dispose (NONE/BACKGROUND/PREVIOUS) and blend (SOURCE/OVER via
-  `DataTool.blendOver`), writes BGRA with `Canvas.write`. CRC mismatch → `CodecException` when
-  `codecs.png.failOnCorruptedData`. Caps: `MAX_ANCILLARY_CHUNKS=64`, `MAX_ANCILLARY_BYTES=4 MiB`, `MAX_TEXT_ENTRIES=256`,
+  `ERR_PNGREADER_INFLATE_OVERSIZE` "Failed to inflate the PNG image data due to size over the expected (N bytes)"),
+  unfilters (None/Sub/Up/Average/Paeth, Adam7), converts depths 1/2/4/8/16 (16 → 8), applies gamma LUT
+  (`gAMA`/`sRGB`/`cICP`, only when it differs from 2.2), optional bKGD flatten (`codecs.png.useBKGDChunk`), APNG
+  dispose (NONE/BACKGROUND/PREVIOUS) and blend (SOURCE/OVER via `DataTool.blendOver`), writes BGRA with `Canvas.write`.
+  CRC mismatch → `CodecException` when `codecs.png.failOnCorruptedData`. Caps: `MAX_ANCILLARY_CHUNKS=64`,
+  `MAX_ANCILLARY_BYTES=4 MiB`, `MAX_TEXT_ENTRIES=256`,
   `MAX_TEXT_BYTES=4 MiB`; unknown critical chunk → `UnsupportedFormatException`; malformed ancillary chunks are skipped
   (warn once `ancillaryWarned`). Metadata: every ancillary chunk mapped to `PNG_METAKEY_*`, iTXt `XML:com.adobe.xmp` →
   `Xmp.read`. ⚠ `fcTL`/`fdAT` sequence numbers are not enforced; no frame-count cap (budget is `readAll`).
@@ -649,7 +672,8 @@ requested, and SVG yields RGBA when RGBA is requested (everything else is conver
   `MRL.error`), `mrl(URI)`, `preload(URI...)`: throw `IllegalStateException` before `loaded()` or on a server.
 - `player(MRL, [int sourceIndex,] Supplier<GFXEngine>, Supplier<SFXEngine>)`: null when the source is missing (FETCHING
   logs DEBUG), `MediaType.IMAGE` → `TxMediaPlayer` (sfx supplier never called), else `FFMediaPlayer` when
-  `CodecsAPI.ffmpegLoaded()`, else null (ERROR "No media backend available"); an `Exception` in construction releases
+  `CodecsAPI.ffmpegLoaded()`, else null (ERROR `ERR_PLAYERAPI_NO_BACKEND` "Failed to create the player due to no
+  media backend available"); an `Exception` in construction releases
   the engines and returns null, `Error`s propagate. `serverPlayer()` → `ServerMediaPlayer` (works on servers).
 - Engine factories (client only): `glEngine(Thread renderThread, Executor renderEx)` (both null = calling-thread GL),
   `vkEngine(VKContext)`, `jfxEngine(Runnable onFrame)` (throws without JavaFX 13+), `awtEngine(Runnable)`,
@@ -938,9 +962,11 @@ requested, and SVG yields RGBA when RGBA is requested (everything else is conver
   (`totalBytes()`, `uploadedBytes()`, `speed()`, `id()`, `uri()` = `water://remote/<id>`, `completed()`, `failed()`,
   `error()`, `percentage()`, `displaySpeed()`, `cancel()`; ⚠ a cancelled status reads as failed with "Cancelled").
   POST `<remoteUrl>/upload` with `network.token`, filename and content-type headers, fixed-length streaming in 8 KiB
-  chunks; 503 → "server is busy". `remoteUrl()` validates `network.remoteUrl` (http(s), trailing slash stripped).
-  `start(...)`: upload pool, then `NetworkServer.start(port, cwd)` when `network.server` is `ALWAYS`, or `DEDICATED`
-  on a non-client; failure logged, uploads keep working.
+  chunks; 503 → "busy server" failure (`ERR_NETWORK_UPLOAD_SERVER_BUSY`). `remoteUrl()` validates `network.remoteUrl`
+  (http(s), trailing slash stripped; else ISE `ERR_NETWORK_REMOTE_URL`). `start(...)`: upload pool, then
+  `NetworkServer.start(network.serverPort, cwd)` when the package-private gate `serverEnabled(client, server)` passes
+  (`network.server` is `ALWAYS`, or `DEDICATED` on a non-client); a failure logs ERROR `ERR_NETWORK_SERVER_START` and
+  uploads keep working.
 - `NetworkServer` (package-private entry points `start`, `address`, `stop`): JDK `HttpServer` bound to
   `network.serverBindAddress:serverPort` (`127.0.0.1:25572`; ⚠ a non-loopback bind with the default token refuses to
   start), storage `cwd/watermedia/files` with a `.server.lock` file lock and an `.upload-*` sweep, elastic
@@ -987,8 +1013,9 @@ requested, and SVG yields RGBA when RGBA is requested (everything else is conver
   file (`token = "x"`, `network.token=x`, a quoted value whole; possessive, so a long value never overflows the
   stack) while `?token=` link parameters and compound keys (`nextPageToken`, `token_type`) stay, and `token:x:y`),
   `sha256(byte[])`, pixels (`yuvToBgra`, `bgraToBuffer`, `blendOver`, `premultiply`, `orient`), scaling (`scalable`,
-  `scaleArea`). ⚠ A new secret shape goes into `redact` only: the loggers and the app's log upload (config copies
-  included) both mask through it.
+  `scaleArea`), `errCode(int)` (takes a `WaterMedia.ERR_*` constant and returns the `"(wm_err:0720) "` prefix of an
+  error message, the code padded to four digits and a wider one kept whole; registry in §15). ⚠ A new secret shape
+  goes into `redact` only: the loggers and the app's log upload (config copies included) both mask through it.
 - `FFTool`: `Pixels(format, bits)` record + `BGRA`, `pixels(avPixFmt)`, `avPixelFormat(PixelFormat)`, `sampleType(av)`,
   `avSampleFormat(SampleType)`, `error(code)`, `failure(op, code)` → `IOException`, `isNull`, `string`,
   `parseVersion`, `vulkanBindings()`, `bundled()` (natives from Binaries), TLS (`startTLS()` verifies the patched
@@ -1065,18 +1092,18 @@ requested, and SVG yields RGBA when RGBA is requested (everything else is conver
     `title` (`TITLE_LIMIT_CHARS` 80) and `description` (`DESCRIPTION_LIMIT_CHARS` 2000); `ready()` turns true when it
     lands. A failed read sets `error`, and the stage 3 `step()` reads the report again while it is missing (the RETRY
     button); with a report it submits only under a non-blank title. `submit()` composes `body(description, info, jars,
-    files)` (description, `## Alerts`, `## Suspected mods` from the `SUSPECT_MODS` ids inside jar names, `## Files` as
+    files, codes)` (description, `## Alerts`, `## Suspected mods` from the `SUSPECT_MODS` ids inside jar names,
+    `## Error codes` (`- None detected`, or one line of the codes as `wm_err:NNNN` in backticks), `## Files` as
     `label: url` or `N/A`, `## Environment` with the SW codecs folded in `<details>`, `## System Properties`), copies it
     with `AppContext.clipboard(body)` and browses `issueUrl(title, body)`: the body rides in the link only while the
     encoded link fits `URL_LIMIT_CHARS` (8000), else `PASTE_NOTE` ("Paste the report here."); a refused long link
     retries once with the short one while the clipboard holds the report. A failure sets `error`, plus `browserFailed`
     when it came from the browser (the clipboard alone fails before the browser is tried). `title`/`description`
     outlive a closed dialog and clear on the first session after `issueOpened`.
-  - ⚠ Error codes are pending and wholly commented out, each spot under `// PENDING: ERROR CODES ARE NOT LOGGED YET`:
-    the `codes` field (`ConcurrentSkipListSet`), its `clear()` in the session reset, the `wm_err:(\d{4})` matcher in
-    `upload()` and the `## Error codes` section in `body()`; no live scanner and no tests remain. Uncommenting needs
-    the library to log `wm_err:NNNN` markers, a last `Set<String> codes` parameter on `body()` (which `submit()` and the
-    `LogUploaderTest` callers pass), the `Set`, `ConcurrentSkipListSet`, `Matcher` and `Pattern` imports, and new tests.
+  - Error codes: `readContent` adds every `ERROR_CODE` match (`\bwm_err:(\d{4})\b`, so an unpadded or five-digit
+    code is skipped) of the masked text of each file it reads for the upload, config copies included, to `codes`
+    (package-private sorted `ConcurrentSkipListSet`). A fresh session clears it; a resumed stage 3 keeps it. A row
+    that is `TOO LARGE`, missing or fails to read adds none.
 - `SystemInfo`: package-private record `(alerts, environment, codecs, system)` built by `read(jars)` on the report
   worker, once per gathered report. Alerts: NVIDIA Threaded Optimization (Windows, GL), FFmpeg load failure, and
   `extensionAlerts(jars)` for `watermedia-youtube-extension`/`watermedia-platform-extension` jars (case, `-` and `_`
@@ -1251,6 +1278,75 @@ System properties: `watermedia.engine`, `watermedia.app` (child JVM flag), `wate
   `PlatformException` (112), players/engines `IllegalStateException` for lifecycle misuse and `IllegalArgumentException`
   for bad input; engines log and drop bad frames instead of throwing (except `ALEngine` on AL errors); status failures
   surface through `MediaPlayer.exception()` and ERROR status.
+- Error codes (`wm_err`; owner rule 2026-11-16, message form and naming in §2): `DataTool.errCode(WaterMedia.ERR_X)`
+  writes the prefix and the app's log upload lists the codes it finds (§12.1). The constants live in `WaterMedia.java`
+  right after the default paths, under a header comment: `public static final int ERR_UNKNOWN = 0` (reserved for
+  unknown, no site), then one `// <PACKAGE> <first>-<last>` comment per range (`// ROOT PACKAGE 1-99`,
+  `// TOOLS 100-399`, `// UTIL 400-699`, `// NETWORK 700-999`, `// PLAYER 1000-1999`, `// PLATFORM 2000-3999`,
+  `// CODECS 4000-7999`, `// BOOTSTRAP AND APP 8000-8999`) holding one `// Class first-last` comment per block
+  (`// NetworkServer 720-769`) over its constants. 9000-9999 belong to Binaries and extensions (Binaries has no codes
+  yet). Each source file owns one block of its package range (nested types share it). Ranges, blocks and next free
+  block:
+  - Root 1-99 (next 30): `WaterMedia` 1-19, `WaterMediaConfig` 20-29.
+  - `tools` 100-399 (next 180): `DataTool` 100-119, `FFTool` 120-139, `IOTool` 140-169, `M3UTool` 170-179.
+    `ThreadTool` owns no block: `safeCall` forwards its caller's code.
+  - `api/util` 400-699 (next 490): `HttpHeaders` 400-409, `MediaQuality` 410-419, `Metadata` 420-429, `NetRequest`
+    430-469, `PixelFormat` 470-479, `Track` 480-489.
+  - `api/network` 700-999 (next 770): `NetworkAPI` 700-719, `NetworkServer` 720-769.
+  - `api/player` 1000-1999 (next 1300): `ALEngine` 1000-1019, `FFMediaPlayer` 1020-1049, `GFXEngine` 1050-1059,
+    `GLEngine` 1060-1079, `JSEngine` 1080-1089, `MRL` 1090-1129, `MediaPlayer` 1130-1169, `NetworkCache` 1170-1189,
+    `PlayerAPI` 1190-1209, `SFXEngine` 1210-1229, `SWEngine` 1230-1239, `TxMediaPlayer` 1240-1269, `VKEngine`
+    1270-1299.
+  - `api/platform` 2000-3999 (next 2460): `Platform` 2000-2009, `PlatformAPI` 2010-2019, `PlatformException`
+    2020-2029, `PlatformResult` 2030-2039; subfolders:
+    - `internal`: `WaterPlatform` 2040-2049.
+    - `web`: `BiliBiliPlatform` 2050-2079, `BlueskyPlatform` 2080-2089, `DTubePlatform` 2090-2099, `DrivePlatform`
+      2100-2109, `DropboxPlatform` 2110-2119, `ImgurPlatform` 2120-2139, `KickPlatform` 2140-2159,
+      `LightshotPlatform` 2160-2169, `MedalPlatform` 2170-2179, `MediaFirePlatform` 2180-2189, `NewgroundsPlatform`
+      2190-2239, `OdyseePlatform` 2240-2269, `PornHubPlatform` 2270-2289, `SendvidPlatform` 2290-2309,
+      `StreamablePlatform` 2310-2319, `TikTokPlatform` 2320-2349, `TwitchPlatform` 2350-2379, `TwitterPlatform`
+      2380-2389, `VidLiiPlatform` 2390-2399, `WebRequests` 2400-2409, `YouTubePlatform` 2410-2429, `YtDlpPlatform`
+      2430-2459.
+  - `api/codecs` 4000-7999 (next 5230): `BcReader` 4000-4009, `CodecsAPI` 4010-4039, `DownscaleFilter` 4040-4049,
+    `Encoder` 4050-4109, `ImageData` 4110-4139, `ImageMetadata` 4140-4149, `ImageReader` 4150-4169; subfolders:
+    - `common/dds`: `DdsHeader` 4170-4209.
+    - `common/gif`: `ColorTable` 4210-4219, `GraphicExtension` 4220-4229, `ImageDescriptor` 4230-4239,
+      `ScreenDescriptor` 4240-4249.
+    - `common/png`: `ACTL` 4250-4259, `BKGD` 4260-4269, `CHRM` 4270-4279, `CICP` 4280-4289, `CLLI` 4290-4299,
+      `ColorType` 4300-4309, `EXIF` 4310-4319, `FCTL` 4320-4339, `FDAT` 4340-4349, `GAMA` 4350-4359, `HIST` 4360-4369,
+      `ICCP` 4370-4379, `IHDR` 4380-4389, `ITXT` 4390-4409, `MDCV` 4410-4419, `PHYS` 4420-4429, `PLTE` 4430-4439,
+      `PngChunk` 4440-4459, `SBIT` 4460-4479, `SPLT` 4480-4489, `SRGB` 4490-4499, `TEXT` 4500-4509, `TIME` 4510-4519,
+      `TRNS` 4520-4529, `ZTXT` 4530-4539, `Zlib` 4540-4549.
+    - `decoders`: `FFDecoder` 4550-4619, `FrameQueue` 4620-4629, `PacketQueue` 4630-4639, `Placebo` 4640-4649.
+    - `encoders`: `AnimationEncoder` 4650-4659, `FFEncoder` 4660-4699, `GifEncoder` 4700-4709, `PngEncoder` 4710-4719.
+    - `readers`: `GifReader` 4720-4749, `JpegReader` 4750-4869, `NetpbmReader` 4870-4919, `PngReader` 4920-4999,
+      `WebPReader` 5000-5039.
+    - `readers/svg`: `Path` 5040-5049, `PathParser` 5050-5059, `SvgColor` 5060-5069, `SvgDocument` 5070-5079,
+      `SvgParser` 5080-5089, `SvgRasterizer` 5090-5099, `SvgReader` 5100-5109.
+    - `readers/webp`: `AlphaDecoder` 5110-5119.
+    - `readers/webp/lossless`: `BitReader` 5120-5129, `ColorCache` 5130-5139, `HuffmanDecoder` 5140-5159,
+      `HuffmanTable` 5160-5169, `VP8LosslessDecoder` 5170-5189.
+    - `readers/webp/lossy`: `VP8BoolDecoder` 5190-5199, `VP8LossyDecoder` 5200-5229.
+  - `bootstrap` 8000-8999 (next 8210): `AppBootstrap` 8000-8019, `DefensiveCheck` 8020-8029, `FabricBootstrap`
+    8030-8039, `ForgeBootstrap` 8040-8049, `NeoBootstrap` 8050-8059; subfolders:
+    - `app`: `ClickSound` 8060-8069, `LogUploader` 8070-8089, `MediaCatalog` 8090-8099, `WaterMediaApp` 8100-8119.
+    - `app/element`: `Spinner` 8120-8129.
+    - `app/render`: `RenderEngine` 8130-8139, `RenderSystem` 8140-8149.
+    - `app/render/opengl`: `OpenGLRenderBackend` 8150-8159.
+    - `app/render/vulkan`: `VulkanRenderBackend` 8160-8189.
+    - `app/screen`: `SettingsModel` 8190-8199, `SettingsScreen` 8200-8209.
+  - New codes: a new site declares a new constant with the next unused value of its class block (the last constant
+    under its `// Class first-last` comment) and the class prefix; a new class adds a `// Class first-last` comment
+    with the next free block of its package (blocks so far hold about twice their sites, rounded up to a ten) and
+    moves that package's "next" above; a folder outside these prefixes (a new `api/x`) needs a `RANGES` entry.
+  - `ErrorCodeInventoryTest` parses the `public static final int ERR_X = <digits>;` declarations of `WaterMedia.java`
+    and scans `src/main/java/org/watermedia` with comments and string contents blanked: every site
+    (`new ...Exception(`, `new ...Error(`, `LOGGER.error(`, `ThreadTool.safeCall(`) carries an `errCode(` (only
+    exemption: the forwarding `LOGGER.error(it, log, e)` of `safeCall`); every `errCode(...)` argument is a declared
+    constant (bare or `WaterMedia.`), used by one site only, whose value sits in the range of the package that uses it
+    (the test's `RANGES` map) and is followed by `+ "Failed to`; no value belongs to two constants; every constant but
+    `ERR_UNKNOWN` (asserted 0) has its site. A numeric literal, an undeclared name or a declaration the pattern cannot
+    read (`4_750`) fails it.
 - Hardening: decoder budgets (`ImageReader.MAX_DECODED_BYTES` 512 MiB, `Limits`, per-reader caps), allocation after
   validation, bounded inflate, XXE closed, hostile corpus `src/test/resources/pentest/*` (`PentestTest`, generator
   `MaliciousImages`), bounded downloads with mandatory SHA-256 (`NetRequest.download`, provisioning), HTTPS-only
@@ -1260,17 +1356,21 @@ System properties: `watermedia.engine`, `watermedia.app` (child JVM flag), `wate
 ## 16. Tests (`src/test`)
 - Layout mirrors the main packages (112 files, 15 of them support helpers). Root: `ApiGuideExampleTest` (runs the public-only `ApiGuideExample`),
   `BootstrapProcessTest` and `ServiceLifecycleProcessTest` (child JVMs through `MediaBootstrap.runProbe`),
-  `LoggerRedactionTest`. Probes and scenarios: `BootstrapProbe` (`server`, `client`, `native`, `native-failure`,
-  `optional-failure`, `tls` via `TLSLifecycleProbe.run`, `tls-empty`), `WithoutBinariesProbe` (`server-no-binaries`,
-  `client-no-binaries`), `ServiceLifecycleProbe` (`platform`, `uploads`, `evicted`, `failed-probe`), `AppConfigProbe`
-  (`defaults`, `shared`, `malformed`, `override`, launched by `AppConfigTest`), `NetworkServerTest.main`
-  (`storage-lock`). `PlatformSmokeTest` is a manual network harness, not a JUnit test.
+  `LoggerRedactionTest`, `ErrorCodeInventoryTest` (parses the `ERR_*` declarations of `WaterMedia.java`; every site
+  carries a declared constant used once, inside its package range, and every constant but `ERR_UNKNOWN` has a site;
+  details in §15). Probes and scenarios:
+  `BootstrapProbe` (`server`, `client`, `native`, `native-failure`, `optional-failure`, `tls` via
+  `TLSLifecycleProbe.run`, `tls-empty`), `WithoutBinariesProbe` (`server-no-binaries`, `client-no-binaries`),
+  `ServiceLifecycleProbe` (`platform`, `uploads`, `evicted`, `failed-probe`), `AppConfigProbe` (`defaults`, `shared`,
+  `malformed`, `override`, launched by `AppConfigTest`), `NetworkServerTest.main` (`storage-lock`).
+  `PlatformSmokeTest` is a manual network harness, not a JUnit test.
 - Test classes by area: codecs `CodecsApiContractTest`, `ImageDataTest`, `ImageMetadataTest`, `MediaTypeSniffTest`,
   `ScanTest`, `PentestTest` (hostile corpus), `BcReaderTest`, `DdsHeaderTest`, PNG/GIF `ChunkContractTest`,
   `FFDecoderTest`, `QueueLifecycleTest`, `FFEncoderTest`, `GifEncoderTest`, `PngEncoderTest`, readers `GifTest`,
   `JpegTest`, `NetpbmTest`, `PngTest`, `WebpTest`, `WebpMalformedTest`, `SvgTest`, `AlphaDecoderTest`,
   `HuffmanTableTest`, `VP8LosslessDecoderTest`, `FFmpegLogRoutingTest` (disabled); network `NetworkServerTest`,
-  `NetworkServerGateTest`, `UploadStatusTest`; platform `PlatformApiTest`, `PlatformSearchTest`, `PlatformClaimTest`,
+  `NetworkServerGateTest`, `UploadStatusTest`;
+  platform `PlatformApiTest`, `PlatformSearchTest`, `PlatformClaimTest`,
   `WaterPlatformTest`, offline handler tests `BiliBiliPlatformTest`, `KickPlatformTest`, `NewgroundsPlatformTest`,
   `OdyseePlatformTest` (loopback proxy through `LocalHttp`), `TwitchPlatformTest` (search hits), `TwitterPlatformTest`,
   `YtDlpPlatformTest` (dubbed JSON offline); player `MediaPlayerBaseTest`, `MasterClockTest`, `MrlTest`, `NetworkCacheTest`, `PlayerStateTest`,
@@ -1281,12 +1381,15 @@ System properties: `watermedia.engine`, `watermedia.app` (child JVM flag), `wate
   util `HttpHeadersTest`, `NetRequestTest`, `MediaTypeTest`, `MediaQualityTest`, `PixelFormatTest`, `MathUtilTest`,
   `MathEasesTest`; bootstrap `AppBootstrapDependenciesTest`, `DefensiveCheckTest`, app `AppConfigTest`,
   `FramePlanTest`, `LogUploaderTest` (stages with the stage 3 resume and the report retry, both scan layouts in a
-  `@TempDir`, masked reads, body, link limit), `SystemInfoTest` (extension alerts), `HomeScreenTest` (`IssueKeys`,
-  `EarlierKeys`, `Status`: a windowless `HomeScreen` whose navigator only records the fired `Action`s, so nothing is
-  scanned, uploaded or opened), `CanvasLiveTest`, `DialogTest` (panel height against the bands), `ListRowTest`,
+  `@TempDir`, masked reads, collected `wm_err` codes, body with `## Error codes`, link limit), `SystemInfoTest`
+  (extension alerts), `HomeScreenTest` (`IssueKeys`, `EarlierKeys`, `Status`: a windowless `HomeScreen` whose
+  navigator only records the fired `Action`s, so nothing is scanned, uploaded or opened), `CanvasLiveTest`,
+  `DialogTest` (panel height against the bands), `ListRowTest`,
   `ListViewInteractionTest` (+ `ScrollbarChannel`), `SpinnerTest`, `TextFieldTest`, `TextAreaTest` (+ `SingleLine`;
   headless through the package-private `TextArea.metrics` hook), `RenderEngineBatchTest`, `RenderEngineCacheTest`,
-  `VulkanRenderBackendTest`; tools `DataToolTest`, `IOToolTest`, `JSONToolTest`, `M3UToolTest`, `ThreadToolTest`.
+  `VulkanRenderBackendTest`; tools `DataToolTest` (incl. `errCode` padding), `IOToolTest`, `JSONToolTest`,
+  `M3UToolTest`, `ThreadToolTest`. ⚠ Many tests that match an error message match its code too
+  (`assertEquals("(wm_err:0410) Failed to pick the quality ...", ...)`), so renumbering a site breaks them.
   ⚠ `LogUploaderTest` expects a test JVM that loads classes from a directory (`LogUploader.DEV`), and its stage cases
   scan the real working directory and read the real system (`SystemInfo.read`).
 - Support helpers (`org.watermedia.test.support`): `Fixtures` (resource paths and constants `MP4_H264`, `PNG_STATIC`,
@@ -1368,10 +1471,8 @@ System properties: `watermedia.engine`, `watermedia.app` (child JVM flag), `wate
 - Platform notes: mature gates only where the service exposes a flag; `WaterPlatform.local` allows `..`; Sendvid/yt-dlp
   resolves can hold a loader thread for 60/120 s; Twitch persisted-query hashes rotate.
 - App notes: no Vulkan validation layers; `PlayerScreen` not restored after a hot swap; `TextField` has no caret
-  movement/selection; `TextArea` has no selection, copy, cut or undo; the log upload's `wm_err` error-code scanner is
-  wholly commented out in `LogUploader` (PENDING markers, §12.1) because the library logs no such codes yet;
-  `HomeScreen.Action.SETTINGS` navigates only with DEBUG logging (`WaterMediaApp.navigateAction`); stale
-  `config/watermedia.toml` in the repo.
+  movement/selection; `TextArea` has no selection, copy, cut or undo; `HomeScreen.Action.SETTINGS` navigates only with
+  DEBUG logging (`WaterMediaApp.navigateAction`); stale `config/watermedia.toml` in the repo.
 - Library notes: `NetworkCache` sweeps `.part` files once per start (no timer); `GLEngine.drainOne` clears `pending`
   without a lock (possible lost frame, unverified); `AppBootstrap` libs dir is shared per tmpdir; FFmpeg generations are
   never pruned.

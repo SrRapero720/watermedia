@@ -1,8 +1,10 @@
 package org.watermedia.bootstrap;
 
+import org.watermedia.WaterMedia;
 import org.watermedia.bootstrap.app.AppConfig;
 import org.watermedia.bootstrap.app.WaterMediaApp;
 import org.watermedia.bootstrap.app.ui.AppTheme;
+import org.watermedia.tools.DataTool;
 import org.watermedia.tools.IOTool;
 
 import javax.imageio.ImageIO;
@@ -101,7 +103,7 @@ public final class AppBootstrap {
         Files.createDirectories(LIBS_DIR);
         final Properties versions = versions();
         final String nested = versions.getProperty("nested");
-        if (nested == null) throw new IOException("Missing nested libraries in bootstrap.properties");
+        if (nested == null) throw new IOException(DataTool.errCode(WaterMedia.ERR_LAUNCHER_NESTED_MISSING) + "Failed to read bootstrap.properties due to missing nested libraries");
         for (final String name: nested.split(",")) {
             this.log("Extracting " + name);
             jars.add(extract("/META-INF/jarjar/" + name, LIBS_DIR));
@@ -109,7 +111,7 @@ public final class AppBootstrap {
         for (final Dependency dependency: dependencies(versions)) {
             final Path jar = LIBS_DIR.resolve(dependency.name());
             final String sha256 = versions.getProperty(dependency.name());
-            if (sha256 == null) throw new IOException("Missing SHA-256 pin for " + dependency.name());
+            if (sha256 == null) throw new IOException(DataTool.errCode(WaterMedia.ERR_LAUNCHER_PIN_MISSING) + "Failed to verify " + dependency.name() + " due to missing SHA-256 pin");
             // THE SHARED CACHE IS UNTRUSTED: A JAR JOINS THE CLASSPATH ONLY WHILE IT MATCHES ITS BUILD PIN
             if (!Files.isRegularFile(jar, LinkOption.NOFOLLOW_LINKS) || !IOTool.sha256(jar).equals(sha256)) {
                 if (!GraphicsEnvironment.isHeadless()) this.window();
@@ -178,7 +180,7 @@ public final class AppBootstrap {
     private static Properties versions() throws IOException {
         final Properties versions = new Properties();
         try (final InputStream source = AppBootstrap.class.getResourceAsStream("/bootstrap.properties")) {
-            if (source == null) throw new IOException("Missing bootstrap.properties");
+            if (source == null) throw new IOException(DataTool.errCode(WaterMedia.ERR_LAUNCHER_PROPERTIES_MISSING) + "Failed to read bootstrap.properties due to missing file");
             versions.load(source);
         }
         return versions;
@@ -186,7 +188,7 @@ public final class AppBootstrap {
 
     private static List<Dependency> dependencies(final Properties versions) throws IOException {
         final String platform = IOTool.platformClassifier();
-        if (platform.equals("unsupported")) throw new IOException("Unsupported operating system or CPU architecture");
+        if (platform.equals("unsupported")) throw new IOException(DataTool.errCode(WaterMedia.ERR_LAUNCHER_PLATFORM_UNSUPPORTED) + "Failed to resolve the dependencies due to unsupported operating system or CPU architecture");
         final String natives = "natives-" + platform;
         final String lwjgl = version(versions, "lwjgl");
         final List<Dependency> dependencies = new ArrayList<>();
@@ -210,14 +212,14 @@ public final class AppBootstrap {
     private static String version(final Properties versions, final String name) throws IOException {
         final String value = versions.getProperty(name + "_version");
         if (value == null || !value.matches("[0-9][A-Za-z0-9_.-]*"))
-            throw new IOException("Invalid bootstrap dependency version: " + name);
+            throw new IOException(DataTool.errCode(WaterMedia.ERR_LAUNCHER_VERSION_INVALID) + "Failed to resolve the bootstrap dependency version due to invalid value: " + name);
         return value;
     }
 
     // THE DIRECTORY IS A PARAMETER SO THE TESTS EXTRACT INTO THEIR OWN TEMPORARY FOLDER
     private static Path extract(final String resource, final Path directory) throws IOException {
         try (final InputStream input = AppBootstrap.class.getResourceAsStream(resource)) {
-            if (input == null) throw new IOException("Missing bundled library: " + resource);
+            if (input == null) throw new IOException(DataTool.errCode(WaterMedia.ERR_LAUNCHER_LIBRARY_MISSING) + "Failed to extract the bundled library due to missing resource: " + resource);
             // EACH LAUNCH OWNS ITS FILE UNTIL THE CHILD JVM EXITS, INCLUDING ON WINDOWS
             final String name = resource.substring(resource.lastIndexOf('/') + 1);
             final Path jar = Files.createTempFile(directory, name + ".", ".jar");
@@ -243,7 +245,7 @@ public final class AppBootstrap {
         final long total = connection.getContentLengthLong();
         // THE SHA-256 ONLY JUDGES A FINISHED FILE, SO A HOSTILE MIRROR COULD FILL THE DISK FIRST: THE BODY STOPS AT ITS
         // ANNOUNCED LENGTH OR THE CAP. THIS RUNS BEFORE LOG4J AND GSON EXIST, SO IT CANNOT USE NetRequest
-        if (total > MAX_DOWNLOAD_BYTES) throw new IOException(name + " announces " + total + " bytes, above the " + MAX_DOWNLOAD_BYTES + "-byte cap");
+        if (total > MAX_DOWNLOAD_BYTES) throw new IOException(DataTool.errCode(WaterMedia.ERR_LAUNCHER_DOWNLOAD_CAP) + "Failed to download " + name + " due to announced size above the cap: " + total + " bytes (cap " + MAX_DOWNLOAD_BYTES + " bytes)");
         final long limit = total >= 0 ? total : MAX_DOWNLOAD_BYTES;
         // UNIQUE PARTIAL FILES PREVENT CONCURRENT LAUNCHERS FROM OVERWRITING EACH OTHER'S TRANSFERS
         final Path partial = Files.createTempFile(destination.getParent(), name + ".", ".part");
@@ -256,7 +258,7 @@ public final class AppBootstrap {
                 int count;
                 while ((count = input.read(buffer)) != -1) {
                     received += count;
-                    if (received > limit) throw new IOException("Download of " + name + " exceeds " + limit + " bytes");
+                    if (received > limit) throw new IOException(DataTool.errCode(WaterMedia.ERR_LAUNCHER_DOWNLOAD_LIMIT) + "Failed to download " + name + " due to size above the limit: " + limit + " bytes");
                     output.write(buffer, 0, count);
                     final long now = System.nanoTime();
                     if (window != null && now - lastUpdate >= 50_000_000L) {
@@ -266,7 +268,7 @@ public final class AppBootstrap {
                 }
             }
             if (total >= 0 && received != total)
-                throw new IOException("Incomplete download of " + name + ": " + received + " of " + total + " bytes");
+                throw new IOException(DataTool.errCode(WaterMedia.ERR_LAUNCHER_DOWNLOAD_INCOMPLETE) + "Failed to download " + name + " due to incomplete data: " + received + " of " + total + " bytes");
             IOTool.verifySha256(partial, sha256);
             IOTool.move(partial, destination);
         } catch (final IOException failure) {

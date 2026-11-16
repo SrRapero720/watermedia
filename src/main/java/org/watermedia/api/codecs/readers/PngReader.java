@@ -2,6 +2,7 @@ package org.watermedia.api.codecs.readers;
 
 import org.apache.logging.log4j.Marker;
 import org.apache.logging.log4j.MarkerManager;
+import org.watermedia.WaterMedia;
 import org.watermedia.WaterMediaConfig;
 import org.watermedia.api.codecs.CodecException;
 import org.watermedia.api.codecs.CodecsAPI;
@@ -171,12 +172,12 @@ public final class PngReader extends ImageReader {
         this.scan = this.scan(this.data.duplicate().order(ByteOrder.BIG_ENDIAN));
 
         this.parseUntilFirstFrame();
-        if (this.ihdr == null) throw new CodecException("Missing IHDR chunk");
+        if (this.ihdr == null) throw new CodecException(DataTool.errCode(WaterMedia.ERR_PNGREADER_IHDR_MISSING) + "Failed to read the PNG stream due to missing IHDR chunk");
         // AN IDAT AHEAD OF THE FIRST fcTL IS THE DEFAULT IMAGE OF AN ANIMATION, NOT ONE OF ITS FRAMES
         if (this.fctlSeen && this.pendingChunk != null && this.pendingChunk.type() == IDAT.SIGNATURE) this.skipDefaultImage();
         // FAIL BEFORE THE CANVAS IS ALLOCATED: A STREAM THAT REACHES IEND OR EOF WITHOUT IDAT/fcTL HAS
         // NO FRAME TO DECODE, SO PAYING FOR THE BUFFERS FIRST WOULD ONLY BE A FREE ALLOCATION FOR AN ATTACKER
-        if (this.pendingChunk == null) throw new CodecException("PNG stream contains no IDAT");
+        if (this.pendingChunk == null) throw new CodecException(DataTool.errCode(WaterMedia.ERR_PNGREADER_IDAT_MISSING) + "Failed to read the PNG stream due to missing IDAT");
 
         // SNAPSHOT THE FRAME-0 BOUNDARY SO reset() CAN REPLAY WITHOUT RE-PARSING THE HEADER
         this.resetPos = this.data.position();
@@ -198,9 +199,9 @@ public final class PngReader extends ImageReader {
 
         // VALIDATE INDEXED bKGD AGAINST THE PALETTE BEFORE ANY background() LOOKUP (PLTE.color IS UNCHECKED)
         if (this.bkgd != null && this.bkgd.isIndexed()) {
-            if (this.plte == null) throw new CodecException("Indexed bKGD without PLTE");
+            if (this.plte == null) throw new CodecException(DataTool.errCode(WaterMedia.ERR_PNGREADER_BKGD_NO_PLTE) + "Failed to read bKGD due to indexed color without PLTE");
             if (this.bkgd.paletteIndex() >= this.plte.size())
-                throw new CodecException("bKGD palette index out of range: " + this.bkgd.paletteIndex() + " (palette size " + this.plte.size() + ")");
+                throw new CodecException(DataTool.errCode(WaterMedia.ERR_PNGREADER_BKGD_INDEX_RANGE) + "Failed to read bKGD due to palette index out of range: " + this.bkgd.paletteIndex() + " (palette size " + this.plte.size() + ")");
         }
 
         // THE CANVAS STARTS AS THE bKGD COLOUR, OR TRANSPARENT FROM ITS ZERO INIT
@@ -254,7 +255,7 @@ public final class PngReader extends ImageReader {
         } else {
             // UNREACHABLE IN A WELL-FORMED STREAM (parseUntilFirstFrame ONLY STOPS ON IDAT/fcTL), SO FAIL FAST
             this.done = true;
-            throw new CodecException("Unexpected PNG frame boundary: " + c.typeName());
+            throw new CodecException(DataTool.errCode(WaterMedia.ERR_PNGREADER_FRAME_BOUNDARY) + "Failed to decode the PNG frame due to unexpected frame boundary: " + c.typeName());
         }
 
         // READ CHUNKS UNTIL NEXT FRAME BOUNDARY (next fcTL) OR IEND / EOF
@@ -270,7 +271,7 @@ public final class PngReader extends ImageReader {
                 compressed.add(new ChunkSlice(c.data(), 0, c.data().length));
             } else if (t == FDAT.SIGNATURE) {
                 final byte[] data = c.data();
-                if (data.length < 4) throw new CodecException("Truncated fdAT chunk");
+                if (data.length < 4) throw new CodecException(DataTool.errCode(WaterMedia.ERR_PNGREADER_FDAT_TRUNCATED) + "Failed to read fdAT due to truncated data");
                 compressed.add(new ChunkSlice(data, 4, data.length - 4));
             } else if (t == FCTL.SIGNATURE) {
                 this.pendingChunk = c;
@@ -288,7 +289,7 @@ public final class PngReader extends ImageReader {
         if (compressed.isEmpty()) {
             // A FRAME WITHOUT IDAT/fdAT IS MALFORMED: TERMINATE AND FAIL FAST INSTEAD OF SKIPPING IT
             this.done = true;
-            throw new CodecException("PNG frame without compressed data");
+            throw new CodecException(DataTool.errCode(WaterMedia.ERR_PNGREADER_FRAME_NO_DATA) + "Failed to decode the PNG frame due to missing compressed data");
         }
 
         // VALIDATE APNG FRAME GEOMETRY AGAINST THE CANVAS: UNCHECKED fcTL FIELDS OTHERWISE DRIVE
@@ -305,7 +306,7 @@ public final class PngReader extends ImageReader {
             // ONLY fcTL-DRIVEN FRAMES COUNT: A LEADING IDAT DEFAULT IMAGE IS NOT PART OF THE ANIMATION.
             if (++this.animFrames > this.scan.frameCount()) {
                 this.done = true;
-                throw new CodecException("APNG declares " + this.scan.frameCount()
+                throw new CodecException(DataTool.errCode(WaterMedia.ERR_PNGREADER_APNG_FRAME_COUNT) + "Failed to decode the APNG frame, it declares " + this.scan.frameCount()
                         + " frames but the stream carries more");
             }
         }
@@ -370,7 +371,7 @@ public final class PngReader extends ImageReader {
         try { c = PngChunk.read(this.data); }
         catch (final EOFException eof) { return null; }
         if (WaterMediaConfig.codecs.png.failOnCorruptedData && c.corrupted())
-            throw new CodecException("Chunk CRC mismatch on " + c.typeName() + ": data corrupted");
+            throw new CodecException(DataTool.errCode(WaterMedia.ERR_PNGREADER_CHUNK_CRC) + "Failed to read the chunk due to CRC mismatch, data corrupted: " + c.typeName());
         return c;
     }
 
@@ -426,40 +427,40 @@ public final class PngReader extends ImageReader {
 
     private void validateIHDR(final IHDR ihdr) throws CodecException {
         if (ihdr.width() <= 0 || ihdr.height() <= 0)
-            throw new CodecException("Invalid image dimensions: " + ihdr.width() + "x" + ihdr.height());
+            throw new CodecException(DataTool.errCode(WaterMedia.ERR_PNGREADER_IHDR_DIMENSIONS) + "Failed to validate IHDR due to invalid image dimensions: " + ihdr.width() + "x" + ihdr.height());
         // CAP DIMENSIONS: 24-BIT-ISH RAW IHDR FIELDS OTHERWISE OVERFLOW width*height*4 INT MATH AND
         // ALLOW MULTI-GB ALLOCATIONS FROM A TINY HEADER
         if (ihdr.width() > MAX_DIM || ihdr.height() > MAX_DIM)
-            throw new CodecException("PNG dimensions too big: " + ihdr.width() + "x" + ihdr.height() + " (max " + MAX_DIM + ")");
+            throw new CodecException(DataTool.errCode(WaterMedia.ERR_PNGREADER_IHDR_DIM_BIG) + "Failed to validate IHDR due to dimensions too big: " + ihdr.width() + "x" + ihdr.height() + " (max " + MAX_DIM + ")");
         // THE PER-AXIS CAP IS ONLY A CHEAP PRE-FILTER: 16384x16384 STILL MULTIPLIES OUT TO A 2 GB CANVAS
         // (int[] + DIRECT BUFFER + APNG FRAME/PREVIOUS BUFFERS), SO THE PRODUCT IS THE REAL GATE. long
         // MATH BECAUSE THE int PRODUCT WRAPS NEGATIVE WELL BEFORE THE LIMIT IS REACHED.
         if ((long) ihdr.width() * ihdr.height() > MAX_PIXELS)
-            throw new CodecException("PNG canvas too big: " + ihdr.width() + "x" + ihdr.height()
+            throw new CodecException(DataTool.errCode(WaterMedia.ERR_PNGREADER_IHDR_CANVAS_BIG) + "Failed to validate IHDR due to canvas too big: " + ihdr.width() + "x" + ihdr.height()
                     + " (max " + MAX_PIXELS + " pixels)");
         // ColorType.of THROWS IllegalArgumentException ON AN UNKNOWN TYPE, BUT A BAD HEADER IS A CodecException
         final int colorTypeByte = ihdr.colorType();
-        if (colorTypeByte < 0 || colorTypeByte > 6) throw new CodecException("Unknown color type: " + colorTypeByte);
+        if (colorTypeByte < 0 || colorTypeByte > 6) throw new CodecException(DataTool.errCode(WaterMedia.ERR_PNGREADER_IHDR_COLOR_TYPE) + "Failed to validate IHDR due to unknown color type: " + colorTypeByte);
         final ColorType colorType = ColorType.of(colorTypeByte);
         final int depth = ihdr.depth();
         switch (colorType) {
             case GREYSCALE -> {
                 if (depth != 1 && depth != 2 && depth != 4 && depth != 8 && depth != 16)
-                    throw new CodecException("Invalid bit depth " + depth + " for greyscale");
+                    throw new CodecException(DataTool.errCode(WaterMedia.ERR_PNGREADER_IHDR_DEPTH_GREY) + "Failed to validate IHDR due to invalid bit depth " + depth + " for greyscale");
             }
             case TRUECOLOR, GREYSCALE_ALPHA, TRUECOLOR_ALPHA -> {
                 if (depth != 8 && depth != 16)
-                    throw new CodecException("Invalid bit depth " + depth + " for color type " + colorType);
+                    throw new CodecException(DataTool.errCode(WaterMedia.ERR_PNGREADER_IHDR_DEPTH_COLOR) + "Failed to validate IHDR due to invalid bit depth " + depth + " for color type " + colorType);
             }
             case INDEXED -> {
                 if (depth != 1 && depth != 2 && depth != 4 && depth != 8)
-                    throw new CodecException("Invalid bit depth " + depth + " for indexed-color");
+                    throw new CodecException(DataTool.errCode(WaterMedia.ERR_PNGREADER_IHDR_DEPTH_INDEXED) + "Failed to validate IHDR due to invalid bit depth " + depth + " for indexed-color");
             }
-            case FORBIDDEN_1, FORBIDDEN_5 -> throw new CodecException("Forbidden color type: " + ihdr.colorType());
+            case FORBIDDEN_1, FORBIDDEN_5 -> throw new CodecException(DataTool.errCode(WaterMedia.ERR_PNGREADER_IHDR_FORBIDDEN) + "Failed to validate IHDR due to forbidden color type: " + ihdr.colorType());
         }
-        if (ihdr.compression() != 0) throw new CodecException("Unknown compression method: " + ihdr.compression());
-        if (ihdr.filter() != 0) throw new CodecException("Unknown filter method: " + ihdr.filter());
-        if (ihdr.interlace() != 0 && ihdr.interlace() != 1) throw new CodecException("Unknown interlace method: " + ihdr.interlace());
+        if (ihdr.compression() != 0) throw new CodecException(DataTool.errCode(WaterMedia.ERR_PNGREADER_IHDR_COMPRESSION) + "Failed to validate IHDR due to unknown compression method: " + ihdr.compression());
+        if (ihdr.filter() != 0) throw new CodecException(DataTool.errCode(WaterMedia.ERR_PNGREADER_IHDR_FILTER) + "Failed to validate IHDR due to unknown filter method: " + ihdr.filter());
+        if (ihdr.interlace() != 0 && ihdr.interlace() != 1) throw new CodecException(DataTool.errCode(WaterMedia.ERR_PNGREADER_IHDR_INTERLACE) + "Failed to validate IHDR due to unknown interlace method: " + ihdr.interlace());
     }
 
     // ANCILLARY CHUNKS NEVER FAIL A DECODE: A MALFORMED OR OVERSIZED ONE IS SKIPPED AND THE FIRST SKIP IS LOGGED ONCE PER READER.
@@ -467,8 +468,8 @@ public final class PngReader extends ImageReader {
     private void handleAncillary(final PngChunk c) throws IOException {
         final int t = c.type();
         if (t == IHDR.SIGNATURE || t == PLTE.SIGNATURE || t == IDAT.SIGNATURE || t == IEND.SIGNATURE)
-            throw new CodecException("Misplaced critical chunk: " + c.typeName());
-        if (c.isCritical()) throw new UnsupportedFormatException("Unknown critical chunk: " + c.typeName());
+            throw new CodecException(DataTool.errCode(WaterMedia.ERR_PNGREADER_CHUNK_MISPLACED) + "Failed to read the chunk due to misplaced critical chunk: " + c.typeName());
+        if (c.isCritical()) throw new UnsupportedFormatException(DataTool.errCode(WaterMedia.ERR_PNGREADER_CHUNK_UNKNOWN) + "Failed to read the chunk due to unknown critical chunk: " + c.typeName());
         try { this.storeAncillary(c); }
         catch (final IOException | RuntimeException failure) {
             if (this.ancillaryWarned) return;
@@ -546,7 +547,7 @@ public final class PngReader extends ImageReader {
             final PHYS phys = PHYS.convert(c);
             this.metadata.put(CodecsAPI.PNG_METAKEY_PHYSICAL_PIXEL_DIMENSIONS, new long[] { phys.pixelsPerUnitX(), phys.pixelsPerUnitY(), phys.unit() });
         } else if (t == HIST.SIGNATURE) {
-            if (this.plte == null) throw new CodecException("hIST before PLTE");
+            if (this.plte == null) throw new CodecException(DataTool.errCode(WaterMedia.ERR_PNGREADER_HIST_NO_PLTE) + "Failed to read hIST due to missing PLTE before it");
             this.metadata.put(CodecsAPI.PNG_METAKEY_HISTOGRAM, HIST.convert(c, this.plte.size()).frequencies());
         } else if (t == SPLT.SIGNATURE) {
             final SPLT splt = SPLT.convert(c);
@@ -639,7 +640,7 @@ public final class PngReader extends ImageReader {
         // A WELL-FORMED PNG DECOMPRESSES TO EXACTLY THIS MANY FILTERED BYTES; ANYTHING PAST IT IS A
         // DECOMPRESSION BOMB. COMPUTED AS long SO 16K depth-16 FRAMES DON'T OVERFLOW THE int MULTIPLY.
         final long expectedLong = this.expectedInflatedBytes(ihdr);
-        if (expectedLong > MAX_INFLATED_IMAGE_BYTES) throw new CodecException("PNG image data too large: " + expectedLong + " bytes");
+        if (expectedLong > MAX_INFLATED_IMAGE_BYTES) throw new CodecException(DataTool.errCode(WaterMedia.ERR_PNGREADER_INFLATE_TOO_LARGE) + "Failed to inflate the PNG image data due to size too large: " + expectedLong + " bytes");
         final int expected = (int) expectedLong;
         // SIZE THE FIRST BUFFER FROM THE COMPRESSED BYTES ACTUALLY PRESENT, NOT FROM THE HEADER: AN
         // 8-BYTE IDAT UNDER A 8192x8192 16-BIT IHDR OTHERWISE PINS A ~400 MB ARRAY IN `decompressed`.
@@ -668,13 +669,13 @@ public final class PngReader extends ImageReader {
                     final int len = inflater.inflate(output, outputSize, output.length - outputSize);
                     if (len > 0) {
                         outputSize += len;
-                        if (outputSize > expected) throw new CodecException("Compressed image data exceeds expected size (" + expected + " bytes)");
+                        if (outputSize > expected) throw new CodecException(DataTool.errCode(WaterMedia.ERR_PNGREADER_INFLATE_OVERSIZE) + "Failed to inflate the PNG image data due to size over the expected (" + expected + " bytes)");
                         continue;
                     }
                     if (inflater.finished()) return outputSize;
-                    if (inflater.needsDictionary()) throw new CodecException("PNG uses unsupported compression dictionary");
+                    if (inflater.needsDictionary()) throw new CodecException(DataTool.errCode(WaterMedia.ERR_PNGREADER_INFLATE_DICT) + "Failed to inflate the PNG image data due to unsupported compression dictionary");
                     if (inflater.needsInput()) break;
-                    throw new CodecException("Invalid compressed data stream");
+                    throw new CodecException(DataTool.errCode(WaterMedia.ERR_PNGREADER_INFLATE_STREAM) + "Failed to inflate the PNG image data due to invalid compressed data stream");
                 }
             }
             while (true) {
@@ -685,16 +686,16 @@ public final class PngReader extends ImageReader {
                 final int len = inflater.inflate(output, outputSize, output.length - outputSize);
                 if (len > 0) {
                     outputSize += len;
-                    if (outputSize > expected) throw new CodecException("Compressed image data exceeds expected size (" + expected + " bytes)");
+                    if (outputSize > expected) throw new CodecException(DataTool.errCode(WaterMedia.ERR_PNGREADER_INFLATE_OVERSIZE_TAIL) + "Failed to inflate the PNG image data due to size over the expected (" + expected + " bytes)");
                     continue;
                 }
                 if (inflater.finished()) return outputSize;
-                if (inflater.needsDictionary()) throw new CodecException("PNG uses unsupported compression dictionary");
-                if (inflater.needsInput()) throw new CodecException("Incomplete compressed data");
-                throw new CodecException("Invalid compressed data stream");
+                if (inflater.needsDictionary()) throw new CodecException(DataTool.errCode(WaterMedia.ERR_PNGREADER_INFLATE_DICT_TAIL) + "Failed to inflate the PNG image data due to unsupported compression dictionary");
+                if (inflater.needsInput()) throw new CodecException(DataTool.errCode(WaterMedia.ERR_PNGREADER_INFLATE_INCOMPLETE) + "Failed to inflate the PNG image data due to incomplete compressed data");
+                throw new CodecException(DataTool.errCode(WaterMedia.ERR_PNGREADER_INFLATE_STREAM_TAIL) + "Failed to inflate the PNG image data due to invalid compressed data stream");
             }
         } catch (final DataFormatException e) {
-            throw new CodecException("Invalid compressed data: " + e.getMessage(), e);
+            throw new CodecException(DataTool.errCode(WaterMedia.ERR_PNGREADER_INFLATE_FORMAT) + "Failed to inflate the PNG image data due to invalid compressed data: " + e.getMessage(), e);
         }
     }
 
@@ -747,9 +748,9 @@ public final class PngReader extends ImageReader {
         final int imageWidth = this.ihdr.width();
 
         for (int passY = 0; passY < passHeight; passY++) {
-            if (offset >= dataLength) throw new CodecException("Unexpected end of image data");
+            if (offset >= dataLength) throw new CodecException(DataTool.errCode(WaterMedia.ERR_PNGREADER_UNFILTER_EOF_FILTER) + "Failed to unfilter the PNG image due to unexpected end of image data");
             final int filterType = data[offset++] & 0xFF;
-            if (offset + scanlineBytes > dataLength) throw new CodecException("Unexpected end of image data");
+            if (offset + scanlineBytes > dataLength) throw new CodecException(DataTool.errCode(WaterMedia.ERR_PNGREADER_UNFILTER_EOF_ROW) + "Failed to unfilter the PNG image due to unexpected end of image data");
             System.arraycopy(data, offset, currentRow, 0, scanlineBytes);
             offset += scanlineBytes;
 
@@ -790,7 +791,7 @@ public final class PngReader extends ImageReader {
                 case INDEXED -> writeRow8Indexed(row, pixels, rowBase, xStart, xStep, passWidth, imageWidth, this.indexedARGB);
                 case GREYSCALE -> writeRow8Greyscale(row, pixels, rowBase, xStart, xStep, passWidth, imageWidth, this.trnsGray8);
                 case GREYSCALE_ALPHA -> writeRow8GreyscaleAlpha(row, pixels, rowBase, xStart, xStep, passWidth, imageWidth);
-                case FORBIDDEN_1, FORBIDDEN_5 -> throw new CodecException("Forbidden color type: " + this.ihdr.colorType());
+                case FORBIDDEN_1, FORBIDDEN_5 -> throw new CodecException(DataTool.errCode(WaterMedia.ERR_PNGREADER_ROW8_FORBIDDEN) + "Failed to write the PNG row due to forbidden color type: " + this.ihdr.colorType());
             }
             return;
         }
@@ -824,7 +825,7 @@ public final class PngReader extends ImageReader {
                 }
                 case INDEXED -> {
                     final int index = extractSample(row, bitOffset, d); bitOffset += d;
-                    if (this.indexedARGB == null) throw new CodecException("Indexed-color image without PLTE");
+                    if (this.indexedARGB == null) throw new CodecException(DataTool.errCode(WaterMedia.ERR_PNGREADER_ROW_NO_PLTE) + "Failed to write the PNG row due to indexed color without PLTE");
                     yield this.indexedARGB[index];
                 }
                 case GREYSCALE_ALPHA -> {
@@ -843,7 +844,7 @@ public final class PngReader extends ImageReader {
                     alpha = scaleTo8Bit(alpha, d);
                     yield (alpha << 24) | (r << 16) | (g << 8) | b;
                 }
-                case FORBIDDEN_1, FORBIDDEN_5 -> throw new CodecException("Forbidden color type: " + this.ihdr.colorType());
+                case FORBIDDEN_1, FORBIDDEN_5 -> throw new CodecException(DataTool.errCode(WaterMedia.ERR_PNGREADER_ROW_FORBIDDEN) + "Failed to write the PNG row due to forbidden color type: " + this.ihdr.colorType());
             };
         }
     }
@@ -1025,7 +1026,7 @@ public final class PngReader extends ImageReader {
                     currentRow[i] = (byte) ((currentRow[i] & 0xFF) + pr);
                 }
             }
-            default -> throw new CodecException("Unknown filter type: " + filterType);
+            default -> throw new CodecException(DataTool.errCode(WaterMedia.ERR_PNGREADER_FILTER_UNKNOWN) + "Failed to unfilter the PNG row due to unknown filter type: " + filterType);
         }
     }
 
@@ -1092,7 +1093,7 @@ public final class PngReader extends ImageReader {
     private static void writeRow8Indexed(final byte[] row, final int[] pixels, final int rowBase,
                                          final int xStart, final int xStep, final int passWidth, final int imageWidth,
                                          final int[] lut) throws IOException {
-        if (lut == null) throw new CodecException("Indexed-color image without PLTE");
+        if (lut == null) throw new CodecException(DataTool.errCode(WaterMedia.ERR_PNGREADER_LUT_NO_PLTE) + "Failed to write the PNG row due to indexed color without PLTE");
         if (xStep == 1) {
             final int dstStart = rowBase + xStart;
             final int limit = Math.min(passWidth, imageWidth - xStart);

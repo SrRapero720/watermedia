@@ -1,5 +1,8 @@
 package org.watermedia.api.util;
 
+import org.watermedia.WaterMedia;
+import org.watermedia.tools.DataTool;
+
 import java.util.Set;
 
 /** Quality levels of media streams, each named by the smallest side its bucket starts at. */
@@ -58,7 +61,7 @@ public enum MediaQuality {
 
     /** Returns the available quality closest to {@code preferred}, the lower one on a tie, or null when none is available. */
     public static MediaQuality closest(final Set<MediaQuality> available, final MediaQuality preferred) {
-        if (preferred == null) throw new IllegalArgumentException("Preferred quality cannot be null");
+        if (preferred == null) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_QUALITY_PREFERRED_NULL) + "Failed to pick the quality due to null preferred quality");
         if (available == null || available.isEmpty()) return null;
 
         // LINEAR MIN-DISTANCE SCAN; ASCENDING ORDER BREAKS TIES TOWARD THE LOWER QUALITY

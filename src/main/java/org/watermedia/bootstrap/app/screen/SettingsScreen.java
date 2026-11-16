@@ -38,6 +38,7 @@ import org.watermedia.bootstrap.app.ui.AppTheme;
 import org.watermedia.bootstrap.app.ui.Gravity;
 import org.watermedia.bootstrap.app.ui.Spacing;
 import org.watermedia.bootstrap.app.ui.TextRenderer;
+import org.watermedia.tools.DataTool;
 import org.watermedia.tools.ThreadTool;
 
 import java.awt.Color;
@@ -761,7 +762,7 @@ public final class SettingsScreen extends BaseScreen {
         ThreadTool.thread("WaterMedia-ConfigSave", () -> {
             ReflectiveOperationException error = null;
             try {
-                if (CONFIG_SAVE == null) throw new NoSuchMethodException("ConfigSpec#save unavailable");
+                if (CONFIG_SAVE == null) throw new NoSuchMethodException(DataTool.errCode(WaterMedia.ERR_APP_SETTINGSSCREEN_SAVE) + "Failed to save the settings due to unavailable ConfigSpec#save");
                 CONFIG_SAVE.invoke(configSpec);
             } catch (final ReflectiveOperationException e) {
                 error = e;

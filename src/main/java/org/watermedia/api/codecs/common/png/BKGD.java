@@ -1,6 +1,8 @@
 package org.watermedia.api.codecs.common.png;
 
+import org.watermedia.WaterMedia;
 import org.watermedia.api.codecs.CodecException;
+import org.watermedia.tools.DataTool;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -36,29 +38,29 @@ public record BKGD(int gray, int red, int green, int blue, int paletteIndex) imp
 
     /** Converts a generic chunk to bKGD for the color type. */
     public static BKGD convert(final PngChunk chunk, final int colorType) throws CodecException {
-        if (chunk.type() != SIGNATURE) throw new IllegalArgumentException("Invalid chunk type for bKGD: 0x" + Integer.toHexString(chunk.type()));
+        if (chunk.type() != SIGNATURE) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_PNG_BKGD_TYPE) + "Failed to read bKGD due to invalid chunk type: 0x" + Integer.toHexString(chunk.type()));
 
         final byte[] data = chunk.data();
         final ByteBuffer buffer = ByteBuffer.wrap(data).order(ByteOrder.BIG_ENDIAN);
         return switch (ColorType.of(colorType)) {
             case GREYSCALE, GREYSCALE_ALPHA -> {
-                if (data.length != 2) throw new CodecException("bKGD for greyscale must be 2 bytes, got " + data.length);
+                if (data.length != 2) throw new CodecException(DataTool.errCode(WaterMedia.ERR_PNG_BKGD_LENGTH_GREYSCALE) + "Failed to read bKGD due to invalid length: " + data.length + " bytes (expected 2 for greyscale)");
                 final int gray = buffer.getShort() & 0xFFFF;
                 yield new BKGD(gray);
             }
             case TRUECOLOR, TRUECOLOR_ALPHA -> {
-                if (data.length != 6) throw new CodecException("bKGD for truecolor must be 6 bytes, got " + data.length);
+                if (data.length != 6) throw new CodecException(DataTool.errCode(WaterMedia.ERR_PNG_BKGD_LENGTH_TRUECOLOR) + "Failed to read bKGD due to invalid length: " + data.length + " bytes (expected 6 for truecolor)");
                 final int red = buffer.getShort() & 0xFFFF;
                 final int green = buffer.getShort() & 0xFFFF;
                 final int blue = buffer.getShort() & 0xFFFF;
                 yield new BKGD(red, green, blue);
             }
             case INDEXED -> {
-                if (data.length != 1) throw new CodecException("bKGD for indexed must be 1 byte, got " + data.length);
+                if (data.length != 1) throw new CodecException(DataTool.errCode(WaterMedia.ERR_PNG_BKGD_LENGTH_INDEXED) + "Failed to read bKGD due to invalid length: " + data.length + " bytes (expected 1 for indexed)");
                 final int index = data[0] & 0xFF;
                 yield BKGD.forPalette(index);
             }
-            case FORBIDDEN_1, FORBIDDEN_5 -> throw new CodecException("Forbidden color type: " + colorType);
+            case FORBIDDEN_1, FORBIDDEN_5 -> throw new CodecException(DataTool.errCode(WaterMedia.ERR_PNG_BKGD_COLOR_TYPE) + "Failed to read bKGD due to forbidden color type: " + colorType);
         };
     }
 

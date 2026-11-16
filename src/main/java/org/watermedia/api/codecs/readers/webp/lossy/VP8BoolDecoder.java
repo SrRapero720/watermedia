@@ -1,6 +1,8 @@
 package org.watermedia.api.codecs.readers.webp.lossy;
 
+import org.watermedia.WaterMedia;
 import org.watermedia.api.codecs.CodecException;
+import org.watermedia.tools.DataTool;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -28,7 +30,7 @@ final class VP8BoolDecoder {
     // READS FIRST TWO BYTES TO INITIALIZE VALUE, SETS RANGE = 255
     VP8BoolDecoder(final ByteBuffer buffer) throws CodecException {
         this.buf = buffer.slice().order(ByteOrder.LITTLE_ENDIAN);
-        if (this.buf.remaining() < 2) throw new CodecException("VP8 bool decoder buffer too small");
+        if (this.buf.remaining() < 2) throw new CodecException(DataTool.errCode(WaterMedia.ERR_VP8_BOOL_SMALL) + "Failed to create the VP8 bool decoder due to small buffer");
 
         // VALUE = FIRST 2 INPUT BYTES (BIG-ENDIAN ORDER)
         this.val = (this.buf.get() & 0xFF) << 8;

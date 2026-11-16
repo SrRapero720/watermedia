@@ -257,7 +257,7 @@ public class ChunkContractTest {
         void rejectsWrongWireType() {
             final TEXT text = new TEXT(TEXT.KEYWORD_TITLE, "value");
             final CodecException failure = assertThrows(CodecException.class, () -> ZTXT.read(envelope(text)));
-            assertEquals("Expected zTXt chunk, got tEXt", failure.getMessage());
+            assertEquals("(wm_err:4444) Failed to read the chunk due to unexpected type: expected zTXt, got tEXt", failure.getMessage());
             assertThrows(CodecException.class, () -> ITXT.read(envelope(text)));
             assertThrows(CodecException.class, () -> ICCP.read(envelope(text)));
             assertThrows(CodecException.class, () -> SRGB.read(envelope(text)));

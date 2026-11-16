@@ -1,6 +1,8 @@
 package org.watermedia.api.codecs.common.png;
 
+import org.watermedia.WaterMedia;
 import org.watermedia.api.codecs.CodecException;
+import org.watermedia.tools.DataTool;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -15,10 +17,10 @@ public record FDAT(int sequence, byte[] data) implements IChunk {
 
     /** Converts a generic chunk to fdAT. */
     public static FDAT convert(final PngChunk chunk) throws CodecException {
-        if (chunk.type() != SIGNATURE) throw new IllegalArgumentException("Invalid chunk type for fdAT: 0x" + Integer.toHexString(chunk.type()));
+        if (chunk.type() != SIGNATURE) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_PNG_FDAT_TYPE) + "Failed to read fdAT due to invalid chunk type: 0x" + Integer.toHexString(chunk.type()));
 
         final byte[] rawData = chunk.data();
-        if (rawData.length < 4) throw new CodecException("fdAT data must be at least 4 bytes");
+        if (rawData.length < 4) throw new CodecException(DataTool.errCode(WaterMedia.ERR_PNG_FDAT_LENGTH) + "Failed to read fdAT due to invalid length: " + rawData.length + " bytes (expected at least 4)");
 
         // THE SEQUENCE NUMBER COMES FIRST, THE COMPRESSED FRAME DATA FILLS THE REST
         final int sequence = ByteBuffer.wrap(rawData, 0, 4).order(ByteOrder.BIG_ENDIAN).getInt();

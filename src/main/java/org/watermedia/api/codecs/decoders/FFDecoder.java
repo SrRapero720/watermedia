@@ -15,6 +15,7 @@ import org.bytedeco.javacpp.BytePointer;
 import org.bytedeco.javacpp.IntPointer;
 import org.bytedeco.javacpp.Pointer;
 import org.bytedeco.javacpp.PointerPointer;
+import org.watermedia.WaterMedia;
 import org.watermedia.WaterMediaConfig;
 import org.watermedia.api.util.HttpHeaders;
 import org.watermedia.api.util.SampleType;
@@ -344,7 +345,7 @@ public final class FFDecoder {
     boolean initAudioTrack(final Track track, final int stream, final String language) {
         final URI trackUri = track.uri();
         if (trackUri == null) {
-            LOGGER.error(IT, "Audio track {} has no URI", track.name());
+            LOGGER.error(IT, DataTool.errCode(WaterMedia.ERR_FFDECODER_TRACK_NO_URI) + "Failed to open audio track {} due to missing URI", track.name());
             return false;
         }
 
@@ -359,7 +360,7 @@ public final class FFDecoder {
             this.applyInputOptions(trackOptions);
 
             if (avformat.avformat_open_input(this.trackFormatContext, trackUrl, null, trackOptions) < 0) {
-                if (!this.aborted) LOGGER.error(IT, "Failed to open audio track input: {}", trackUrl);
+                if (!this.aborted) LOGGER.error(IT, DataTool.errCode(WaterMedia.ERR_FFDECODER_TRACK_OPEN) + "Failed to open audio track input: {}", trackUrl);
                 this.trackFormatContext = null;
                 return false;
             }
@@ -368,7 +369,7 @@ public final class FFDecoder {
         }
 
         if (avformat.avformat_find_stream_info(this.trackFormatContext, (PointerPointer<?>) null) < 0) {
-            if (!this.aborted) LOGGER.error(IT, "Failed to find stream info for audio track");
+            if (!this.aborted) LOGGER.error(IT, DataTool.errCode(WaterMedia.ERR_FFDECODER_TRACK_STREAM_INFO) + "Failed to find stream info for audio track");
             avformat.avformat_close_input(this.trackFormatContext);
             this.trackFormatContext = null;
             return false;
@@ -382,7 +383,7 @@ public final class FFDecoder {
             return true;
         }
 
-        LOGGER.error(IT, "No audio stream found in audio track: {}", trackUrl);
+        LOGGER.error(IT, DataTool.errCode(WaterMedia.ERR_FFDECODER_TRACK_NO_STREAM) + "Failed to find an audio stream in audio track: {}", trackUrl);
         avformat.avformat_close_input(this.trackFormatContext);
         this.trackFormatContext = null;
         return false;
@@ -396,14 +397,14 @@ public final class FFDecoder {
             if (!this.init()) {
                 // AN OPEN CUT SHORT BY stop()/RESTART/RELEASE IS NOT A FAILURE: THE INTERRUPTED
                 // LIFECYCLE LANDS ON STOPPED BY ITSELF AND NO EXCEPTION LEAKS INTO THE NEXT RUN
-                if (!this.aborted) this.host.failed(this.failure != null ? this.failure : new IOException("Failed to open " + this.uri));
+                if (!this.aborted) this.host.failed(this.failure != null ? this.failure : new IOException(DataTool.errCode(WaterMedia.ERR_FFDECODER_OPEN_FAILED) + "Failed to open " + this.uri));
                 return;
             }
             this.host.opened(this);
         } catch (final Throwable e) {
             // WHATEVER AN ABORT LEFT HALF DONE IS NOT A FAILURE
             if (this.aborted) return;
-            LOGGER.error(IT, "Init failed with exception", e);
+            LOGGER.error(IT, DataTool.errCode(WaterMedia.ERR_FFDECODER_INIT_EXCEPTION) + "Failed to initialize the decoder due to an exception", e);
             this.host.failed(e);
             return;
         }
@@ -478,8 +479,8 @@ public final class FFDecoder {
                             // reopenFormat ALREADY CLOSED THE OLD CONTEXT: WITH NOTHING LEFT TO READ FROM, THE PIPELINE CANNOT RECOVER;
                             // A REOPEN CUT SHORT BY stop() IS THE CALLER'S OWN DOING, NOT A FAILURE
                             if (this.aborted) return;
-                            LOGGER.error(IT, "Seek to {}ms failed and the input could not be reopened; stopping pipeline", targetMs);
-                            this.host.failed(new IOException("Seek to " + targetMs + "ms failed and the input could not be reopened"));
+                            LOGGER.error(IT, DataTool.errCode(WaterMedia.ERR_FFDECODER_SEEK_REOPEN_LOG) + "Failed to seek to {}ms due to input reopen failure, stopping the pipeline", targetMs);
+                            this.host.failed(new IOException(DataTool.errCode(WaterMedia.ERR_FFDECODER_SEEK_REOPEN) + "Failed to seek to " + targetMs + "ms due to input reopen failure"));
                             return;
                         }
                         LOGGER.warn(IT, "Seek to {}ms failed; reopened input from beginning", targetMs);
@@ -690,7 +691,7 @@ public final class FFDecoder {
                             if (av_hwframe_transfer_data(hwTransfer, tempFrame, 0) < 0) {
                                 if (hwFailStreak++ == 0) LOGGER.warn(IT, "Failed to transfer frame from GPU");
                                 if (hwFailStreak >= HW_TRANSFER_FAIL_LIMIT) {
-                                    LOGGER.error(IT, "GPU frame transfer failed {} times in a row; falling back to software decoding", hwFailStreak);
+                                    LOGGER.error(IT, DataTool.errCode(WaterMedia.ERR_FFDECODER_GPU_TRANSFER) + "Failed to transfer GPU frames {} times in a row, falling back to software decoding", hwFailStreak);
                                     hwGaveUp = this.reinitVideoCodecSoftware();
                                     hwFailStreak = 0;
                                 }
@@ -1073,7 +1074,7 @@ public final class FFDecoder {
             avutil.av_opt_set_sample_fmt(fresh, "out_sample_fmt", this.audioOutputAvFormat, 0);
 
             if (swresample.swr_init(fresh) < 0) {
-                LOGGER.error(IT, "Failed to initialize resampler for new audio parameters");
+                LOGGER.error(IT, DataTool.errCode(WaterMedia.ERR_FFDECODER_RESAMPLER_REINIT) + "Failed to initialize resampler for new audio parameters");
                 swresample.swr_free(fresh);
                 return false;
             }
@@ -1245,8 +1246,8 @@ public final class FFDecoder {
                     return false;
                 }
                 final String reason = FFTool.error(ret);
-                LOGGER.error(IT, "Failed to open input ({}): {}", reason, url);
-                this.failure = new IOException("Failed to open input (" + reason + "): " + url);
+                LOGGER.error(IT, DataTool.errCode(WaterMedia.ERR_FFDECODER_OPEN_INPUT_LOG) + "Failed to open input ({}): {}", reason, url);
+                this.failure = new IOException(DataTool.errCode(WaterMedia.ERR_FFDECODER_OPEN_INPUT) + "Failed to open input (" + reason + "): " + url);
                 return false;
             }
             return true;
@@ -1267,7 +1268,7 @@ public final class FFDecoder {
         if (!this.openInput(url)) return false;
 
         if (avformat.avformat_find_stream_info(this.formatContext, (PointerPointer<?>) null) < 0) {
-            if (!this.aborted) LOGGER.error(IT, "reopenFormat: failed to find stream info");
+            if (!this.aborted) LOGGER.error(IT, DataTool.errCode(WaterMedia.ERR_FFDECODER_REOPEN_STREAM_INFO) + "Failed to find stream info while reopening the format");
             return false;
         }
 
@@ -1283,7 +1284,7 @@ public final class FFDecoder {
         }
         if (this.videoCodecContext != null) {
             if (newVideoIndex < 0 || this.formatContext.streams(newVideoIndex).codecpar().codec_id() != this.videoCodecContext.codec_id()) {
-                LOGGER.error(IT, "reopenFormat: video stream missing or codec mismatch (index={})", newVideoIndex);
+                LOGGER.error(IT, DataTool.errCode(WaterMedia.ERR_FFDECODER_REOPEN_VIDEO) + "Failed to reopen the format due to missing video stream or codec mismatch (index={})", newVideoIndex);
                 return false;
             }
             this.videoStreamIndex = newVideoIndex;
@@ -1295,7 +1296,7 @@ public final class FFDecoder {
             final AudioStream played = this.audioStream;
             final int newAudioIndex = audioIndex(this.formatContext, played == null ? -1 : played.stream(), played == null ? null : played.lang(), null);
             if (newAudioIndex < 0 || this.formatContext.streams(newAudioIndex).codecpar().codec_id() != this.audioCodecContext.codec_id()) {
-                LOGGER.error(IT, "reopenFormat: audio stream missing or codec mismatch (index={})", newAudioIndex);
+                LOGGER.error(IT, DataTool.errCode(WaterMedia.ERR_FFDECODER_REOPEN_AUDIO) + "Failed to reopen the format due to missing audio stream or codec mismatch (index={})", newAudioIndex);
                 return false;
             }
             final AVStream stream = this.formatContext.streams(newAudioIndex);
@@ -1331,8 +1332,8 @@ public final class FFDecoder {
                     LOGGER.debug(IT, "Stream probe aborted by stop/restart: {}", url);
                     return false;
                 }
-                LOGGER.error(IT, "Failed to find stream info");
-                this.failure = new IOException("Failed to find stream info: " + url);
+                LOGGER.error(IT, DataTool.errCode(WaterMedia.ERR_FFDECODER_STREAM_INFO_LOG) + "Failed to find stream info");
+                this.failure = new IOException(DataTool.errCode(WaterMedia.ERR_FFDECODER_STREAM_INFO) + "Failed to find stream info: " + url);
                 return false;
             }
 
@@ -1426,7 +1427,7 @@ public final class FFDecoder {
             }
 
             if (!videoInit && !audioInit)
-                throw new IllegalStateException("Video and Audio failed to initialize");
+                throw new IllegalStateException(DataTool.errCode(WaterMedia.ERR_FFDECODER_INIT_NO_STREAMS) + "Failed to initialize the decoder, neither video nor audio could start");
 
             // ONLY THE DECODED STREAMS ARE READ: THE DEMUXER SKIPS THE REST, AND AN HLS MASTER STOPS FETCHING EVERY OTHER RENDITION
             discard(this.formatContext, this.videoStreamIndex, this.useAudioTrack ? -1 : this.audioStreamIndex);
@@ -1438,7 +1439,7 @@ public final class FFDecoder {
         } catch (final Exception e) {
             // A SETUP CUT SHORT BY stop()/RESTART IS NOT A FAILURE WORTH RECORDING
             if (this.aborted) return false;
-            LOGGER.error(IT, "Failed to initialize the FFmpeg decoder", e);
+            LOGGER.error(IT, DataTool.errCode(WaterMedia.ERR_FFDECODER_INIT_FAILED) + "Failed to initialize the FFmpeg decoder", e);
             this.failure = e;
             return false;
         }
@@ -1477,7 +1478,7 @@ public final class FFDecoder {
 
         final AVCodec decoder = avcodec_find_decoder(codecId);
         if (decoder == null)
-            LOGGER.error(IT, "Failed to find video codec with id {} for videoIndex {}", codecId, this.videoStreamIndex);
+            LOGGER.error(IT, DataTool.errCode(WaterMedia.ERR_FFDECODER_VIDEO_CODEC_FIND) + "Failed to find video codec with id {} for videoIndex {}", codecId, this.videoStreamIndex);
 
         // REPORT THE ACTUAL DECODER (libdav1d, libaom-av1 OR THE NATIVE av1 ONE): THE SAME CODEC ID RESOLVES TO DIFFERENT DECODERS
         // PER PLATFORM BUILD, WHICH DIFFER IN REORDER DELAY AND STREAM SUPPORT (KEY CONTEXT WHEN A DECODE YIELDS NO FRAMES)
@@ -1494,7 +1495,7 @@ public final class FFDecoder {
 
             final AVCodec swDecoder = softwareVideoDecoder(codecId, decoder);
             if (swDecoder == null) {
-                LOGGER.error(IT, "No software decoder available for codec id {}", codecId);
+                LOGGER.error(IT, DataTool.errCode(WaterMedia.ERR_FFDECODER_SW_DECODER_FIND) + "Failed to find a software decoder for codec id {}", codecId);
                 return false;
             }
             if (decoder == null || !Objects.equals(FFTool.string(swDecoder.name(), ""), FFTool.string(decoder.name(), "")))
@@ -1502,14 +1503,14 @@ public final class FFDecoder {
 
             this.videoCodecContext = avcodec.avcodec_alloc_context3(swDecoder);
             if (avcodec_parameters_to_context(this.videoCodecContext, videoStream.codecpar()) < 0) {
-                LOGGER.error(IT, "Failed to copy video codec parameters to context");
+                LOGGER.error(IT, DataTool.errCode(WaterMedia.ERR_FFDECODER_VIDEO_PARAMS) + "Failed to copy video codec parameters to context");
                 return false;
             }
 
             configureSwDecoderThreads(this.videoCodecContext);
 
             if (avcodec.avcodec_open2(this.videoCodecContext, swDecoder, (PointerPointer<?>) null) < 0) {
-                LOGGER.error(IT, "Failed to open video codec");
+                LOGGER.error(IT, DataTool.errCode(WaterMedia.ERR_FFDECODER_VIDEO_CODEC_OPEN) + "Failed to open video codec");
                 return false;
             }
         }
@@ -1592,7 +1593,7 @@ public final class FFDecoder {
         if (fresh == null) return false;
         if (avcodec_parameters_to_context(fresh, stream.codecpar()) < 0) {
             avcodec.avcodec_free_context(fresh);
-            LOGGER.error(IT, "SW fallback: failed to copy codec parameters");
+            LOGGER.error(IT, DataTool.errCode(WaterMedia.ERR_FFDECODER_FALLBACK_PARAMS) + "Failed to copy codec parameters for the software fallback");
             return false;
         }
 
@@ -1600,7 +1601,7 @@ public final class FFDecoder {
 
         if (avcodec.avcodec_open2(fresh, decoder, (PointerPointer<?>) null) < 0) {
             avcodec.avcodec_free_context(fresh);
-            LOGGER.error(IT, "SW fallback: failed to open software codec");
+            LOGGER.error(IT, DataTool.errCode(WaterMedia.ERR_FFDECODER_FALLBACK_OPEN) + "Failed to open the software codec for the software fallback");
             return false;
         }
 
@@ -1630,7 +1631,7 @@ public final class FFDecoder {
 
         int errorCode;
         if (audioCodec == null) {
-            LOGGER.error(IT, "Failed to find audio codec with id {} for audioIndex {}", codecId, this.audioStreamIndex);
+            LOGGER.error(IT, DataTool.errCode(WaterMedia.ERR_FFDECODER_AUDIO_CODEC_FIND) + "Failed to find audio codec with id {} for audioIndex {}", codecId, this.audioStreamIndex);
             return false;
         }
 
@@ -1645,17 +1646,17 @@ public final class FFDecoder {
 
         this.audioCodecContext = avcodec.avcodec_alloc_context3(audioCodec);
         if (this.audioCodecContext == null) {
-            LOGGER.error(IT, "Failed to allocate audio codec context");
+            LOGGER.error(IT, DataTool.errCode(WaterMedia.ERR_FFDECODER_AUDIO_CTX_ALLOC) + "Failed to allocate audio codec context");
             return false;
         }
 
         if ((errorCode = avcodec_parameters_to_context(this.audioCodecContext, codecParams)) < 0) {
-            LOGGER.error(IT, "Failed to copy audio codec parameters to context - err: {}", errorCode);
+            LOGGER.error(IT, DataTool.errCode(WaterMedia.ERR_FFDECODER_AUDIO_PARAMS) + "Failed to copy audio codec parameters to context, err: {}", errorCode);
             return false;
         }
 
         if ((errorCode = avcodec.avcodec_open2(this.audioCodecContext, audioCodec, (PointerPointer<?>) null)) < 0) {
-            LOGGER.error(IT, "Failed to open audio codec - err: {}", errorCode);
+            LOGGER.error(IT, DataTool.errCode(WaterMedia.ERR_FFDECODER_AUDIO_CODEC_OPEN) + "Failed to open audio codec, err: {}", errorCode);
             return false;
         }
 
@@ -1699,7 +1700,7 @@ public final class FFDecoder {
 
         this.swrContext = swresample.swr_alloc();
         if (this.swrContext == null) {
-            LOGGER.error(IT, "Failed to allocate SWResampler context");
+            LOGGER.error(IT, DataTool.errCode(WaterMedia.ERR_FFDECODER_SWR_ALLOC) + "Failed to allocate SWResampler context");
             return false;
         }
 
@@ -1725,7 +1726,7 @@ public final class FFDecoder {
             avutil.av_opt_set_sample_fmt(this.swrContext, "out_sample_fmt", this.audioOutputAvFormat, 0);
 
             if (swresample.swr_init(this.swrContext) < 0) {
-                LOGGER.error(IT, "Failed to initialize SWResampler context");
+                LOGGER.error(IT, DataTool.errCode(WaterMedia.ERR_FFDECODER_SWR_INIT) + "Failed to initialize SWResampler context");
                 return false;
             }
         } finally {

@@ -2,6 +2,7 @@ package org.watermedia.api.player;
 
 import org.watermedia.WaterMedia;
 import org.watermedia.api.util.SampleType;
+import org.watermedia.tools.DataTool;
 
 import java.nio.ByteBuffer;
 import java.util.Collections;
@@ -150,7 +151,7 @@ public abstract sealed class SFXEngine permits ALEngine, JSEngine {
         final SampleType type = this.sampleType;
         if (this.released || type == null) return false;
         if (!data.isDirect() || !data.hasRemaining() || data.remaining() % (this.channels * type.bytes()) != 0)
-            throw new IllegalArgumentException("Audio data must be direct, nonempty and sample-frame aligned");
+            throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_SFX_AUDIO_DATA) + "Failed to upload the audio due to invalid data, it must be direct, nonempty and sample-frame aligned");
         return this.push(data);
     }
 
@@ -176,7 +177,7 @@ public abstract sealed class SFXEngine permits ALEngine, JSEngine {
 
     // SETS THE GAIN: 0 = SILENT, 1 = FULL. A NEGATIVE OR NON-FINITE VALUE IS A CALLER BUG; IGNORED ONCE RELEASED
     final void volume(final float volume) {
-        if (!Float.isFinite(volume) || volume < 0) throw new IllegalArgumentException("Volume must be finite and nonnegative");
+        if (!Float.isFinite(volume) || volume < 0) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_SFX_VOLUME) + "Failed to set the volume due to non-finite or negative value");
         if (this.released) return;
         this.volume = volume;
         this.gain();
@@ -202,8 +203,8 @@ public abstract sealed class SFXEngine permits ALEngine, JSEngine {
      */
     public record ChannelSupport(int channels, Set<SampleType> types) {
         public ChannelSupport {
-            if (channels < 1 || channels > 8) throw new IllegalArgumentException("Channel count must be 1..8, got " + channels);
-            if (types == null || types.isEmpty()) throw new IllegalArgumentException("A channel count needs at least one sample type");
+            if (channels < 1 || channels > 8) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_SFX_CHANNEL_COUNT) + "Failed to create the channel layout due to invalid channel count: " + channels + " (expected 1..8)");
+            if (types == null || types.isEmpty()) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_SFX_NO_SAMPLE_TYPES) + "Failed to create the channel layout due to no sample types");
             types = Collections.unmodifiableSet(EnumSet.copyOf(types));
         }
 
@@ -234,13 +235,13 @@ public abstract sealed class SFXEngine permits ALEngine, JSEngine {
         public SpatialAudio {
             if (!Double.isFinite(x) || !Double.isFinite(y) || !Double.isFinite(z)
                     || !Float.isFinite((float) x) || !Float.isFinite((float) y) || !Float.isFinite((float) z))
-                throw new IllegalArgumentException("Position must fit finite OpenAL coordinates");
+                throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_SFX_POSITION) + "Failed to set the spatial audio due to invalid position, it must fit finite OpenAL coordinates");
             if (!Float.isFinite(referenceDistance) || referenceDistance <= 0
                     || !Float.isFinite(maxDistance) || maxDistance <= referenceDistance
                     || !Float.isFinite(rolloff) || rolloff < 0)
-                throw new IllegalArgumentException("Distances must be finite with 0 < reference < max, and rolloff >= 0");
+                throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_SFX_DISTANCES) + "Failed to set the spatial audio due to invalid distances, they must be finite with 0 < reference < max, and rolloff >= 0");
             if (auxOnly && environment == null)
-                throw new IllegalArgumentException("Reflected-only audio requires an environment processor");
+                throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_SFX_NO_ENVIRONMENT) + "Failed to set the spatial audio due to no environment processor, reflected-only audio requires one");
         }
 
         /** Host adapter for environment effects such as reverb or occlusion from spatial sound mods, called on the host's sound thread; it must not retain or delete the source nor switch context. */

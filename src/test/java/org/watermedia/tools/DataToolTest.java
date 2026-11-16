@@ -130,6 +130,16 @@ public class DataToolTest {
         }
 
         @Test
+        @DisplayName("errCode prefixes a message with its code padded to four digits")
+        void errorCodePrefix() {
+            assertEquals("(wm_err:0000) ", DataTool.errCode(0));
+            assertEquals("(wm_err:0007) ", DataTool.errCode(7));
+            assertEquals("(wm_err:0720) ", DataTool.errCode(720));
+            assertEquals("(wm_err:4750) Failed to parse", DataTool.errCode(4_750) + "Failed to parse");
+            assertEquals("(wm_err:12345) ", DataTool.errCode(12_345));
+        }
+
+        @Test
         @DisplayName("megabytes converts configuration values and the lenient parsers fall back")
         void unitsAndParsers() {
             assertEquals(8_388_608L, DataTool.megabytes(8));

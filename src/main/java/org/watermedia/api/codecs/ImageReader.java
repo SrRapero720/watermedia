@@ -1,6 +1,8 @@
 package org.watermedia.api.codecs;
 
+import org.watermedia.WaterMedia;
 import org.watermedia.api.util.PixelFormat;
+import org.watermedia.tools.DataTool;
 
 import java.io.Closeable;
 import java.io.IOException;
@@ -59,7 +61,7 @@ public abstract class ImageReader implements Closeable {
 
     protected ImageReader(final ByteBuffer data, final PixelFormat requestedFormat) {
         if (requestedFormat != null && requestedFormat != PixelFormat.BGRA && requestedFormat != PixelFormat.RGBA && requestedFormat != PixelFormat.GRAY)
-            throw new IllegalArgumentException("Readers deliver BGRA, RGBA or GRAY, not " + requestedFormat);
+            throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_IMAGEREADER_FORMAT) + "Failed to create the image reader due to unsupported output format, readers deliver BGRA, RGBA or GRAY: " + requestedFormat);
         this.data = data.slice();
         this.requestedFormat = requestedFormat;
     }
@@ -141,7 +143,7 @@ public abstract class ImageReader implements Closeable {
      * @throws IllegalArgumentException when {@code filter} is null
      */
     public void addFilter(final ReaderFilter filter) {
-        if (filter == null) throw new IllegalArgumentException("Filter cannot be null");
+        if (filter == null) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_IMAGEREADER_NULL_FILTER) + "Failed to add the filter due to null filter");
         this.filters.add(filter);
     }
 
@@ -162,13 +164,13 @@ public abstract class ImageReader implements Closeable {
             // THE CONTAINER. CHARGED BEFORE THE COPY, SO THE FRAME THAT BREAKS THE BUDGET IS NEVER RETAINED
             retained += decoded.remaining();
             if (retained > MAX_DECODED_BYTES)
-                throw new CodecException("Decoded animation exceeds budget: " + retained
+                throw new CodecException(DataTool.errCode(WaterMedia.ERR_IMAGEREADER_BUDGET) + "Failed to read all frames due to the decoded animation exceeding the budget: " + retained
                         + " bytes over " + frames.size() + " frames (max " + MAX_DECODED_BYTES + ")");
             // A REUSED READER FRAME IS COPIED OUT; A FILTER-ALLOCATED ONE IS KEPT AS IT IS
             frames.add(this.fresh ? decoded : ByteBuffer.allocateDirect(decoded.remaining()).order(decoded.order()).put(decoded.duplicate()).flip());
             frameDelays.add(this.delayMs);
         }
-        if (frames.isEmpty()) throw new CodecException("No frames decoded by " + this.name());
+        if (frames.isEmpty()) throw new CodecException(DataTool.errCode(WaterMedia.ERR_IMAGEREADER_NO_FRAMES) + "Failed to read all frames due to no frames decoded by " + this.name());
         final long[] delayArray = new long[frameDelays.size()];
         for (int i = 0; i < delayArray.length; i++) delayArray[i] = frameDelays.get(i);
         return new ImageData(frames.toArray(ByteBuffer[]::new), this.pixelFormat(), this.frameWidth(), this.frameHeight(),
@@ -216,7 +218,7 @@ public abstract class ImageReader implements Closeable {
      */
     public final ByteBuffer next() throws IOException {
         this.checkOpen();
-        if (!this.hasMore()) throw new NoSuchElementException("No more " + this.name() + " frames");
+        if (!this.hasMore()) throw new NoSuchElementException(DataTool.errCode(WaterMedia.ERR_IMAGEREADER_NO_MORE) + "Failed to read the next frame due to no more " + this.name() + " frames");
         final ByteBuffer decoded;
         final ByteBuffer delivered;
         try {
@@ -224,7 +226,7 @@ public abstract class ImageReader implements Closeable {
             delivered = this.requestedFormat == null ? decoded : this.convert(decoded, this.decodedFormat(), this.requestedFormat);
         } catch (final RuntimeException failure) {
             // A CONCURRENT close() DROPS THE BUFFERS UNDER THE DECODER: THAT IS A STATE ERROR, NOT A CODEC FAULT
-            if (this.closed) throw new IllegalStateException(this.name() + " reader was closed while decoding", failure);
+            if (this.closed) throw new IllegalStateException(DataTool.errCode(WaterMedia.ERR_IMAGEREADER_CLOSED_DECODING) + "Failed to read the next frame, the " + this.name() + " reader was closed while decoding", failure);
             throw failure;
         }
         ReaderFilter.Frame f = new ReaderFilter.Frame(delivered, this.width(), this.height(), this.pixelFormat());
@@ -272,7 +274,7 @@ public abstract class ImageReader implements Closeable {
     // HELPERS
     // ==========================================================================
     private void checkOpen() {
-        if (this.closed) throw new IllegalStateException(this.name() + " reader is closed");
+        if (this.closed) throw new IllegalStateException(DataTool.errCode(WaterMedia.ERR_IMAGEREADER_CLOSED) + "Failed to use the " + this.name() + " reader, it is closed");
     }
 
     // THE CONVERSION PASS BETWEEN THE READER'S LAYOUT AND THE REQUESTED ONE, ALWAYS INTO A REUSED BUFFER: A DECODER MAY

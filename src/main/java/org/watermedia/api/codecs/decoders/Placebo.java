@@ -7,6 +7,8 @@ import org.bytedeco.ffmpeg.avutil.AVBufferRef;
 import org.bytedeco.ffmpeg.avutil.AVFrame;
 import org.bytedeco.ffmpeg.avutil.AVRational;
 import org.bytedeco.ffmpeg.global.avfilter;
+import org.watermedia.WaterMedia;
+import org.watermedia.tools.DataTool;
 import org.watermedia.tools.FFTool;
 
 import static org.bytedeco.ffmpeg.global.avutil.AV_PIX_FMT_VULKAN;
@@ -68,7 +70,7 @@ public final class Placebo {
         }
         if (result >= 0) return new Placebo(graph, source, sink, frame.hw_frames_ctx().data().address());
         avfilter.avfilter_graph_free(graph);
-        throw new IllegalStateException("The libplacebo " + step + " failed: " + FFTool.error(result));
+        throw new IllegalStateException(DataTool.errCode(WaterMedia.ERR_PLACEBO_STEP) + "Failed to run the libplacebo " + step + ": " + FFTool.error(result));
     }
 
     /** Hands a decoded frame to the graph, taking its reference (the frame stays untouched on failure); null flushes it. */

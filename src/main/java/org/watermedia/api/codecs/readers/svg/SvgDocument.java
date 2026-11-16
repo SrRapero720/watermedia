@@ -1,7 +1,9 @@
 package org.watermedia.api.codecs.readers.svg;
 
+import org.watermedia.WaterMedia;
 import org.watermedia.api.codecs.CodecException;
 import org.watermedia.api.util.MathUtil;
+import org.watermedia.tools.DataTool;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -111,7 +113,7 @@ final class SvgDocument {
     }
 
     private void renderNode(final SvgNode node, final RenderState state, final SvgRasterizer out, final int depth) throws CodecException {
-        if (depth > MAX_DEPTH) throw new CodecException("SVG nesting exceeds " + MAX_DEPTH + " levels");
+        if (depth > MAX_DEPTH) throw new CodecException(DataTool.errCode(WaterMedia.ERR_SVG_DOCUMENT_RENDER_DEPTH) + "Failed to render the SVG node due to excessive nesting (max " + MAX_DEPTH + " levels)");
         // display:none REMOVES THE ELEMENT AND ITS ENTIRE SUBTREE FROM RENDERING (NOT INHERITED, SO CHECKED PER NODE)
         if (hidden(node)) return;
         switch (node.tag()) {
@@ -255,7 +257,7 @@ final class SvgDocument {
     }
 
     private static void indexGradients(final SvgNode node, final Map<String, SvgNode> out, final int depth) throws CodecException {
-        if (depth > MAX_DEPTH) throw new CodecException("SVG nesting exceeds " + MAX_DEPTH + " levels");
+        if (depth > MAX_DEPTH) throw new CodecException(DataTool.errCode(WaterMedia.ERR_SVG_DOCUMENT_INDEX_DEPTH) + "Failed to index the SVG gradients due to excessive nesting (max " + MAX_DEPTH + " levels)");
         final String tag = node.tag();
         if (tag.equals("lineargradient") || tag.equals("radialgradient")) {
             final String id = node.attr("id");
@@ -298,7 +300,7 @@ final class SvgDocument {
         final Set<SvgNode> seen = Collections.newSetFromMap(new IdentityHashMap<>());
         SvgNode cur = node;
         while (cur != null && seen.add(cur)) {
-            if (chain.size() == MAX_CHAIN) throw new CodecException("Gradient href chain exceeds " + MAX_CHAIN);
+            if (chain.size() == MAX_CHAIN) throw new CodecException(DataTool.errCode(WaterMedia.ERR_SVG_DOCUMENT_HREF_CHAIN) + "Failed to resolve the SVG gradient due to href chain exceeding " + MAX_CHAIN);
             chain.add(cur);
             String href = cur.attr("href");
             if (href == null) href = cur.attr("xlink:href");
@@ -322,7 +324,7 @@ final class SvgDocument {
             final List<SvgNode> stops = new ArrayList<>();
             for (final SvgNode c: n.children()) {
                 if (!c.tag().equals("stop")) continue;
-                if (stops.size() == MAX_STOPS) throw new CodecException("Gradient exceeds " + MAX_STOPS + " stops");
+                if (stops.size() == MAX_STOPS) throw new CodecException(DataTool.errCode(WaterMedia.ERR_SVG_DOCUMENT_GRADIENT_STOPS) + "Failed to resolve the SVG gradient due to too many stops (max " + MAX_STOPS + ")");
                 stops.add(c);
             }
             if (!stops.isEmpty()) return stops;

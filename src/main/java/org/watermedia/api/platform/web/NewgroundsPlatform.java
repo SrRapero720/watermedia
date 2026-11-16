@@ -7,6 +7,7 @@ import com.google.gson.JsonParser;
 import com.google.gson.stream.JsonReader;
 import org.apache.logging.log4j.Marker;
 import org.apache.logging.log4j.MarkerManager;
+import org.watermedia.WaterMedia;
 import org.watermedia.WaterMediaConfig;
 import org.watermedia.api.platform.MatureContentException;
 import org.watermedia.api.platform.Platform;
@@ -116,7 +117,7 @@ public final class NewgroundsPlatform implements Platform {
         } catch (final PlatformException e) {
             throw e;
         } catch (final IOException | RuntimeException e) {
-            throw new PlatformException(NAME, "Failed to resolve " + uri, e);
+            throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_NEWGROUNDS_RESOLVE) + "Failed to resolve " + uri, e);
         }
     }
 
@@ -129,11 +130,11 @@ public final class NewgroundsPlatform implements Platform {
     private Resolution movie(final String id) throws IOException {
         final String item = "Movie " + id;
         final Fetched page = this.fetch(ORIGIN + "/portal/view/" + id, false);
-        if (page.uri().getPath() != null && page.uri().getPath().contains("/rip/")) throw new PlatformException(NAME, item + " was removed from Newgrounds");
+        if (page.uri().getPath() != null && page.uri().getPath().contains("/rip/")) throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_NEWGROUNDS_MOVIE_REMOVED) + "Failed to resolve " + item + ", it was removed from Newgrounds");
         final boolean walled = page.adultWall(item);
-        if (!walled && page.status() != 200) throw new PlatformException(NAME, "HTTP " + page.status() + " for " + item);
+        if (!walled && page.status() != 200) throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_NEWGROUNDS_MOVIE_PAGE_STATUS) + "Failed to resolve " + item + " due to HTTP " + page.status());
         final Fetched video = this.fetch(ORIGIN + "/portal/video/" + id, true);
-        if (video.status() != 200) throw new PlatformException(NAME, "HTTP " + video.status() + " for the files of " + item);
+        if (video.status() != 200) throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_NEWGROUNDS_MOVIE_FILES_STATUS) + "Failed to resolve the files of " + item + " due to HTTP " + video.status());
         return new Resolution(null, parseMovie(walled ? "" : page.body(), video.body(), id));
     }
 
@@ -143,7 +144,7 @@ public final class NewgroundsPlatform implements Platform {
         // THE SITE SERVES THE PLAYER JSON AS text/html
         final JsonObject video = JSONTool.parse(json, JsonObject.class);
         final JsonObject error = obj(video, "error");
-        if (error != null) throw new PlatformException(NAME, item + ": " + str(error, "msg"));
+        if (error != null) throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_NEWGROUNDS_MOVIE_SITE_ERROR) + "Failed to resolve " + item + " due to site error: " + str(error, "msg"));
 
         // ONE FILE PER TIER ("1080p", "720p", "360p"); THE TIER NAME IS THE ONLY SIZE THE SITE TELLS
         final JsonObject sources = obj(video, "sources");
@@ -160,7 +161,7 @@ public final class NewgroundsPlatform implements Platform {
                 break;
             }
         }
-        if (qualities.isEmpty()) throw new PlatformException(NAME, item + " has no video file; Flash-only submissions cannot play");
+        if (qualities.isEmpty()) throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_NEWGROUNDS_MOVIE_NO_VIDEO) + "Failed to resolve " + item + " due to no video file, Flash-only submissions cannot play");
 
         String title = meta(html, "og:title");
         if (title == null) title = str(video, "title");
@@ -172,9 +173,9 @@ public final class NewgroundsPlatform implements Platform {
     private Resolution audio(final String id) throws IOException {
         final String item = "Audio " + id;
         final Fetched page = this.fetch(ORIGIN + "/audio/listen/" + id, false);
-        if (page.uri().getPath() != null && page.uri().getPath().contains("/rip/")) throw new PlatformException(NAME, item + " was removed from Newgrounds");
-        if (page.adultWall(item)) throw new PlatformException(NAME, item + " needs a Newgrounds login");
-        if (page.status() != 200) throw new PlatformException(NAME, "HTTP " + page.status() + " for " + item);
+        if (page.uri().getPath() != null && page.uri().getPath().contains("/rip/")) throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_NEWGROUNDS_AUDIO_REMOVED) + "Failed to resolve " + item + ", it was removed from Newgrounds");
+        if (page.adultWall(item)) throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_NEWGROUNDS_AUDIO_LOGIN) + "Failed to resolve " + item + " due to required Newgrounds login");
+        if (page.status() != 200) throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_NEWGROUNDS_AUDIO_PAGE_STATUS) + "Failed to resolve " + item + " due to HTTP " + page.status());
         return new Resolution(null, parseAudio(page.body(), id));
     }
 
@@ -184,7 +185,7 @@ public final class NewgroundsPlatform implements Platform {
         // THE PLAYER IS BOOTED INLINE WITH ITS FILE AS A JSON STRING LITERAL
         final Matcher player = AUDIO_FILE.matcher(html);
         final URI file = player.find() ? DataTool.uri(JSONTool.parse(player.group(1), String.class)) : null;
-        if (file == null) throw new PlatformException(NAME, item + " exposes no audio file");
+        if (file == null) throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_NEWGROUNDS_AUDIO_NO_FILE) + "Failed to resolve " + item + " due to no audio file");
         final Matcher duration = AUDIO_DURATION.matcher(html);
         final long durationMs = duration.find() ? DataTool.parseLong(duration.group(1), 0L) * 1_000L : 0L;
         if (durationMs == 0L) LOGGER.warn(IT, "{} reports no duration", item);
@@ -199,8 +200,8 @@ public final class NewgroundsPlatform implements Platform {
     private Resolution art(final String user, final String slug) throws IOException {
         final String item = "Art " + user + "/" + slug;
         final Fetched page = this.fetch(ORIGIN + "/art/view/" + user + "/" + slug, false);
-        if (page.adultWall(item)) throw new PlatformException(NAME, item + " needs a Newgrounds login");
-        if (page.status() != 200) throw new PlatformException(NAME, "HTTP " + page.status() + " for " + item);
+        if (page.adultWall(item)) throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_NEWGROUNDS_ART_LOGIN) + "Failed to resolve " + item + " due to required Newgrounds login");
+        if (page.status() != 200) throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_NEWGROUNDS_ART_PAGE_STATUS) + "Failed to resolve " + item + " due to HTTP " + page.status());
         return new Resolution(null, parseArt(page.body(), item));
     }
 
@@ -208,9 +209,9 @@ public final class NewgroundsPlatform implements Platform {
     static List<Source> parseArt(final String html, final String item) throws PlatformException {
         gate(html, item);
         final int at = html.indexOf(IMAGE_DATA);
-        if (at < 0) throw new PlatformException(NAME, item + " exposes no images");
+        if (at < 0) throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_NEWGROUNDS_ART_NO_DATA) + "Failed to resolve " + item + " due to no images");
         final JsonElement data = JsonParser.parseReader(new JsonReader(new StringReader(html.substring(at + IMAGE_DATA.length()))));
-        if (!data.isJsonArray()) throw new PlatformException(NAME, item + " exposes no images");
+        if (!data.isJsonArray()) throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_NEWGROUNDS_ART_NOT_ARRAY) + "Failed to resolve " + item + " due to no images");
 
         final String title = meta(html, "og:title");
         final Matcher author = AUTHOR.matcher(html);
@@ -228,7 +229,7 @@ public final class NewgroundsPlatform implements Platform {
             sources.add(new Source(MediaType.IMAGE, preview, metadata, HttpHeaders.defaults(full),
                     List.of(new Quality(full, Math.max(0, intOr(image, "width", 0)), Math.max(0, intOr(image, "height", 0)))), null, null));
         }
-        if (sources.isEmpty()) throw new PlatformException(NAME, item + " exposes no images");
+        if (sources.isEmpty()) throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_NEWGROUNDS_ART_NO_SOURCES) + "Failed to resolve " + item + " due to no images");
         LOGGER.info(IT, "Resolved {} '{}' with {} image(s)", item, title, sources.size());
         return sources;
     }
@@ -243,7 +244,7 @@ public final class NewgroundsPlatform implements Platform {
         if (!rating.find()) return;
         final char level = rating.group(1).charAt(0);
         if ((level == 'm' || level == 'a') && !WaterMediaConfig.platforms.allowMatureContent)
-            throw new MatureContentException(NAME, item + " is rated " + (level == 'a' ? "Adult" : "Mature"));
+            throw new MatureContentException(NAME, DataTool.errCode(WaterMedia.ERR_NEWGROUNDS_RATING_MATURE) + "Failed to resolve " + item + " due to rating " + (level == 'a' ? "Adult" : "Mature"));
     }
 
     // THE DECODED content OF AN OPEN GRAPH META TAG, OR NULL
@@ -300,7 +301,7 @@ public final class NewgroundsPlatform implements Platform {
                 req.send();
                 final String body = req.text();
                 if (!body.contains(GUARD_TITLE)) return new Fetched(req.uri(), req.statusCode(), body);
-                if (attempt > 0) throw new PlatformException(NAME, "NG Guard still blocks " + uri + " after a solved puzzle");
+                if (attempt > 0) throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_NEWGROUNDS_GUARD_STILL_BLOCKS) + "Failed to resolve " + uri + ", NG Guard still blocks it after a solved puzzle");
                 LOGGER.debug(IT, "NG Guard interposed on {}", uri);
             }
             this.clearGuard(seenAt);
@@ -321,10 +322,10 @@ public final class NewgroundsPlatform implements Platform {
             final int bits = intOr(challenge, "bits", -1);
             final String payload = str(challenge, "payload");
             final String sig = str(challenge, "sig");
-            if (bits < 0 || payload == null || sig == null) throw new PlatformException(NAME, "NG Guard sent an unreadable puzzle");
+            if (bits < 0 || payload == null || sig == null) throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_NEWGROUNDS_GUARD_UNREADABLE) + "Failed to read the NG Guard puzzle due to unreadable data");
             final JsonObject params = obj(challenge, "params");
             final boolean argon = "argon2id".equals(algo);
-            if (argon && params == null) throw new PlatformException(NAME, "NG Guard sent an argon2id puzzle without parameters");
+            if (argon && params == null) throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_NEWGROUNDS_GUARD_NO_PARAMS) + "Failed to read the NG Guard puzzle due to an argon2id puzzle without parameters");
             LOGGER.debug(IT, "NG Guard puzzle: {} with {} leading zero bits", algo, bits);
 
             // THE GUARD HASHES WITH AN ALL-ZERO 8-BYTE SALT
@@ -348,7 +349,7 @@ public final class NewgroundsPlatform implements Platform {
             try (verify) {
                 verify.send();
                 final JsonObject result = verify.statusCode() == 200 ? verify.json(JsonObject.class) : null;
-                if (result == null || !bool(result, "ok")) throw new PlatformException(NAME, "NG Guard rejected the puzzle answer with HTTP " + verify.statusCode());
+                if (result == null || !bool(result, "ok")) throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_NEWGROUNDS_GUARD_REJECTED) + "Failed to verify the NG Guard puzzle answer due to rejection with HTTP " + verify.statusCode());
             }
             this.clearedAt = System.nanoTime();
             LOGGER.info(IT, "NG Guard cleared with nonce {} in {} ms", nonce, solveMs);
@@ -362,15 +363,15 @@ public final class NewgroundsPlatform implements Platform {
         try {
             sha256 = argon == null ? MessageDigest.getInstance("SHA-256") : null;
         } catch (final NoSuchAlgorithmException e) {
-            throw new IllegalStateException("SHA-256 is unavailable", e);
+            throw new IllegalStateException(DataTool.errCode(WaterMedia.ERR_NEWGROUNDS_SHA256_MISSING) + "Failed to solve the NG Guard puzzle due to unavailable SHA-256", e);
         }
         final byte[] password = new byte[payload.length + 1 + 20];
         System.arraycopy(payload, 0, password, 0, payload.length);
         password[payload.length] = ':';
         final long deadline = System.nanoTime() + SOLVE_BUDGET_MS * 1_000_000L;
         for (long nonce = 0; ; nonce++) {
-            if ((nonce & 0xFF) == 0 && Thread.currentThread().isInterrupted()) throw new PlatformException(NAME, "Interrupted while solving the NG Guard puzzle");
-            if ((nonce & 0xFF) == 0 && System.nanoTime() > deadline) throw new PlatformException(NAME, "NG Guard puzzle unsolved after " + SOLVE_BUDGET_MS / 1_000L + " s");
+            if ((nonce & 0xFF) == 0 && Thread.currentThread().isInterrupted()) throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_NEWGROUNDS_GUARD_INTERRUPTED) + "Failed to solve the NG Guard puzzle due to an interruption");
+            if ((nonce & 0xFF) == 0 && System.nanoTime() > deadline) throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_NEWGROUNDS_GUARD_TIMEOUT) + "Failed to solve the NG Guard puzzle after " + SOLVE_BUDGET_MS / 1_000L + " s");
             final byte[] digits = Long.toString(nonce).getBytes(StandardCharsets.US_ASCII);
             System.arraycopy(digits, 0, password, payload.length + 1, digits.length);
             final int length = payload.length + 1 + digits.length;
@@ -448,7 +449,7 @@ public final class NewgroundsPlatform implements Platform {
         // WHETHER THIS IS THE "LOGIN REQUIRED" WALL GUESTS GET ON ADULT ITEMS, A MATURE BLOCK WHILE THE GATE IS OFF
         boolean adultWall(final String item) throws MatureContentException {
             if (this.status != 403 || !this.body.contains(LOGIN_TITLE)) return false;
-            if (!WaterMediaConfig.platforms.allowMatureContent) throw new MatureContentException(NAME, item + " is rated Adult");
+            if (!WaterMediaConfig.platforms.allowMatureContent) throw new MatureContentException(NAME, DataTool.errCode(WaterMedia.ERR_NEWGROUNDS_RATING_ADULT) + "Failed to resolve " + item + " due to rating Adult");
             return true;
         }
     }
@@ -469,7 +470,7 @@ public final class NewgroundsPlatform implements Platform {
 
         Argon2id(final int memoryKiB, final int passes, final int lanes, final int tagLength, final byte[] salt) throws PlatformException {
             if (lanes < 1 || lanes > MAX_LANES || passes < 1 || tagLength < 4 || memoryKiB < 8 * lanes || memoryKiB > MAX_MEMORY_KIB)
-                throw new PlatformException(NAME, "NG Guard asked for an unreasonable argon2id puzzle (m=" + memoryKiB + ", t=" + passes + ", p=" + lanes + ", tag=" + tagLength + ")");
+                throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_NEWGROUNDS_GUARD_ARGON_LIMITS) + "Failed to solve the NG Guard puzzle due to an unreasonable argon2id request (m=" + memoryKiB + ", t=" + passes + ", p=" + lanes + ", tag=" + tagLength + ")");
             this.memoryKiB = memoryKiB;
             this.passes = passes;
             this.lanes = lanes;

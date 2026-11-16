@@ -1,6 +1,8 @@
 package org.watermedia.api.codecs.common.png;
 
+import org.watermedia.WaterMedia;
 import org.watermedia.api.codecs.CodecException;
+import org.watermedia.tools.DataTool;
 
 import java.io.ByteArrayOutputStream;
 import java.util.zip.DataFormatException;
@@ -27,20 +29,20 @@ public final class Zlib {
             while (true) {
                 final int length = inflater.inflate(buffer);
                 if (length > 0) {
-                    if (output.size() + length > maxBytes) throw new CodecException(what + " exceeds " + maxBytes + " bytes decompressed");
+                    if (output.size() + length > maxBytes) throw new CodecException(DataTool.errCode(WaterMedia.ERR_PNG_ZLIB_SIZE) + "Failed to inflate " + what + " due to excessive size: more than " + maxBytes + " bytes decompressed");
                     output.write(buffer, 0, length);
                     continue;
                 }
                 if (inflater.finished()) break;
-                if (inflater.needsDictionary()) throw new CodecException(what + " uses an unsupported compression dictionary");
+                if (inflater.needsDictionary()) throw new CodecException(DataTool.errCode(WaterMedia.ERR_PNG_ZLIB_DICTIONARY) + "Failed to inflate " + what + " due to unsupported compression dictionary");
                 if (inflater.needsInput()) {
                     if (tolerateTruncated) break;
-                    throw new CodecException("Incomplete compressed " + what);
+                    throw new CodecException(DataTool.errCode(WaterMedia.ERR_PNG_ZLIB_INCOMPLETE) + "Failed to inflate " + what + " due to incomplete compressed data");
                 }
-                throw new CodecException("Invalid compressed " + what + " stream");
+                throw new CodecException(DataTool.errCode(WaterMedia.ERR_PNG_ZLIB_STREAM) + "Failed to inflate " + what + " due to invalid compressed stream");
             }
         } catch (final DataFormatException e) {
-            throw new CodecException("Invalid compressed " + what + ": " + e.getMessage(), e);
+            throw new CodecException(DataTool.errCode(WaterMedia.ERR_PNG_ZLIB_DATA) + "Failed to inflate " + what + " due to invalid compressed data: " + e.getMessage(), e);
         } finally {
             inflater.end();
         }

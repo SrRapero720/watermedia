@@ -4,8 +4,10 @@ import me.srrapero720.waterconfig.ConfigGroup;
 import me.srrapero720.waterconfig.ConfigSpec;
 import me.srrapero720.waterconfig.api.Control;
 import me.srrapero720.waterconfig.api.IConfigField;
+import org.watermedia.WaterMedia;
 import org.watermedia.api.util.MathUtil;
 import org.watermedia.bootstrap.app.ui.AppTheme;
+import org.watermedia.tools.DataTool;
 
 import java.awt.Color;
 import java.lang.reflect.Method;
@@ -501,7 +503,7 @@ final class SettingsModel {
             if (this.isBoolean()) {
                 if ("on".equalsIgnoreCase(value) || "true".equalsIgnoreCase(value)) return Boolean.TRUE;
                 if ("off".equalsIgnoreCase(value) || "false".equalsIgnoreCase(value)) return Boolean.FALSE;
-                throw new IllegalArgumentException("Expected on/off or true/false");
+                throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_APP_SETTINGS_BOOLEAN) + "Failed to parse the setting due to invalid boolean, expected on/off or true/false");
             }
             if (this.valueType.isEnum()) {
                 final Object[] constants = this.valueType.getEnumConstants();
@@ -510,12 +512,12 @@ final class SettingsModel {
                         if (((Enum<?>) constant).name().equalsIgnoreCase(value)) return constant;
                     }
                 }
-                throw new IllegalArgumentException("Unknown enum value: " + value);
+                throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_APP_SETTINGS_ENUM) + "Failed to parse the setting due to unknown enum value: " + value);
             }
             if (this.isNumber()) return this.clampNumber(parseNumber(value, this.valueType));
             if (Path.class.isAssignableFrom(this.valueType)) return Path.of(value);
             if (this.valueType == Character.class || this.valueType == char.class) {
-                if (value.length() != 1) throw new IllegalArgumentException("Expected one character");
+                if (value.length() != 1) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_APP_SETTINGS_CHAR_LENGTH) + "Failed to parse the setting due to invalid length, expected one character");
                 return value.charAt(0);
             }
             return raw == null ? "" : raw;
@@ -561,7 +563,7 @@ final class SettingsModel {
             if (this.valueType == Byte.class || this.valueType == byte.class) return (byte) Math.round(value);
             if (this.valueType == Float.class || this.valueType == float.class) return (float) value;
             if (this.valueType == Double.class || this.valueType == double.class) return value;
-            throw new IllegalArgumentException("Unsupported number type: " + this.valueType.getSimpleName());
+            throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_APP_SETTINGS_NUMBER_CONVERT) + "Failed to convert the setting due to unsupported number type: " + this.valueType.getSimpleName());
         }
 
         private void setValue(final Object next) {
@@ -621,7 +623,7 @@ final class SettingsModel {
             if (type == Byte.class || type == byte.class) return Byte.parseByte(raw);
             if (type == Float.class || type == float.class) return Float.parseFloat(raw);
             if (type == Double.class || type == double.class) return Double.parseDouble(raw);
-            throw new IllegalArgumentException("Unsupported number type: " + type.getSimpleName());
+            throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_APP_SETTINGS_NUMBER_PARSE) + "Failed to parse the setting due to unsupported number type: " + type.getSimpleName());
         }
 
         private static Double numberLimit(final IConfigField<?, ?> field, final String methodName) {

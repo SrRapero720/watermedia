@@ -5,6 +5,7 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import org.apache.logging.log4j.Marker;
 import org.apache.logging.log4j.MarkerManager;
+import org.watermedia.WaterMedia;
 import org.watermedia.api.platform.*;
 import org.watermedia.api.util.MediaType;
 import org.watermedia.api.util.Metadata;
@@ -79,13 +80,13 @@ public final class TikTokPlatform implements Platform {
                 videoData = this.extractVideoData(page.html(), videoId);
             }
 
-            if (videoData == null) throw new PlatformException(NAME, "No video data found in page for video " + videoId);
+            if (videoData == null) throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_TIKTOK_NO_VIDEO_DATA) + "Failed to resolve video " + videoId + " due to no video data in page");
 
             return this.buildResult(videoData, videoId, cookies);
         } catch (final PlatformException e) {
             throw e;
         } catch (final IOException | RuntimeException e) {
-            throw new PlatformException(NAME, "Failed to resolve " + link, e);
+            throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_TIKTOK_RESOLVE) + "Failed to resolve " + link, e);
         }
     }
 
@@ -106,8 +107,8 @@ public final class TikTokPlatform implements Platform {
         if (videoDetail == null) return null;
 
         final int status = intOr(videoDetail, "statusCode", 0);
-        if (status == 10_216 || status == 10_222) throw new PlatformException(NAME, "Video " + videoId + " is private or requires login");
-        if (status == 10_204) throw new PlatformException(NAME, "IP address is blocked from accessing video " + videoId);
+        if (status == 10_216 || status == 10_222) throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_TIKTOK_PRIVATE) + "Failed to read video " + videoId + " due to private video or required login");
+        if (status == 10_204) throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_TIKTOK_IP_BLOCKED) + "Failed to read video " + videoId + " due to blocked IP address");
         if (status != 0) LOGGER.warn(IT, "TikTok video {} returned status code {}", videoId, status);
 
         return obj(videoDetail, "itemInfo", "itemStruct");
@@ -115,7 +116,7 @@ public final class TikTokPlatform implements Platform {
 
     private Resolution buildResult(final JsonObject awemeDetail, final String videoId, final String cookies) throws PlatformException {
         final JsonObject video = obj(awemeDetail, "video");
-        if (video == null) throw new PlatformException(NAME, "No video object found for video " + videoId);
+        if (video == null) throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_TIKTOK_NO_VIDEO_OBJECT) + "Failed to resolve video " + videoId + " due to no video object");
 
         final String desc = str(awemeDetail, "desc");
         final String title = (desc != null && !desc.isEmpty()) ? desc : "TikTok video #" + videoId;
@@ -139,7 +140,7 @@ public final class TikTokPlatform implements Platform {
             URI fallback = extractAddrUri(video, "playAddr");
             if (fallback == null) fallback = extractAddrUri(video, "downloadAddr");
             if (fallback == null)
-                throw new PlatformException(NAME, "Video '" + videoId + "' exposed no playable URLs (bitrateInfo, playAddr, and downloadAddr all empty)");
+                throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_TIKTOK_NO_PLAY_URLS) + "Failed to resolve video '" + videoId + "' due to no playable URLs (bitrateInfo, playAddr, and downloadAddr all empty)");
             // NO RELIABLE DIMENSIONS ON THIS FALLBACK, FFMediaPlayer PROBES AND RE-BUCKETS IT
             LOGGER.debug(IT, "TikTok video '{}' had no usable bitrateInfo, falling back to {}", videoId, fallback);
             variants.add(new Quality(fallback, 0, 0));
@@ -204,7 +205,7 @@ public final class TikTokPlatform implements Platform {
 
         req.send();
         try (req) {
-            if (req.statusCode() != 200) throw new PlatformException(NAME, "Page request for " + uri + " returned HTTP " + req.statusCode());
+            if (req.statusCode() != 200) throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_TIKTOK_PAGE_STATUS) + "Failed to request the page " + uri + " due to HTTP " + req.statusCode());
             final String html = req.text();
 
             // THE name=value PAIRS OF EVERY Set-Cookie HEADER; null WHEN THE RESPONSE SET NONE
@@ -222,7 +223,7 @@ public final class TikTokPlatform implements Platform {
     // WAF CHALLENGE SOLVER (PORTED FROM yt-dlp _solve_challenge_and_set_cookies)
     private static String solveChallenge(final String html) throws PlatformException {
         final String csData = elementClass(html, "cs");
-        if (csData == null || csData.isEmpty()) throw new PlatformException(NAME, "Unable to extract WAF challenge data");
+        if (csData == null || csData.isEmpty()) throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_TIKTOK_WAF_EXTRACT) + "Failed to extract the WAF challenge data");
 
         // THE CHALLENGE DATA MAY CARRY WRONG OR NO BASE64 PADDING, SO THE PADDING IS REBUILT BEFORE DECODING
         final String unpadded = csData.replaceAll("=+$", "");
@@ -231,7 +232,7 @@ public final class TikTokPlatform implements Platform {
         final JsonObject v = obj(challengeData, "v");
         final String a = str(v, "a");
         final String c = str(v, "c");
-        if (a == null || c == null) throw new PlatformException(NAME, "WAF challenge data carries no seed or digest");
+        if (a == null || c == null) throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_TIKTOK_WAF_NO_SEED) + "Failed to read the WAF challenge data due to no seed or digest");
         final byte[] seed = Base64.getDecoder().decode(a);
         final byte[] expectedDigest = Base64.getDecoder().decode(c);
 
@@ -241,7 +242,7 @@ public final class TikTokPlatform implements Platform {
             baseDigest.update(seed);
             for (int i = 0; i <= CHALLENGE_ATTEMPTS; i++) {
                 if ((i & CHALLENGE_CHECK_MASK) == 0 && Thread.currentThread().isInterrupted())
-                    throw new PlatformException(NAME, "Interrupted while solving the WAF challenge");
+                    throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_TIKTOK_WAF_INTERRUPTED) + "Failed to solve the WAF challenge due to interruption");
                 final MessageDigest testDigest = (MessageDigest) baseDigest.clone();
                 testDigest.update(String.valueOf(i).getBytes(StandardCharsets.UTF_8));
                 if (MessageDigest.isEqual(testDigest.digest(), expectedDigest)) {
@@ -253,10 +254,10 @@ public final class TikTokPlatform implements Platform {
             }
         } catch (final NoSuchAlgorithmException | CloneNotSupportedException e) {
             // SHA-256 IS MANDATED BY THE JVM SPEC
-            throw new IllegalStateException("SHA-256 is unavailable", e);
+            throw new IllegalStateException(DataTool.errCode(WaterMedia.ERR_TIKTOK_WAF_NO_SHA256) + "Failed to solve the WAF challenge due to unavailable SHA-256", e);
         }
 
-        if (!solved) throw new PlatformException(NAME, "Unable to solve WAF challenge");
+        if (!solved) throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_TIKTOK_WAF_UNSOLVED) + "Failed to solve the WAF challenge");
 
         final String cookieValue = Base64.getEncoder().encodeToString(challengeData.toString().getBytes(StandardCharsets.UTF_8));
         String cookieName = elementClass(html, "wci");

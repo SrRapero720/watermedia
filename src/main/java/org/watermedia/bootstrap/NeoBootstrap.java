@@ -4,6 +4,7 @@ import net.neoforged.api.distmarker.Dist;
 import net.neoforged.fml.common.Mod;
 import net.neoforged.fml.loading.FMLLoader;
 import org.watermedia.WaterMedia;
+import org.watermedia.tools.DataTool;
 
 @Mod(WaterMedia.ID)
 public class NeoBootstrap {
@@ -14,7 +15,7 @@ public class NeoBootstrap {
         try {
             WaterMedia.start(NAME, null, null, clientSide());
         } catch (final Exception e) {
-            throw new RuntimeException("Failed to start " + WaterMedia.NAME + " for " + NAME + ": " + e.getMessage(), e);
+            throw new RuntimeException(DataTool.errCode(WaterMedia.ERR_NEOFORGE_START) + "Failed to start " + WaterMedia.NAME + " for " + NAME + ": " + e.getMessage(), e);
         }
     }
 
@@ -27,7 +28,7 @@ public class NeoBootstrap {
             try {
                 return ((Dist) FMLLoader.class.getMethod("getDist").invoke(null)).isClient();
             } catch (final ReflectiveOperationException ex) {
-                throw new IllegalStateException("Cannot resolve NeoForge dist", ex);
+                throw new IllegalStateException(DataTool.errCode(WaterMedia.ERR_NEOFORGE_DIST) + "Failed to resolve the NeoForge dist", ex);
             }
         }
     }

@@ -1,6 +1,8 @@
 package org.watermedia.api.codecs.common.png;
 
+import org.watermedia.WaterMedia;
 import org.watermedia.api.codecs.CodecException;
+import org.watermedia.tools.DataTool;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -23,12 +25,12 @@ public record HIST(int[] frequencies) implements IChunk {
 
     /** Converts a generic chunk to hIST for a palette of the given size. */
     public static HIST convert(final PngChunk chunk, final int paletteSize) throws CodecException {
-        if (chunk.type() != SIGNATURE) throw new IllegalArgumentException("Invalid chunk type for hIST: 0x" + Integer.toHexString(chunk.type()));
+        if (chunk.type() != SIGNATURE) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_PNG_HIST_TYPE) + "Failed to read hIST due to invalid chunk type: 0x" + Integer.toHexString(chunk.type()));
 
         final byte[] data = chunk.data();
-        if (data.length > MAX_LENGTH) throw new CodecException("hIST holds more than 256 entries: " + (data.length / 2));
+        if (data.length > MAX_LENGTH) throw new CodecException(DataTool.errCode(WaterMedia.ERR_PNG_HIST_ENTRIES) + "Failed to read hIST due to more than 256 entries: " + (data.length / 2));
         if (data.length != paletteSize * 2)
-            throw new CodecException("hIST data must have " + paletteSize + " entries (" + (paletteSize * 2) + " bytes), got " + data.length + " bytes");
+            throw new CodecException(DataTool.errCode(WaterMedia.ERR_PNG_HIST_LENGTH) + "Failed to read hIST due to invalid length: " + data.length + " bytes (expected " + (paletteSize * 2) + " for " + paletteSize + " entries)");
 
         final ByteBuffer buffer = ByteBuffer.wrap(data).order(ByteOrder.BIG_ENDIAN);
         final int[] frequencies = new int[paletteSize];

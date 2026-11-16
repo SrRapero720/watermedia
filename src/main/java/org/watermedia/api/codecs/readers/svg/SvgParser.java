@@ -1,6 +1,8 @@
 package org.watermedia.api.codecs.readers.svg;
 
+import org.watermedia.WaterMedia;
 import org.watermedia.api.codecs.CodecException;
+import org.watermedia.tools.DataTool;
 
 import javax.xml.stream.XMLInputFactory;
 import javax.xml.stream.XMLResolver;
@@ -68,7 +70,7 @@ final class SvgParser {
                 final int ev = r.next();
                 if (ev == XMLStreamConstants.START_ELEMENT) {
                     // BUDGETS CHECKED BEFORE ANY ALLOCATION: THE WHOLE POINT IS TO NOT RETAIN THE NODE
-                    if (++elements > MAX_ELEMENTS) throw new CodecException("SVG element count exceeds " + MAX_ELEMENTS);
+                    if (++elements > MAX_ELEMENTS) throw new CodecException(DataTool.errCode(WaterMedia.ERR_SVG_PARSER_ELEMENTS) + "Failed to parse the SVG document due to too many elements (max " + MAX_ELEMENTS + ")");
                     final Map<String, String> attrs = new HashMap<>();
                     final int count = r.getAttributeCount();
                     for (int i = 0; i < count; i++) {
@@ -77,7 +79,7 @@ final class SvgParser {
                         final String value = r.getAttributeValue(i);
                         chars += value.length();
                         if (value.length() > MAX_ATTR_CHARS || chars > MAX_DOC_CHARS)
-                            throw new CodecException("SVG attribute data exceeds the decoder budget");
+                            throw new CodecException(DataTool.errCode(WaterMedia.ERR_SVG_PARSER_ATTRIBUTE_BUDGET) + "Failed to parse the SVG document due to attribute data exceeding the decoder budget");
                         attrs.put(r.getAttributeLocalName(i), value);
                     }
                     // THE INLINE style="prop: value; ..." DECLARATIONS OVERLAY THE PRESENTATION ATTRIBUTES
@@ -112,7 +114,7 @@ final class SvgParser {
         } catch (final XMLStreamException e) {
             // EVERY StAX FAILURE FUNNELS HERE, INCLUDING EACH JDK ENTITY-LIMIT TRIP. THE JDK MESSAGE IS
             // LOCALE-DEPENDENT, SO IT IS ONLY EVER CARRIED ALONG, NEVER INSPECTED
-            throw new CodecException("Malformed SVG document: " + e.getMessage(), e);
+            throw new CodecException(DataTool.errCode(WaterMedia.ERR_SVG_PARSER_MALFORMED_XML) + "Failed to parse the SVG document due to malformed XML: " + e.getMessage(), e);
         } finally {
             if (r != null) {
                 try { r.close(); }
@@ -270,7 +272,7 @@ final class SvgParser {
     // INFINITY, WHICH MAKES FLATNESS TESTS FALSE-BY-NaN (FULL-DEPTH SUBDIVISION) AND SCANLINE CROSSINGS NaN.
     // THE DOCUMENT IS REJECTED INSTEAD OF RENDERED WRONG
     private static double finite(final double v) throws CodecException {
-        if (!Double.isFinite(v)) throw new CodecException("Non-finite number in SVG document");
+        if (!Double.isFinite(v)) throw new CodecException(DataTool.errCode(WaterMedia.ERR_SVG_PARSER_NON_FINITE) + "Failed to parse the SVG document due to non-finite number");
         return v;
     }
 }

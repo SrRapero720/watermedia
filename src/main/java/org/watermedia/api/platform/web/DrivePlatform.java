@@ -2,6 +2,7 @@ package org.watermedia.api.platform.web;
 
 import org.apache.logging.log4j.Marker;
 import org.apache.logging.log4j.MarkerManager;
+import org.watermedia.WaterMedia;
 import org.watermedia.api.platform.*;
 import org.watermedia.api.util.MediaType;
 import org.watermedia.api.util.HttpHeaders;
@@ -74,7 +75,7 @@ public final class DrivePlatform implements Platform {
         } catch (final PlatformException e) {
             throw e;
         } catch (final IOException | RuntimeException e) {
-            throw new PlatformException(NAME, "Failed to resolve " + uri, e);
+            throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_DRIVE_RESOLVE) + "Failed to resolve " + uri, e);
         }
     }
 
@@ -86,7 +87,7 @@ public final class DrivePlatform implements Platform {
         String url = String.format(DOWNLOAD_URL, fileId);
 
         try (final NetRequest req = new NetRequest(url).send()) {
-            if (req.statusCode() != 200) throw new PlatformException(NAME, "Download for fileId '" + fileId + "' returned HTTP " + req.statusCode() + " (" + original + ")");
+            if (req.statusCode() != 200) throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_DRIVE_DOWNLOAD_STATUS) + "Failed to download fileId '" + fileId + "' due to HTTP " + req.statusCode() + " (" + original + ")");
 
             if (req.contentType() != null && req.contentType().startsWith("text/html")) {
                 // LARGE/UNSCANNED FILES RETURN AN HTML "VIRUS SCAN" CONFIRMATION FORM INSTEAD OF THE BYTES;
@@ -99,7 +100,7 @@ public final class DrivePlatform implements Platform {
 
                 final String uuid = form.get("uuid");
                 if (uuid == null)
-                    throw new PlatformException(NAME, "Confirmation form has no 'uuid' field for fileId '" + fileId + "' (file may be private or quota-limited): " + original);
+                    throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_DRIVE_FORM_NO_UUID) + "Failed to read the confirmation form for fileId '" + fileId + "' due to no 'uuid' field (file may be private or quota-limited): " + original);
 
                 final StringBuilder sb = new StringBuilder(url)
                         .append("&uuid=").append(uuid)
@@ -114,7 +115,7 @@ public final class DrivePlatform implements Platform {
                 final URI confirmed = URI.create(url);
                 try (final NetRequest confirm = new NetRequest(confirmed).send()) {
                     if (confirm.statusCode() != 200)
-                        throw new PlatformException(NAME, "Confirmed download for fileId '" + fileId + "' returned HTTP " + confirm.statusCode() + " (" + original + ")");
+                        throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_DRIVE_CONFIRM_STATUS) + "Failed to download the confirmed fileId '" + fileId + "' due to HTTP " + confirm.statusCode() + " (" + original + ")");
                     final MediaType type = MediaType.of(confirm.contentType());
                     LOGGER.debug(IT, "Google Drive resolved fileId '{}' via confirmed download (content-type {})", fileId, confirm.contentType());
                     final var entry = new Source(type, null, null,

@@ -1,5 +1,6 @@
 package org.watermedia.api.codecs.readers;
 
+import org.watermedia.WaterMedia;
 import org.watermedia.api.codecs.CodecException;
 import org.watermedia.api.codecs.ImageData;
 import org.watermedia.api.codecs.ImageReader;
@@ -44,7 +45,7 @@ public final class NetpbmReader extends ImageReader {
     /** Parses the header that follows the {@code P<version>} magic; a version outside 1 to 7 is an {@link IllegalArgumentException}. */
     public NetpbmReader(final ByteBuffer data, final int version, final PixelFormat requestedFormat) throws IOException {
         super(data, requestedFormat);
-        if (version < 1 || version > 7) throw new IllegalArgumentException("Netpbm version must be 1 to 7, not " + version);
+        if (version < 1 || version > 7) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_NETPBM_VERSION) + "Failed to create the Netpbm reader due to invalid version, it must be 1 to 7: " + version);
         // RE-SYNTHESIZE "P<digit>" SO Header.read SEES THE WHOLE HEADER; readHeaderBytes CAPS THE BUFFERING
         this.header = Header.read(ByteBuffer.wrap(readHeaderBytes(this.data, version)));
         this.type = Type.values()[this.header.version() - 1];
@@ -52,7 +53,7 @@ public final class NetpbmReader extends ImageReader {
         // THE PIXEL BUDGET IS WHAT THE VERY NEXT STATEMENT RESERVES: A PER-AXIS CAP ALONE LETS A 15-BYTE
         // HEADER RESERVE 1 GiB OF DIRECT MEMORY BEFORE ONE RASTER BYTE IS READ
         if (!Limits.fits(this.header.width(), this.header.height()))
-            throw new CodecException("Netpbm dimensions too big: " + this.header.width() + "x" + this.header.height()
+            throw new CodecException(DataTool.errCode(WaterMedia.ERR_NETPBM_DIMENSIONS) + "Failed to read Netpbm due to oversized dimensions: " + this.header.width() + "x" + this.header.height()
                     + " (max " + Limits.MAX_DIM + " per axis, " + Limits.MAX_PIXELS + " pixels)");
         this.directOut = ByteBuffer.allocateDirect(this.header.width() * this.header.height() * 4).order(ByteOrder.LITTLE_ENDIAN);
         // SNAPSHOT THE RASTER START SO reset() CAN REPLAY WITHOUT RE-PARSING THE HEADER
@@ -179,7 +180,7 @@ public final class NetpbmReader extends ImageReader {
     private int raster(final long rowBytes) throws CodecException {
         final long need = rowBytes * this.header.height();
         if (need > this.data.remaining())
-            throw new CodecException("Truncated Netpbm raster: need " + need + " bytes, have " + this.data.remaining());
+            throw new CodecException(DataTool.errCode(WaterMedia.ERR_NETPBM_RASTER_TRUNCATED) + "Failed to read the Netpbm raster due to truncated data: need " + need + " bytes, have " + this.data.remaining());
         final int start = this.data.position();
         this.data.position(start + (int) need);
         return start;
@@ -200,21 +201,21 @@ public final class NetpbmReader extends ImageReader {
                 while (c >= 0 && c != '\n') c = readUnsignedOrEnd(this.data);
                 continue;
             }
-            if (c < 0) throw new CodecException("Truncated Netpbm plain raster");
+            if (c < 0) throw new CodecException(DataTool.errCode(WaterMedia.ERR_NETPBM_PLAIN_TRUNCATED) + "Failed to read the Netpbm plain raster due to truncated data");
             if (!whitespace(c)) break;
         }
         if (bit) {
-            if (c != '0' && c != '1') throw new CodecException("Invalid plain bitmap bit: " + (char) c);
+            if (c != '0' && c != '1') throw new CodecException(DataTool.errCode(WaterMedia.ERR_NETPBM_PLAIN_BIT) + "Failed to read the plain bitmap due to invalid bit: " + (char) c);
             return c - '0';
         }
         int value = 0;
         int digits = 0;
         while (c >= '0' && c <= '9') {
-            if (++digits > MAX_SAMPLE_DIGITS) throw new CodecException("Plain Netpbm sample too long");
+            if (++digits > MAX_SAMPLE_DIGITS) throw new CodecException(DataTool.errCode(WaterMedia.ERR_NETPBM_PLAIN_LONG) + "Failed to read the plain Netpbm sample due to excessive length");
             value = value * 10 + (c - '0');
             c = readUnsignedOrEnd(this.data);
         }
-        if (digits == 0) throw new CodecException("Invalid plain Netpbm sample: " + (char) c);
+        if (digits == 0) throw new CodecException(DataTool.errCode(WaterMedia.ERR_NETPBM_PLAIN_SAMPLE) + "Failed to read the plain Netpbm sample due to invalid character: " + (char) c);
         // THE TERMINATOR IS CONSUMED UNLESS IT OPENS A COMMENT, WHICH THE NEXT SAMPLE SKIPS WHOLE
         if (c == '#') this.data.position(this.data.position() - 1);
         return value;
@@ -249,8 +250,8 @@ public final class NetpbmReader extends ImageReader {
             int last = -1;
             while (true) {
                 final int b = readUnsignedOrEnd(in);
-                if (b < 0) throw new CodecException("Truncated PAM header");
-                if (out.size() >= maxHeader) throw new CodecException("Netpbm header exceeds " + maxHeader + " bytes");
+                if (b < 0) throw new CodecException(DataTool.errCode(WaterMedia.ERR_NETPBM_PAM_TRUNCATED) + "Failed to read the PAM header due to truncated data");
+                if (out.size() >= maxHeader) throw new CodecException(DataTool.errCode(WaterMedia.ERR_NETPBM_PAM_HEADER_SIZE) + "Failed to read the PAM header due to size over " + maxHeader + " bytes");
                 out.write(b);
                 if (endhdrSeen) {
                     if (b == '\n') return out.toByteArray();
@@ -277,8 +278,8 @@ public final class NetpbmReader extends ImageReader {
         boolean inToken = false;
         while (tokens < expectedTokens || inToken || inComment) {
             final int b = readUnsignedOrEnd(in);
-            if (b < 0) throw new CodecException("Truncated Netpbm header");
-            if (out.size() >= maxHeader) throw new CodecException("Netpbm header exceeds " + maxHeader + " bytes");
+            if (b < 0) throw new CodecException(DataTool.errCode(WaterMedia.ERR_NETPBM_HEADER_TRUNCATED) + "Failed to read the Netpbm header due to truncated data");
+            if (out.size() >= maxHeader) throw new CodecException(DataTool.errCode(WaterMedia.ERR_NETPBM_HEADER_SIZE) + "Failed to read the Netpbm header due to size over " + maxHeader + " bytes");
             out.write(b);
             if (inComment) {
                 if (b != '\n') continue;
@@ -376,7 +377,7 @@ public final class NetpbmReader extends ImageReader {
                             case "MAXVAL" -> maxVal = nextTokenInt(data);
                             case "TUPLTYPE" -> {
                                 // A REPEATED TUPLTYPE IS REJECTED: CONCATENATING THEM WOULD LET ONE FILE GROW AN UNBOUNDED STRING
-                                if (tuplTypeSeen) throw new CodecException("Duplicate PAM TUPLTYPE");
+                                if (tuplTypeSeen) throw new CodecException(DataTool.errCode(WaterMedia.ERR_NETPBM_TUPLTYPE_DUP) + "Failed to parse the PAM header due to duplicate TUPLTYPE");
                                 tuplTypeSeen = true;
                                 tuplType = readRestOfLine(data).trim();
                             }
@@ -385,23 +386,23 @@ public final class NetpbmReader extends ImageReader {
                             }
                         }
                     }
-                    default -> throw new CodecException("Unknown Netpbm version: " + version);
+                    default -> throw new CodecException(DataTool.errCode(WaterMedia.ERR_NETPBM_UNKNOWN_VERSION) + "Failed to parse the Netpbm header due to unknown version: " + version);
                 }
             }
 
-            if (width <= 0) throw new CodecException("Invalid WIDTH: " + width + ". Must be greater than 0.");
-            if (height <= 0) throw new CodecException("Invalid HEIGHT: " + height + ". Must be greater than 0.");
+            if (width <= 0) throw new CodecException(DataTool.errCode(WaterMedia.ERR_NETPBM_WIDTH) + "Failed to parse the Netpbm header due to invalid WIDTH: " + width + ", it must be greater than 0");
+            if (height <= 0) throw new CodecException(DataTool.errCode(WaterMedia.ERR_NETPBM_HEIGHT) + "Failed to parse the Netpbm header due to invalid HEIGHT: " + height + ", it must be greater than 0");
 
             // EVERYTHING BUT A BITMAP REQUIRES MAXVAL; A TRUNCATED HEADER LEAVES IT NULL AND NPEs THE DECODER UNDER A BLANKET CATCH
             if (version != 1 && version != 4 && maxVal == null)
-                throw new CodecException("Missing MAXVAL for P" + version);
+                throw new CodecException(DataTool.errCode(WaterMedia.ERR_NETPBM_MAXVAL_MISSING) + "Failed to parse the Netpbm header due to missing MAXVAL for P" + version);
             if (maxVal != null && (maxVal <= 0 || maxVal > 65_535))
-                throw new CodecException("Invalid MAXVAL: " + maxVal + ". Must be between 1 and 65535.");
+                throw new CodecException(DataTool.errCode(WaterMedia.ERR_NETPBM_MAXVAL) + "Failed to parse the Netpbm header due to invalid MAXVAL: " + maxVal + ", it must be between 1 and 65535");
 
             if (version == 7) {
                 // THE TUPLE TYPE BELOW BOUNDS DEPTH TO 1..4; A MISSING OR NON-POSITIVE ONE IS MALFORMED WHATEVER THE TYPE
                 if (depth == null || depth <= 0)
-                    throw new CodecException("Invalid DEPTH: " + depth + ". Must be greater than 0.");
+                    throw new CodecException(DataTool.errCode(WaterMedia.ERR_NETPBM_DEPTH) + "Failed to parse the PAM header due to invalid DEPTH: " + depth + ", it must be greater than 0");
 
                 // DEPTH SIZES EVERY ROW AND IS THE ONE RASTER DIMENSION THE PIXEL CAP DOES NOT COVER, SO IT IS BOUND TO
                 // THE TUPLE TYPE: "DEPTH 65535 / TUPLTYPE RGB" IS A 2 GiB ROW DESCRIBED BY 69 BYTES. ANY OTHER TUPLE TYPE
@@ -411,12 +412,12 @@ public final class NetpbmReader extends ImageReader {
                     case "BLACKANDWHITE_ALPHA", "GRAYSCALE_ALPHA" -> 2;
                     case "RGB" -> 3;
                     case "RGB_ALPHA" -> 4;
-                    default -> throw new UnsupportedFormatException("Unsupported PAM tuple type: " + (tuplType.isEmpty() ? "(none)" : tuplType));
+                    default -> throw new UnsupportedFormatException(DataTool.errCode(WaterMedia.ERR_NETPBM_TUPLTYPE_UNSUPPORTED) + "Failed to parse the PAM header due to unsupported tuple type: " + (tuplType.isEmpty() ? "(none)" : tuplType));
                 };
                 if (depth != expectedDepth)
-                    throw new CodecException("PAM DEPTH " + depth + " does not match TUPLTYPE " + tuplType);
+                    throw new CodecException(DataTool.errCode(WaterMedia.ERR_NETPBM_DEPTH_MISMATCH) + "Failed to parse the PAM header due to DEPTH not matching TUPLTYPE: " + depth + " vs " + tuplType);
                 if (tuplType.startsWith("BLACKANDWHITE") && maxVal != 1)
-                    throw new CodecException("PAM " + tuplType + " requires MAXVAL 1, not " + maxVal);
+                    throw new CodecException(DataTool.errCode(WaterMedia.ERR_NETPBM_BW_MAXVAL) + "Failed to parse the PAM header due to invalid MAXVAL for " + tuplType + ", it requires 1: " + maxVal);
             }
 
             return new Header(version, width, height, depth, maxVal, tuplType);
@@ -427,7 +428,7 @@ public final class NetpbmReader extends ImageReader {
         // ======================================================================
         private static int nextTokenInt(final ByteBuffer buf) throws CodecException {
             final String valueToken = nextToken(buf);
-            if (valueToken.isBlank()) throw new CodecException("Expected integer token but found blank");
+            if (valueToken.isBlank()) throw new CodecException(DataTool.errCode(WaterMedia.ERR_NETPBM_TOKEN_BLANK) + "Failed to parse the integer token due to blank value");
             return parseInt(valueToken);
         }
 
@@ -435,7 +436,7 @@ public final class NetpbmReader extends ImageReader {
             try {
                 return Integer.parseInt(string);
             } catch (final NumberFormatException e) {
-                throw new CodecException(e);
+                throw new CodecException(DataTool.errCode(WaterMedia.ERR_NETPBM_TOKEN_NUMBER) + "Failed to parse the integer token due to invalid number", e);
             }
         }
 
@@ -468,7 +469,7 @@ public final class NetpbmReader extends ImageReader {
             while (buf.hasRemaining()) {
                 final char c = (char) (buf.get() & 0xFF);
                 if (c == '\n') break;
-                if (sb.length() >= MAX_TUPLTYPE_CHARS) throw new CodecException("PAM TUPLTYPE too long");
+                if (sb.length() >= MAX_TUPLTYPE_CHARS) throw new CodecException(DataTool.errCode(WaterMedia.ERR_NETPBM_TUPLTYPE_LONG) + "Failed to read the PAM TUPLTYPE due to excessive length");
                 sb.append(c >= 0x20 && c < 0x7F ? c : ' ');
             }
             return sb.toString();

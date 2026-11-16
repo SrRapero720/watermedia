@@ -1,5 +1,6 @@
 package org.watermedia.api.codecs.readers.svg;
 
+import org.watermedia.WaterMedia;
 import org.watermedia.WaterMediaConfig;
 import org.watermedia.api.codecs.ImageData;
 import org.watermedia.api.codecs.ImageReader;
@@ -29,11 +30,11 @@ public final class SvgReader extends ImageReader {
         this.format = requestedFormat == PixelFormat.RGBA ? PixelFormat.RGBA : PixelFormat.BGRA;
 
         final SvgNode root = SvgParser.parse(new ByteBufferInputStream(this.data.duplicate()));
-        if (root == null || !root.tag().equals("svg")) throw new CodecException("Document root is not <svg>");
+        if (root == null || !root.tag().equals("svg")) throw new CodecException(DataTool.errCode(WaterMedia.ERR_SVG_READER_ROOT) + "Failed to read the SVG document due to root that is not <svg>");
         this.document = new SvgDocument(root);
 
         final double iw = this.document.intrinsicWidth(), ih = this.document.intrinsicHeight();
-        if (iw <= 0 || ih <= 0) throw new CodecException("SVG has no resolvable size");
+        if (iw <= 0 || ih <= 0) throw new CodecException(DataTool.errCode(WaterMedia.ERR_SVG_READER_SIZE) + "Failed to read the SVG document due to no resolvable size");
         // INTRINSIC SIZE CAPPED BY THE CONFIG, NEVER UPSCALED
         final double cap = Math.max(1, WaterMediaConfig.codecs.svg.maxSize);
         final double s = Math.min(Math.max(iw, ih), cap) / Math.max(iw, ih);

@@ -14,6 +14,7 @@ import org.bytedeco.javacpp.BytePointer;
 import org.bytedeco.javacpp.IntPointer;
 import org.bytedeco.javacpp.Pointer;
 import org.lwjgl.system.MemoryUtil;
+import org.watermedia.WaterMedia;
 import org.watermedia.WaterMediaConfig;
 import org.watermedia.api.codecs.decoders.FFDecoder;
 import org.watermedia.api.codecs.decoders.FrameQueue;
@@ -207,7 +208,7 @@ public final class FFMediaPlayer extends MediaPlayer {
         final Thread caller = Thread.currentThread();
         final FFDecoder decoder = this.decoder;
         if (caller == this.lifecycleThread || decoder != null && decoder.owns(caller))
-            throw new IllegalStateException("Release the player from its host thread, not from a playback callback");
+            throw new IllegalStateException(DataTool.errCode(WaterMedia.ERR_FFPLAYER_RELEASE_CALLBACK) + "Failed to release the player from a playback callback, release it from its host thread");
         // ONE RELEASE AT A TIME: A CONCURRENT SECOND CALL WAITS AND THEN FINDS THE WORK DONE. STOPPED AND WHATEVER THE PIPELINE
         // PUBLISHED WHILE IT WAS JOINED ARE HEARD AFTER THE LOCK, SO A LISTENER CAN WAIT FOR A THREAD THAT CALLS INTO THIS PLAYER
         try {
@@ -356,7 +357,7 @@ public final class FFMediaPlayer extends MediaPlayer {
 
     @Override
     public boolean audioTrack(final AudioTrack track) {
-        if (track == null) throw new IllegalArgumentException("Audio track cannot be null");
+        if (track == null) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_FFPLAYER_NULL_TRACK) + "Failed to select the audio track due to null track");
         if (this.sfx == null || this.released) return false;
         // ONLY AN ENTRY OF THE LIST COUNTS, FOUND BY ORIGIN AND STREAM; A PROVISIONAL PICK IS THE STREAM ITS ORIGIN PLAYS ONCE OPEN
         AudioTrack entry = null;
@@ -560,7 +561,7 @@ public final class FFMediaPlayer extends MediaPlayer {
             this.scaledFrame.width(dstWidth);
             this.scaledFrame.height(dstHeight);
             if (avutil.av_frame_get_buffer(this.scaledFrame, 32) < 0) {
-                LOGGER.error(IT, "Failed to allocate scaled frame buffer");
+                LOGGER.error(IT, DataTool.errCode(WaterMedia.ERR_FFPLAYER_SCALED_ALLOC) + "Failed to allocate scaled frame buffer");
                 avutil.av_frame_free(this.scaledFrame);
                 this.scaledFrame = null;
                 return false;
@@ -716,8 +717,8 @@ public final class FFMediaPlayer extends MediaPlayer {
                     // E.G. AN AV1 STREAM THE SELECTED DECODER CANNOT HANDLE: ENDED WOULD LOOK LIKE AN INSTANT 0-LENGTH PLAYBACK
                     // AND repeat() WOULD RETRY IT FOREVER
                     if (decoder.video() && this.totalRenderedFrames == 0 && this.totalSkippedFrames == 0) {
-                        LOGGER.error(IT, "Video decoder emitted no frames for {}: failing instead of reporting ENDED", decoder.uri());
-                        this.exception(new IOException("Video decoder emitted no frames: unsupported or broken stream"));
+                        LOGGER.error(IT, DataTool.errCode(WaterMedia.ERR_FFPLAYER_NO_FRAMES_LOG) + "Failed to decode video for {} due to no frames emitted, failing instead of reporting ENDED", decoder.uri());
+                        this.exception(new IOException(DataTool.errCode(WaterMedia.ERR_FFPLAYER_NO_FRAMES) + "Failed to decode video due to no frames emitted, the stream is unsupported or broken"));
                         this.publishTransition(Status.ERROR);
                         break;
                     }
@@ -746,8 +747,8 @@ public final class FFMediaPlayer extends MediaPlayer {
                 }
 
                 if (current == Status.BUFFERING && decoder.demuxDied()) {
-                    LOGGER.error(IT, "Demux thread died during BUFFERING, setting ERROR");
-                    this.exception(new IOException("Demux thread died during BUFFERING"));
+                    LOGGER.error(IT, DataTool.errCode(WaterMedia.ERR_FFPLAYER_DEMUX_DEAD_LOG) + "Failed to keep buffering due to a dead demux thread, setting ERROR");
+                    this.exception(new IOException(DataTool.errCode(WaterMedia.ERR_FFPLAYER_DEMUX_DEAD) + "Failed to keep buffering due to a dead demux thread"));
                     this.publishTransition(Status.ERROR);
                     break;
                 }
@@ -867,7 +868,7 @@ public final class FFMediaPlayer extends MediaPlayer {
                         if (decoded && (mapping == null || this.gfx instanceof final VKEngine vk && !vk.samples(slot.frame))) {
                             if (this.downloadedFrame == null) this.downloadedFrame = avutil.av_frame_alloc();
                             if (av_hwframe_transfer_data(this.downloadedFrame, slot.frame, 0) < 0) {
-                                if (!this.decodedWarned) LOGGER.error(IT, "Frames decoded on the GPU in {} can neither be sampled nor downloaded; frames are dropped",
+                                if (!this.decodedWarned) LOGGER.error(IT, DataTool.errCode(WaterMedia.ERR_FFPLAYER_GPU_FRAMES) + "Failed to read GPU decoded frames in {} due to frames that can neither be sampled nor downloaded, frames are dropped",
                                         FFTool.string(av_get_pix_fmt_name(layout), layout));
                                 this.decodedWarned = true;
                                 videoFrames.next();
@@ -923,7 +924,7 @@ public final class FFMediaPlayer extends MediaPlayer {
                                 );
 
                                 if (result <= 0) {
-                                    LOGGER.error(IT, "sws_scale failed: result={}, fmt={}, size={}x{} -> {}x{}",
+                                    LOGGER.error(IT, DataTool.errCode(WaterMedia.ERR_FFPLAYER_SWS_SCALE) + "Failed to scale the frame with sws_scale: result={}, fmt={}, size={}x{} -> {}x{}",
                                             result, slot.format, slot.width, slot.height, targetW, targetH);
                                     // COUNT AS SKIPPED: THE FRAME WAS DECODED BUT DROPPED HERE, SO THE
                                     // ZERO-FRAME → ERROR CHECK MUST NOT MISTAKE THIS FOR A DEAD DECODER
@@ -963,7 +964,7 @@ public final class FFMediaPlayer extends MediaPlayer {
                                         mapping.format(), uploadW, uploadH, mapping.bits(), color, slot.width, slot.height);
                             else if (!this.refusedWarned) {
                                 this.refusedWarned = true;
-                                LOGGER.error(IT, "Graphics engine refused {} {}x{} {}bit; frames are dropped until the layout changes",
+                                LOGGER.error(IT, DataTool.errCode(WaterMedia.ERR_FFPLAYER_GFX_REFUSED) + "Failed to upload the frame, the graphics engine refused {} {}x{} {}bit and frames are dropped until the layout changes",
                                         mapping.format(), uploadW, uploadH, mapping.bits());
                             }
                         }
@@ -1080,7 +1081,7 @@ public final class FFMediaPlayer extends MediaPlayer {
             this.stopDecoder();
             this.publishTransition(Status.STOPPED);
         } catch (final Throwable e) {
-            LOGGER.error(IT, "Error in lifecycle for URI {}", this.source.uri(this.quality), e);
+            LOGGER.error(IT, DataTool.errCode(WaterMedia.ERR_FFPLAYER_LIFECYCLE) + "Failed to run the lifecycle for URI {}", this.source.uri(this.quality), e);
             this.exception(e);
             this.stopDecoder();
             this.publishTransition(Status.ERROR);
@@ -1173,7 +1174,7 @@ public final class FFMediaPlayer extends MediaPlayer {
         final String dstName = FFTool.string(av_get_pix_fmt_name(dstFormat), dstFormat);
 
         if (this.swsContext == null) {
-            LOGGER.error(IT, "Failed to create SwsContext: {} ({}x{}) -> {} ({}x{})",
+            LOGGER.error(IT, DataTool.errCode(WaterMedia.ERR_FFPLAYER_SWS_CONTEXT) + "Failed to create SwsContext: {} ({}x{}) -> {} ({}x{})",
                     srcName, srcWidth, srcHeight, dstName, dstWidth, dstHeight);
         } else {
             this.swsInputFormat = srcFormat;
@@ -1296,17 +1297,17 @@ public final class FFMediaPlayer extends MediaPlayer {
             final SFXEngine.ChannelSupport exact = sfx.channelSupport(channels);
             final SFXEngine.ChannelSupport entry = exact != null ? exact : sfx.closestChannelSupport(channels > 0 ? channels : 2);
             if (entry == null) {
-                LOGGER.error(IT, "SFX engine exposes an empty channel-support table");
+                LOGGER.error(IT, DataTool.errCode(WaterMedia.ERR_FFPLAYER_SFX_EMPTY_TABLE) + "Failed to pick the audio format due to an empty channel-support table in the SFX engine");
                 return null;
             }
             final SampleType out = entry.supports(type) ? type : entry.supports(SampleType.S16) ? SampleType.S16
                     : Arrays.stream(sfx.supportedTypes()).filter(entry::supports).findFirst().orElse(null);
             if (out == null) {
-                LOGGER.error(IT, "SFX engine exposes no supported types for {} channels", entry.channels());
+                LOGGER.error(IT, DataTool.errCode(WaterMedia.ERR_FFPLAYER_SFX_NO_TYPES) + "Failed to pick the audio format due to no supported types in the SFX engine for {} channels", entry.channels());
                 return null;
             }
             if (!sfx.format(out, entry.channels(), rate)) {
-                LOGGER.error(IT, "SFX engine rejected the audio format: type={}, ch={}, rate={}", out, entry.channels(), rate);
+                LOGGER.error(IT, DataTool.errCode(WaterMedia.ERR_FFPLAYER_SFX_REJECTED) + "Failed to set the audio format, the SFX engine rejected it: type={}, ch={}, rate={}", out, entry.channels(), rate);
                 return null;
             }
             return new FFDecoder.Pcm(out, entry.channels());

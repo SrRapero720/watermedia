@@ -1,5 +1,6 @@
 package org.watermedia.api.codecs.encoders;
 
+import org.watermedia.WaterMedia;
 import org.watermedia.api.codecs.Container;
 import org.watermedia.api.codecs.common.png.ACTL;
 import org.watermedia.api.codecs.common.png.ColorType;
@@ -10,6 +11,7 @@ import org.watermedia.api.codecs.common.png.IDAT;
 import org.watermedia.api.codecs.common.png.IEND;
 import org.watermedia.api.codecs.common.png.IHDR;
 import org.watermedia.api.util.PixelFormat;
+import org.watermedia.tools.DataTool;
 
 import java.io.IOException;
 import java.io.OutputStream;
@@ -54,7 +56,7 @@ public final class PngEncoder extends AnimationEncoder {
             case RGBA, BGRA -> ColorType.TRUECOLOR_ALPHA;
             case RGB -> ColorType.TRUECOLOR;
             case GRAY -> ColorType.GREYSCALE;
-            default -> throw new IllegalArgumentException("PNG encodes RGBA, BGRA, RGB or GRAY frames, not " + video.format());
+            default -> throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_PNGENCODER_FORMAT) + "Failed to encode PNG due to unsupported frame format, only RGBA, BGRA, RGB or GRAY are allowed: " + video.format());
         };
         this.header = new IHDR(video.width(), video.height(), 8, type.ordinal(), 0, 0, 0);
         this.channels = video.format().texelBytes(0, 8);

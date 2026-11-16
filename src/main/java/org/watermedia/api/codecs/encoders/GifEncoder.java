@@ -1,11 +1,13 @@
 package org.watermedia.api.codecs.encoders;
 
+import org.watermedia.WaterMedia;
 import org.watermedia.api.codecs.Container;
 import org.watermedia.api.codecs.common.gif.ColorTable;
 import org.watermedia.api.codecs.common.gif.GraphicExtension;
 import org.watermedia.api.codecs.common.gif.ImageDescriptor;
 import org.watermedia.api.codecs.common.gif.ScreenDescriptor;
 import org.watermedia.api.util.PixelFormat;
+import org.watermedia.tools.DataTool;
 
 import java.io.BufferedOutputStream;
 import java.io.IOException;
@@ -109,9 +111,9 @@ public final class GifEncoder extends AnimationEncoder {
     public GifEncoder(final OutputStream out, final Video video) {
         super(Container.GIF, out, video, null);
         if (video.width() > MAX_SIDE || video.height() > MAX_SIDE)
-            throw new IllegalArgumentException("GIF sides stop at " + MAX_SIDE + " pixels: " + video.width() + "x" + video.height());
-        if (!FORMATS.contains(video.format())) throw new IllegalArgumentException("GIF encodes RGBA, BGRA, RGB or GRAY frames, not " + video.format());
-        if (video.repeat() > MAX_PLAYS) throw new IllegalArgumentException("GIF plays at most " + MAX_PLAYS + " times: " + video.repeat());
+            throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_GIFENCODER_SIDE) + "Failed to encode GIF due to sides over " + MAX_SIDE + " pixels: " + video.width() + "x" + video.height());
+        if (!FORMATS.contains(video.format())) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_GIFENCODER_FORMAT) + "Failed to encode GIF due to unsupported frame format, only RGBA, BGRA, RGB or GRAY are allowed: " + video.format());
+        if (video.repeat() > MAX_PLAYS) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_GIFENCODER_PLAYS) + "Failed to encode GIF due to more than " + MAX_PLAYS + " plays: " + video.repeat());
         final int pixels = video.width() * video.height();
         this.dither = video.quality() >= DEFAULT_QUALITY;
         this.pixelBytes = video.format().texelBytes(0, 8);

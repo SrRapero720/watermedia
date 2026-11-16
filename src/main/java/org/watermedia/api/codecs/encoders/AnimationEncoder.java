@@ -1,7 +1,9 @@
 package org.watermedia.api.codecs.encoders;
 
+import org.watermedia.WaterMedia;
 import org.watermedia.api.codecs.Container;
 import org.watermedia.api.codecs.Encoder;
+import org.watermedia.tools.DataTool;
 
 import java.io.IOException;
 import java.io.OutputStream;
@@ -19,7 +21,7 @@ abstract class AnimationEncoder extends Encoder {
 
     AnimationEncoder(final Container container, final OutputStream out, final Video video, final Audio audio) {
         super(container, video, audio);
-        if (out == null) throw new IllegalArgumentException("The output stream is null");
+        if (out == null) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_ANIMATION_NULL_OUT) + "Failed to create the encoder due to null output stream");
         this.out = out;
     }
 
@@ -35,7 +37,7 @@ abstract class AnimationEncoder extends Encoder {
     @Override
     protected final void finish() throws IOException {
         try (this.out) {
-            if (this.held == null) throw new IllegalStateException(this.container + " needs at least one frame");
+            if (this.held == null) throw new IllegalStateException(DataTool.errCode(WaterMedia.ERR_ANIMATION_NO_FRAMES) + "Failed to finish the " + this.container + " encoding due to no frames, at least one is needed");
             this.picture(this.held, 1_000_000L / this.video.fps(), this.pictures++);
             this.end(this.pictures);
         }

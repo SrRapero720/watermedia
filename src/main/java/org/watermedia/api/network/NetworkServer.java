@@ -8,6 +8,7 @@ import org.apache.logging.log4j.MarkerManager;
 import org.watermedia.WaterMedia;
 import org.watermedia.WaterMediaConfig;
 import org.watermedia.api.util.NetRequest;
+import org.watermedia.tools.DataTool;
 import org.watermedia.tools.IOTool;
 import org.watermedia.tools.ThreadTool;
 
@@ -58,38 +59,38 @@ public final class NetworkServer {
     // STARTS THE CONFIGURED LISTENER UNDER cwd; INVALID CONFIGURATION AND BIND FAILURES PROPAGATE TO THE CALLER
     static synchronized void start(final int port, final Path cwd) throws IOException {
         if (running != null)
-            throw new IllegalStateException("The file server is already running");
+            throw new IllegalStateException(DataTool.errCode(WaterMedia.ERR_SERVER_ALREADY_RUNNING) + "Failed to start the file server, it is already running");
+
         final var config = WaterMediaConfig.network;
         // THE CONFIGURATION IS PROCESS STATE, NOT AN ARGUMENT OF THIS CALL
         if (config.serverBindAddress == null || config.serverBindAddress.isBlank())
-            throw new IllegalStateException("The file server requires an explicit bind address");
+            throw new IllegalStateException(DataTool.errCode(WaterMedia.ERR_SERVER_NO_BIND_ADDRESS) + "Failed to start the file server due to missing network.serverBindAddress");
 
         final InetAddress bind = InetAddress.getByName(config.serverBindAddress);
         final String token = config.token;
 
         if (token == null || token.isBlank())
-            throw new IllegalStateException("The file server requires an upload token");
+            throw new IllegalStateException(DataTool.errCode(WaterMedia.ERR_SERVER_NO_TOKEN) + "Failed to start the file server due to missing network.token");
 
         if (!bind.isLoopbackAddress() && WaterMediaConfig.DEFAULT_NETWORK_TOKEN.equals(token.trim()))
-            throw new IllegalStateException("A non-loopback file server requires a custom upload token");
+            throw new IllegalStateException(DataTool.errCode(WaterMedia.ERR_SERVER_DEFAULT_TOKEN) + "Failed to start the file server outside loopback due to default network.token, set your own!");
 
         if (config.maxServerRequests < 1 || config.serverTimeout < 1 || config.maxStorageSize < 1 || config.maxUploadSize < 0)
-            throw new IllegalStateException("File server concurrency, idle timeout and storage limits must be positive");
+            throw new IllegalStateException(DataTool.errCode(WaterMedia.ERR_SERVER_INVALID_LIMITS) + "Failed to start the file server due to non-positive concurrency, idle timeout or storage limits");
 
         final Path storage = cwd.resolve("watermedia").resolve("files").toAbsolutePath().normalize();
         Files.createDirectories(storage);
         // OWN THE STORAGE BEFORE CLEANUP, AND KEEP THE LOCK UNTIL ALL WORKERS EXIT.
-        final FileChannel storageChannel = FileChannel.open(storage.resolve(".server.lock"),
-                StandardOpenOption.CREATE, StandardOpenOption.WRITE, LinkOption.NOFOLLOW_LINKS);
+        final FileChannel storageChannel = FileChannel.open(storage.resolve(".server.lock"), StandardOpenOption.CREATE, StandardOpenOption.WRITE, LinkOption.NOFOLLOW_LINKS);
         boolean retained = false;
         Throwable startFailure = null;
         try {
             final FileLock storageLock;
             try { storageLock = storageChannel.tryLock(); }
             catch (final OverlappingFileLockException occupied) {
-                throw new IOException("File server storage is already in use: " + storage, occupied);
+                throw new IOException(DataTool.errCode(WaterMedia.ERR_SERVER_STORAGE_OVERLAP) + "Failed to start the file server due to storage already in use: " + storage, occupied);
             }
-            if (storageLock == null) throw new IOException("File server storage is already in use: " + storage);
+            if (storageLock == null) throw new IOException(DataTool.errCode(WaterMedia.ERR_SERVER_STORAGE_IN_USE) + "Failed to start the file server due to storage already in use: " + storage);
             final var incomplete = new ArrayList<Path>();
             try (final DirectoryStream<Path> entries = Files.newDirectoryStream(storage, ".upload-*")) {
                 for (final Path entry: entries) incomplete.add(entry);
@@ -174,7 +175,7 @@ public final class NetworkServer {
                 // SLOT LEAVE ROOM FOR THEM. PAST THE CAP THE DISPATCHER CLOSES THE CONNECTION, SO NO REQUEST QUEUE GROWS
                 server.setExecutor(command -> {
                     synchronized (state) {
-                        if (state.exchanges >= 3 * state.slots) throw new RejectedExecutionException("All file server exchanges are busy");
+                        if (state.exchanges >= 3 * state.slots) throw new RejectedExecutionException(DataTool.errCode(WaterMedia.ERR_SERVER_EXCHANGES_BUSY) + "Failed to accept the connection due to busy file server exchanges");
                         state.exchanges++;
                     }
                     state.executor.execute(() -> {
@@ -241,14 +242,14 @@ public final class NetworkServer {
         state.deadlines.shutdownNow();
         try {
             if (!state.executor.awaitTermination(5, TimeUnit.SECONDS))
-                throw new IllegalStateException("File server transfers have not finished; shutdown must be retried");
+                throw new IllegalStateException(DataTool.errCode(WaterMedia.ERR_SERVER_STOP_BUSY) + "Failed to stop the file server due to active file uploads, try again!");
         } catch (final InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw new IllegalStateException("Interrupted while waiting for file server transfers to finish", e);
+            throw new IllegalStateException(DataTool.errCode(WaterMedia.ERR_SERVER_STOP_INTERRUPTED) + "Failed to stop the file server due to interrupted wait for its transfers", e);
         }
         try { state.storageChannel.close(); }
         catch (final IOException failure) {
-            throw new IllegalStateException("File server storage lock could not be released", failure);
+            throw new IllegalStateException(DataTool.errCode(WaterMedia.ERR_SERVER_STOP_STORAGE_LOCK) + "Failed to stop the file server due to unreleased storage lock", failure);
         }
         running = null;
         LOGGER.info(IT, "Stopped file server");
@@ -341,15 +342,15 @@ public final class NetworkServer {
                     final byte[] buffer = new byte[IOTool.BUFFER_SIZE];
                     long remaining = length;
                     while (remaining > 0) {
-                        if (Thread.currentThread().isInterrupted()) throw new IOException("Upload idle for too long");
+                        if (Thread.currentThread().isInterrupted()) throw new IOException(DataTool.errCode(WaterMedia.ERR_SERVER_UPLOAD_IDLE) + "Failed to store the upload due to idle connection");
                         final int read = input.read(buffer, 0, (int) Math.min(buffer.length, remaining));
-                        if (read < 0) throw new IOException("Upload ended before Content-Length");
+                        if (read < 0) throw new IOException(DataTool.errCode(WaterMedia.ERR_SERVER_UPLOAD_TRUNCATED) + "Failed to store the upload, it ended before Content-Length");
                         output.write(buffer, 0, read);
                         remaining -= read;
                         watchdog.touch();
                     }
                 }
-                if (state.stopping || Thread.currentThread().isInterrupted()) throw new IOException("Upload stopped before publication");
+                if (state.stopping || Thread.currentThread().isInterrupted()) throw new IOException(DataTool.errCode(WaterMedia.ERR_SERVER_UPLOAD_STOPPED) + "Failed to store the upload, the server stopped before publishing it");
                 Files.move(temporary, state.storage.resolve(id), StandardCopyOption.ATOMIC_MOVE);
                 stored = true;
             } finally {
@@ -460,9 +461,9 @@ public final class NetworkServer {
                 final byte[] buffer = new byte[CHUNK_BYTES];
                 long remaining = length;
                 while (remaining > 0) {
-                    if (Thread.currentThread().isInterrupted()) throw new IOException("Download idle for too long");
+                    if (Thread.currentThread().isInterrupted()) throw new IOException(DataTool.errCode(WaterMedia.ERR_SERVER_DOWNLOAD_IDLE) + "Failed to send the download due to idle connection");
                     final int read = input.read(buffer, 0, (int) Math.min(buffer.length, remaining));
-                    if (read < 0) throw new IOException("Stored file was truncated during download");
+                    if (read < 0) throw new IOException(DataTool.errCode(WaterMedia.ERR_SERVER_DOWNLOAD_TRUNCATED) + "Failed to send the download due to truncated stored file");
                     output.write(buffer, 0, read);
                     remaining -= read;
                     watchdog.touch();

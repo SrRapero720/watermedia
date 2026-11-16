@@ -19,8 +19,10 @@ import org.lwjgl.system.Platform;
 import org.lwjgl.system.linux.UNISTD;
 import org.lwjgl.system.windows.Kernel32;
 import org.lwjgl.vulkan.*;
+import org.watermedia.WaterMedia;
 import org.watermedia.api.codecs.CodecsAPI;
 import org.watermedia.api.util.PixelFormat;
+import org.watermedia.tools.DataTool;
 import org.watermedia.tools.FFTool;
 import org.watermedia.tools.IOTool;
 
@@ -262,7 +264,7 @@ public final class VKEngine extends GFXEngine {
     // THE CONTEXT AND EVERY VULKAN OBJECT IT EXPOSES MUST OUTLIVE THIS ENGINE, WHICH ONLY CREATES ITS OWN COMMAND POOL,
     // DESCRIPTORS AND PER-SLOT IMAGES ON IT AND SHARES THE DEVICE'S KIT WITH EVERY OTHER ENGINE THERE
     VKEngine(final VKContext ctx) {
-        if (ctx == null) throw new IllegalArgumentException("VKContext must be non-null");
+        if (ctx == null) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_VK_NULL_CONTEXT) + "Failed to create the engine due to null VKContext");
         this.ctx = ctx;
         this.device = ctx.vkDevice();
         this.memProps = ctx.memoryProperties();
@@ -459,7 +461,7 @@ public final class VKEngine extends GFXEngine {
                 this.plane(0, VK_FORMAT_R8G8B8A8_UNORM); // ONE RGBA8 TEXEL PER PIXEL PAIR
             }
             // RGB AND BCn NEVER PASS supports(), SO THEY CANNOT REACH THIS TABLE
-            default -> throw new IllegalStateException("VKEngine: " + format + " has no upload path");
+            default -> throw new IllegalStateException(DataTool.errCode(WaterMedia.ERR_VK_NO_UPLOAD_PATH) + "Failed to upload the frame due to no upload path: " + format);
         }
         if (this.convert) {
             this.outFormat = VK_FORMAT_R8G8B8A8_UNORM;
@@ -515,7 +517,7 @@ public final class VKEngine extends GFXEngine {
     synchronized void destroy() {
         if (!this.waitAllIdle()) {
             // A WEDGED GPU MAY STILL READ EVERY OBJECT: LEAKING THEM BEATS DESTROYING MEMORY IN USE
-            LOGGER.error(IT, "VKEngine released while the GPU is wedged; its Vulkan objects are leaked");
+            LOGGER.error(IT, DataTool.errCode(WaterMedia.ERR_VK_RELEASE_WEDGED) + "Failed to release the engine due to a wedged GPU, its Vulkan objects are leaked");
             return;
         }
         // THE DECODED FRAMES ARE FULLY READ: THEY RETURN TO THEIR POOL AND THE PICTURES OF ITS IMAGES DIE WITH THE REFERENCE
@@ -805,7 +807,7 @@ public final class VKEngine extends GFXEngine {
 
             // THE REFERENCE IS TAKEN BEFORE THE SUBMISSION, SO A FENCE IN FLIGHT ALWAYS HAS ITS FRAME
             if (slot.held == null) slot.held = av_frame_alloc();
-            if (av_frame_ref(slot.held, frame) < 0) throw new IllegalStateException("VKEngine: cannot reference the decoded frame");
+            if (av_frame_ref(slot.held, frame) < 0) throw new IllegalStateException(DataTool.errCode(WaterMedia.ERR_VK_FRAME_REF) + "Failed to reference the decoded frame");
             if (twin != null) {
                 this.twinStep(stack, slot.twinRelease, twin, f, f.layout(0), VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_EXTERNAL, f.sem_value(0), 0L);
                 crossed = f.sem_value(0) + 1;
@@ -896,7 +898,7 @@ public final class VKEngine extends GFXEngine {
             if (!this.waitAllIdle()) return null;
             this.destroyPictures();
             this.framesRef = av_buffer_ref(frame.hw_frames_ctx());
-            if (FFTool.isNull(this.framesRef)) throw new IllegalStateException("VKEngine: cannot reference the decoder's frame pool");
+            if (FFTool.isNull(this.framesRef)) throw new IllegalStateException(DataTool.errCode(WaterMedia.ERR_VK_POOL_REF) + "Failed to reference the decoder's frame pool");
             this.framesCtx = fc.address();
             // THE POOL LIVES ON THIS DEVICE OR ON THE KIT'S TWIN; THE FRAMES OF ANY OTHER DEVICE CANNOT BE REACHED FROM HERE
             final long owner = new AVVulkanDeviceContext(fc.device_ctx().hwctx()).act_dev();
@@ -1226,7 +1228,7 @@ public final class VKEngine extends GFXEngine {
                     int type = this.memType(req.memoryTypeBits(),
                             VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
                     if (type < 0) type = this.memType(req.memoryTypeBits(), VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
-                    if (type < 0) throw new IllegalStateException("VKEngine: no host-visible memory type for staging");
+                    if (type < 0) throw new IllegalStateException(DataTool.errCode(WaterMedia.ERR_VK_STAGING_MEMORY) + "Failed to create the staging buffer due to no host-visible memory type");
 
                     final VkMemoryAllocateInfo mai = VkMemoryAllocateInfo.calloc(stack).sType$Default()
                             .allocationSize(req.size()).memoryTypeIndex(type);
@@ -1392,13 +1394,13 @@ public final class VKEngine extends GFXEngine {
     // PARKS THE ENGINE AFTER A DRIVER FAILURE: FRAMES ARE DROPPED UNTIL THE NEXT LAYOUT AND THE LAST VIEW STAYS EXPOSED
     private void fail(final String op, final int result) {
         this.failed = true;
-        if (!this.failWarned) LOGGER.error(IT, "{} failed (VkResult {}); frames are dropped until the next format", op, result);
+        if (!this.failWarned) LOGGER.error(IT, DataTool.errCode(WaterMedia.ERR_VK_RESULT_LOG) + "Failed to run {} due to VkResult {}, frames are dropped until the next format", op, result);
         this.failWarned = true;
     }
 
     private void fail(final Throwable cause) {
         this.failed = true;
-        if (!this.failWarned) LOGGER.error(IT, "Upload failed; frames are dropped until the next format", cause);
+        if (!this.failWarned) LOGGER.error(IT, DataTool.errCode(WaterMedia.ERR_VK_UPLOAD_LOG) + "Failed to upload the frame, frames are dropped until the next format", cause);
         this.failWarned = true;
     }
 
@@ -1454,7 +1456,7 @@ public final class VKEngine extends GFXEngine {
             final VkMemoryRequirements req = VkMemoryRequirements.malloc(stack);
             vkGetImageMemoryRequirements(this.device, img, req);
             final int type = this.memType(req.memoryTypeBits(), VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-            if (type < 0) throw new IllegalStateException("VKEngine: no device-local memory type for image");
+            if (type < 0) throw new IllegalStateException(DataTool.errCode(WaterMedia.ERR_VK_IMAGE_MEMORY) + "Failed to create the image due to no device-local memory type");
             final VkMemoryAllocateInfo mai = VkMemoryAllocateInfo.calloc(stack).sType$Default()
                     .allocationSize(req.size()).memoryTypeIndex(type);
             final LongBuffer pm = stack.mallocLong(1);
@@ -1638,20 +1640,20 @@ public final class VKEngine extends GFXEngine {
         try {
             final String glsl = IOTool.shader(name);
             compiler = shaderc_compiler_initialize();
-            if (compiler == 0L) throw new IllegalStateException("VKEngine: shaderc_compiler_initialize failed");
+            if (compiler == 0L) throw new IllegalStateException(DataTool.errCode(WaterMedia.ERR_VK_SHADERC_INIT) + "Failed to compile the shader due to shaderc_compiler_initialize failure");
             result = shaderc_compile_into_spv(compiler, glsl, shaderc_compute_shader, name, "main", 0L);
-            if (result == 0L) throw new IllegalStateException("VKEngine: shaderc compile returned null");
+            if (result == 0L) throw new IllegalStateException(DataTool.errCode(WaterMedia.ERR_VK_SHADERC_NULL) + "Failed to compile the shader due to null shaderc result");
             if (shaderc_result_get_compilation_status(result) != shaderc_compilation_status_success)
-                throw new IllegalStateException("VKEngine: shader compile failed: " + shaderc_result_get_error_message(result));
+                throw new IllegalStateException(DataTool.errCode(WaterMedia.ERR_VK_SHADER_COMPILE) + "Failed to compile the shader: " + shaderc_result_get_error_message(result));
             final ByteBuffer spv = shaderc_result_get_bytes(result);
-            if (spv == null) throw new IllegalStateException("VKEngine: shaderc produced no SPIR-V");
+            if (spv == null) throw new IllegalStateException(DataTool.errCode(WaterMedia.ERR_VK_NO_SPIRV) + "Failed to compile the shader due to no SPIR-V produced");
             final byte[] bytes = new byte[spv.remaining()];
             spv.duplicate().get(bytes);
             return bytes;
         } catch (final IOException e) {
             // A MISSING FILE, A MISSING shaderc OR A BROKEN SHADER NEVER RECOVERS: DECLINE CONVERSION LAYOUTS FOR THE REST OF THE PROCESS
             convertBroken = true;
-            throw new IllegalStateException("VKEngine: cannot read the shader " + name, e);
+            throw new IllegalStateException(DataTool.errCode(WaterMedia.ERR_VK_SHADER_READ) + "Failed to read the shader: " + name, e);
         } catch (final RuntimeException | LinkageError e) {
             convertBroken = true;
             throw e;
@@ -1662,7 +1664,7 @@ public final class VKEngine extends GFXEngine {
     }
 
     private static void check(final int result, final String op) {
-        if (result != VK_SUCCESS) throw new IllegalStateException("VKEngine: " + op + " failed (VkResult " + result + ")");
+        if (result != VK_SUCCESS) throw new IllegalStateException(DataTool.errCode(WaterMedia.ERR_VK_CALL_RESULT) + "Failed to run " + op + " due to VkResult " + result);
     }
 
     // ==========================================================================

@@ -1,10 +1,12 @@
 package org.watermedia.api.platform;
 
+import org.watermedia.WaterMedia;
 import org.watermedia.api.player.MRL;
 import org.watermedia.api.util.HttpHeaders;
 import org.watermedia.api.util.MediaType;
 import org.watermedia.api.util.Metadata;
 import org.watermedia.api.util.Track;
+import org.watermedia.tools.DataTool;
 
 import java.net.URI;
 import java.time.Instant;
@@ -79,7 +81,7 @@ public interface Platform {
      */
     record Resolution(Instant expires, List<Source> sources) {
         public Resolution {
-            if (sources == null) throw new IllegalArgumentException("Resolution requires a source list");
+            if (sources == null) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_PLATFORM_SOURCES_NULL) + "Failed to create the resolution due to null source list");
             // THE LIST THE PLATFORM BUILT STAYS MUTABLE ON ITS SIDE: THE RECORD KEEPS ITS OWN COPY
             sources = List.copyOf(sources);
         }
@@ -109,8 +111,8 @@ public interface Platform {
     record Source(MediaType type, URI thumbnail, Metadata metadata, HttpHeaders headers, List<Quality> qualities,
                   List<Track> audioTracks, List<Track> subtitleTracks) {
         public Source {
-            if (type == null) throw new IllegalArgumentException("Source requires a media type");
-            if (qualities == null || qualities.isEmpty()) throw new IllegalArgumentException("Source constructed with no qualities");
+            if (type == null) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_PLATFORM_SOURCE_TYPE_NULL) + "Failed to create the source due to null media type");
+            if (qualities == null || qualities.isEmpty()) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_PLATFORM_SOURCE_NO_QUALITIES) + "Failed to create the source due to no qualities");
             headers = new HttpHeaders(headers).freeze(); // SHARED WITH PLAYER THREADS ONCE RESOLVED: NEVER MUTABLE
 
             // THE LISTS THE PLATFORM BUILT STAY MUTABLE ON ITS SIDE: THE RECORD KEEPS ITS OWN COPIES
@@ -133,8 +135,8 @@ public interface Platform {
      */
     record Quality(URI uri, int width, int height, float fps) {
         public Quality {
-            if (uri == null) throw new IllegalArgumentException("Quality requires a URI");
-            if (width < 0 || height < 0 || fps < 0f) throw new IllegalArgumentException("Quality dimensions cannot be negative");
+            if (uri == null) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_PLATFORM_QUALITY_URI_NULL) + "Failed to create the quality due to null URI");
+            if (width < 0 || height < 0 || fps < 0f) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_PLATFORM_QUALITY_NEGATIVE) + "Failed to create the quality due to negative dimensions");
         }
 
         /** Creates a quality whose frame rate is unknown. */

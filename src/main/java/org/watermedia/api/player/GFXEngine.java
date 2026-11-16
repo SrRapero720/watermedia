@@ -2,6 +2,7 @@ package org.watermedia.api.player;
 
 import org.watermedia.WaterMedia;
 import org.watermedia.api.util.PixelFormat;
+import org.watermedia.tools.DataTool;
 
 import java.nio.ByteBuffer;
 
@@ -129,9 +130,9 @@ public abstract sealed class GFXEngine permits VKEngine, GLEngine, HeadlessGFXEn
     // UNMOVED UNTIL THE SECOND LATER upload RETURNS (CALLERS PASS FRESH ARRAYS). AN EMPTY SET, A NULL OR HEAP PLANE OR A MISSING STRIDE IS A CALLER BUG
     final void upload(final ByteBuffer[] planes, final int[] strides) {
         if (planes == null || planes.length == 0 || strides == null || strides.length < planes.length)
-            throw new IllegalArgumentException("A frame needs at least one plane and a stride per plane");
+            throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_GFX_FRAME_PLANES) + "Failed to create the frame due to missing planes or strides, it needs at least one plane and a stride per plane");
         for (final ByteBuffer plane: planes)
-            if (plane == null || !plane.isDirect()) throw new IllegalArgumentException("Plane buffers must be direct and non-null");
+            if (plane == null || !plane.isDirect()) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_GFX_FRAME_BUFFER) + "Failed to create the frame due to a null or non direct plane buffer");
         if (this.released) return;
         this.push(planes, strides);
     }

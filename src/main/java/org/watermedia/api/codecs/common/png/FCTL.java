@@ -1,6 +1,8 @@
 package org.watermedia.api.codecs.common.png;
 
+import org.watermedia.WaterMedia;
 import org.watermedia.api.codecs.CodecException;
+import org.watermedia.tools.DataTool;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -32,10 +34,10 @@ public record FCTL(int sequence, int width, int height, int xOffset, int yOffset
 
     /** Converts a generic chunk to fcTL. */
     public static FCTL convert(final PngChunk chunk) throws CodecException {
-        if (chunk.type() != SIGNATURE) throw new IllegalArgumentException("Invalid chunk type for fcTL: 0x" + Integer.toHexString(chunk.type()));
+        if (chunk.type() != SIGNATURE) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_PNG_FCTL_TYPE) + "Failed to read fcTL due to invalid chunk type: 0x" + Integer.toHexString(chunk.type()));
 
         final byte[] data = chunk.data();
-        if (data.length != LENGTH) throw new CodecException("fcTL data must be 26 bytes, got " + data.length);
+        if (data.length != LENGTH) throw new CodecException(DataTool.errCode(WaterMedia.ERR_PNG_FCTL_LENGTH) + "Failed to read fcTL due to invalid length: " + data.length + " bytes (expected 26)");
 
         final ByteBuffer buffer = ByteBuffer.wrap(data).order(ByteOrder.BIG_ENDIAN);
         final FCTL fctl = new FCTL(
@@ -57,16 +59,16 @@ public record FCTL(int sequence, int width, int height, int xOffset, int yOffset
     public void validate() throws CodecException {
         // A RECORD CANONICAL CONSTRUCTOR CANNOT THROW CodecException, SO convert() CALLS THIS
         if ((this.dispose & 0xFF) > DISPOSE_OP_PREVIOUS || (this.blend & 0xFF) > BLEND_OP_OVER)
-            throw new CodecException("Invalid fcTL operations: dispose " + (this.dispose & 0xFF) + ", blend " + (this.blend & 0xFF));
+            throw new CodecException(DataTool.errCode(WaterMedia.ERR_PNG_FCTL_OPERATIONS) + "Failed to read fcTL due to invalid operations: dispose " + (this.dispose & 0xFF) + ", blend " + (this.blend & 0xFF));
     }
 
     /** Rejects frame bounds that leave the canvas. */
     public void validate(final int canvasWidth, final int canvasHeight) throws CodecException {
-        if (this.width <= 0 || this.height <= 0) throw new CodecException("Invalid frame dimensions: " + this.width + "x" + this.height);
-        if (this.xOffset < 0 || this.yOffset < 0) throw new CodecException("Invalid frame offset: " + this.xOffset + "," + this.yOffset);
+        if (this.width <= 0 || this.height <= 0) throw new CodecException(DataTool.errCode(WaterMedia.ERR_PNG_FCTL_DIMENSIONS) + "Failed to read fcTL due to invalid frame dimensions: " + this.width + "x" + this.height);
+        if (this.xOffset < 0 || this.yOffset < 0) throw new CodecException(DataTool.errCode(WaterMedia.ERR_PNG_FCTL_OFFSET) + "Failed to read fcTL due to invalid frame offset: " + this.xOffset + "," + this.yOffset);
         // LONG MATH: RAW int FIELDS CAN SUM PAST Integer.MAX_VALUE AND WRAP NEGATIVE, FALSELY PASSING
         if ((long) this.xOffset + this.width > canvasWidth || (long) this.yOffset + this.height > canvasHeight)
-            throw new CodecException("Frame extends beyond canvas bounds");
+            throw new CodecException(DataTool.errCode(WaterMedia.ERR_PNG_FCTL_BOUNDS) + "Failed to read fcTL, the frame extends beyond canvas bounds");
     }
 
     /** Returns the frame delay in milliseconds. */

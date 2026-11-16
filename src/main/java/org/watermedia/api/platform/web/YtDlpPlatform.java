@@ -92,7 +92,7 @@ public sealed class YtDlpPlatform implements Platform permits YouTubePlatform {
         try {
             info = this.info(uri.toString(), List.of());
         } catch (final IOException e) {
-            throw new PlatformException(this.name(), "yt-dlp could not resolve " + uri + ": " + e.getMessage(), e);
+            throw new PlatformException(this.name(), DataTool.errCode(WaterMedia.ERR_YTDLP_RESOLVE) + "Failed to resolve " + uri + " with yt-dlp: " + e.getMessage(), e);
         }
         return this.extract(info);
     }
@@ -112,7 +112,7 @@ public sealed class YtDlpPlatform implements Platform permits YouTubePlatform {
         try {
             exe = this.binary.executable();
         } catch (final IOException e) {
-            throw new IOException("Failed to provision yt-dlp: " + e.getMessage(), e);
+            throw new IOException(DataTool.errCode(WaterMedia.ERR_YTDLP_PROVISION) + "Failed to provision yt-dlp: " + e.getMessage(), e);
         }
 
         final List<String> command = new ArrayList<>();
@@ -136,9 +136,9 @@ public sealed class YtDlpPlatform implements Platform permits YouTubePlatform {
         try {
             info = JSONTool.parse(stdout, JsonObject.class);
         } catch (final JsonParseException e) {
-            throw new IOException("yt-dlp produced unparseable JSON", e);
+            throw new IOException(DataTool.errCode(WaterMedia.ERR_YTDLP_JSON_UNPARSEABLE) + "Failed to parse the yt-dlp output due to unparseable JSON", e);
         }
-        if (info == null) throw new IOException("yt-dlp produced no JSON");
+        if (info == null) throw new IOException(DataTool.errCode(WaterMedia.ERR_YTDLP_NO_JSON) + "Failed to parse the yt-dlp output due to no JSON");
         return info;
     }
 
@@ -148,7 +148,7 @@ public sealed class YtDlpPlatform implements Platform permits YouTubePlatform {
         try {
             process = new ProcessBuilder(command).start();
         } catch (final IOException e) {
-            throw new IOException("Could not start " + tool, e);
+            throw new IOException(DataTool.errCode(WaterMedia.ERR_YTDLP_START) + "Failed to start " + tool, e);
         }
 
         // BOTH PIPES DRAIN ON THEIR OWN THREADS BEFORE THE WAIT, SO THE TIMEOUT BOUNDS THE CHILD: READING STDOUT HERE
@@ -162,7 +162,7 @@ public sealed class YtDlpPlatform implements Platform permits YouTubePlatform {
         try {
             if (!process.waitFor(timeoutSeconds, TimeUnit.SECONDS)) {
                 process.destroyForcibly();
-                throw new IOException(tool + " timed out after " + timeoutSeconds + "s");
+                throw new IOException(DataTool.errCode(WaterMedia.ERR_YTDLP_TIMEOUT) + "Failed to run " + tool + " due to timeout after " + timeoutSeconds + "s");
             }
             // THE CHILD HAS EXITED, SO ITS STDOUT/STDERR ARE AT EOF AND THE JOINS RETURN ONCE EACH DRAIN
             // FINISHES READING; THEY STAY UNBOUNDED SO LARGE OUTPUTS LIKE BIG PLAYLISTS ARE NEVER TRUNCATED
@@ -171,13 +171,13 @@ public sealed class YtDlpPlatform implements Platform permits YouTubePlatform {
         } catch (final InterruptedException e) {
             process.destroyForcibly();
             Thread.currentThread().interrupt();
-            throw new IOException("Interrupted while waiting for " + tool, e);
+            throw new IOException(DataTool.errCode(WaterMedia.ERR_YTDLP_INTERRUPTED) + "Failed to wait for " + tool + " due to interruption", e);
         }
 
         final int exit = process.exitValue();
         if (exit != 0) {
             final String stderr = err.toString().trim();
-            throw new IOException(tool + " exited " + exit + ": " + (stderr.isEmpty() ? "(no stderr)" : stderr.lines().reduce((a, b) -> b).orElse(stderr)));
+            throw new IOException(DataTool.errCode(WaterMedia.ERR_YTDLP_EXIT_CODE) + "Failed to run " + tool + " due to exit code " + exit + ": " + (stderr.isEmpty() ? "(no stderr)" : stderr.lines().reduce((a, b) -> b).orElse(stderr)));
         }
         return out.toString();
     }
@@ -207,14 +207,14 @@ public sealed class YtDlpPlatform implements Platform permits YouTubePlatform {
                 } catch (final PlatformException | RuntimeException failure) {
                     LOGGER.warn(IT, "{} skipped a playlist entry", this.name(), failure);
                     if (skipped == null) skipped = failure instanceof final PlatformException platform ? platform
-                            : new PlatformException(this.name(), "Unexpected yt-dlp JSON for a playlist entry", failure);
+                            : new PlatformException(this.name(), DataTool.errCode(WaterMedia.ERR_YTDLP_ENTRY_JSON) + "Failed to read a playlist entry due to unexpected yt-dlp JSON", failure);
                 }
             }
-            if (sources.isEmpty()) throw skipped != null ? skipped : new PlatformException(this.name(), "No playable entries in playlist");
+            if (sources.isEmpty()) throw skipped != null ? skipped : new PlatformException(this.name(), DataTool.errCode(WaterMedia.ERR_YTDLP_NO_ENTRIES) + "Failed to resolve the playlist due to no playable entries");
             return new Resolution(earliest, sources);
         } catch (final RuntimeException e) {
             // A JSON SHAPE yt-dlp NEVER DOCUMENTED
-            throw new PlatformException(this.name(), "Unexpected yt-dlp JSON", e);
+            throw new PlatformException(this.name(), DataTool.errCode(WaterMedia.ERR_YTDLP_JSON_UNEXPECTED) + "Failed to read the yt-dlp output due to unexpected JSON", e);
         }
     }
 
@@ -225,10 +225,10 @@ public sealed class YtDlpPlatform implements Platform permits YouTubePlatform {
     private Result single(final JsonObject media) throws PlatformException {
         // RESPECT THE MATURE-CONTENT GATE (yt-dlp REPORTS age_limit; >=18 IS AGE-RESTRICTED)
         if (intOr(media, "age_limit", 0) >= 18 && !WaterMediaConfig.platforms.allowMatureContent)
-            throw new MatureContentException(this.name(), "Age-restricted: " + str(media, "webpage_url"));
+            throw new MatureContentException(this.name(), DataTool.errCode(WaterMedia.ERR_YTDLP_MATURE) + "Failed to resolve " + str(media, "webpage_url") + " due to age restriction");
 
         final JsonArray formats = arr(media, "formats");
-        if (formats == null || formats.isEmpty()) throw new PlatformException(this.name(), "No formats for " + str(media, "webpage_url"));
+        if (formats == null || formats.isEmpty()) throw new PlatformException(this.name(), DataTool.errCode(WaterMedia.ERR_YTDLP_NO_FORMATS) + "Failed to resolve " + str(media, "webpage_url") + " due to no formats");
 
         final URI sourceUri = DataTool.uri(str(media, "webpage_url"));
         final boolean live = bool(media, "is_live") || "is_live".equals(str(media, "live_status"));
@@ -309,7 +309,7 @@ public sealed class YtDlpPlatform implements Platform permits YouTubePlatform {
             }
         }
 
-        throw new PlatformException(this.name(), "No usable streams for " + str(media, "webpage_url"));
+        throw new PlatformException(this.name(), DataTool.errCode(WaterMedia.ERR_YTDLP_NO_STREAMS) + "Failed to resolve " + str(media, "webpage_url") + " due to no usable streams");
     }
 
     // ==========================================================================

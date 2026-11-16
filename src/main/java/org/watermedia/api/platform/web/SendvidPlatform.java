@@ -3,6 +3,7 @@ package org.watermedia.api.platform.web;
 import com.google.gson.annotations.SerializedName;
 import org.apache.logging.log4j.Marker;
 import org.apache.logging.log4j.MarkerManager;
+import org.watermedia.WaterMedia;
 import org.watermedia.api.platform.*;
 import org.watermedia.api.util.MediaType;
 import org.watermedia.api.util.Metadata;
@@ -53,22 +54,22 @@ public final class SendvidPlatform implements Platform {
             if (!"done".equals(status.state())) {
                 LOGGER.debug(IT, "Sendvid video '{}' not ready yet (state={}, queue={})", videoId, status.state(), status.placeInQueue());
                 if (status.placeInQueue() > MAX_QUEUE)
-                    throw new PlatformException(NAME, "Video '" + videoId + "' is in queue position " + status.placeInQueue() + " (> " + MAX_QUEUE + "), too far to wait");
+                    throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_SENDVID_QUEUE_FAR) + "Failed to resolve video '" + videoId + "' due to queue position " + status.placeInQueue() + " (> " + MAX_QUEUE + "), too far to wait");
                 this.waitForReady(statusUrl, videoId);
             }
 
             try (final NetRequest req = new NetRequest(uri).accept("text/html").send()) {
-                if (req.statusCode() != 200) throw new PlatformException(NAME, "Page request for video '" + videoId + "' returned HTTP " + req.statusCode());
+                if (req.statusCode() != 200) throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_SENDVID_PAGE_STATUS) + "Failed to request the page of video '" + videoId + "' due to HTTP " + req.statusCode());
 
                 final String html = req.text();
 
                 final Matcher sourceMatcher = PATTERN_SOURCE.matcher(html);
                 if (!sourceMatcher.find())
-                    throw new PlatformException(NAME, "video_source not found in page for video '" + videoId + "' (removed or markup changed): " + uri);
+                    throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_SENDVID_SOURCE_MISSING) + "Failed to read video_source of video '" + videoId + "' due to not found in page (removed or markup changed): " + uri);
 
                 final URI videoUri = DataTool.uri(sourceMatcher.group(1));
                 if (videoUri == null)
-                    throw new PlatformException(NAME, "video_source '" + sourceMatcher.group(1) + "' of video '" + videoId + "' is not a web URL");
+                    throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_SENDVID_SOURCE_NOT_URL) + "Failed to read video_source '" + sourceMatcher.group(1) + "' of video '" + videoId + "' due to not a web URL");
 
                 final Matcher posterMatcher = PATTERN_POSTER.matcher(html);
                 final URI thumbnailUri = posterMatcher.find() ? DataTool.uri(posterMatcher.group(1)) : null;
@@ -91,7 +92,7 @@ public final class SendvidPlatform implements Platform {
         } catch (final PlatformException e) {
             throw e;
         } catch (final IOException | RuntimeException e) {
-            throw new PlatformException(NAME, "Failed to resolve " + uri, e);
+            throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_SENDVID_RESOLVE) + "Failed to resolve " + uri, e);
         }
     }
 
@@ -102,14 +103,14 @@ public final class SendvidPlatform implements Platform {
     private void waitForReady(final String statusUrl, final String videoId) throws PlatformException {
         for (int i = 0; i < MAX_POLLS; i++) {
             // THE SLEEP RESTORES THE INTERRUPT FLAG ITSELF; A CANCELLED RESOLUTION STOPS POLLING AT ONCE
-            if (!ThreadTool.sleep(POLL_DELAY_MS)) throw new PlatformException(NAME, "Interrupted while waiting for video '" + videoId + "'");
+            if (!ThreadTool.sleep(POLL_DELAY_MS)) throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_SENDVID_WAIT_INTERRUPTED) + "Failed to wait for video '" + videoId + "' due to interruption");
             final StatusResponse status = WebRequests.fetchJson(NAME, statusUrl, StatusResponse.class);
             LOGGER.debug(IT, "Sendvid {} status: {} ({}%)", videoId, status.state(), status.progress());
             if ("done".equals(status.state())) return;
             if (status.placeInQueue() > MAX_QUEUE)
-                throw new PlatformException(NAME, "Video '" + videoId + "' queue position grew to " + status.placeInQueue());
+                throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_SENDVID_QUEUE_GREW) + "Failed to wait for video '" + videoId + "' due to queue position grown to " + status.placeInQueue());
         }
-        throw new PlatformException(NAME, "Video '" + videoId + "' did not become ready after " + MAX_POLLS * POLL_DELAY_MS / 1_000L + " seconds");
+        throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_SENDVID_WAIT_TIMEOUT) + "Failed to wait for video '" + videoId + "', it did not become ready after " + MAX_POLLS * POLL_DELAY_MS / 1_000L + " seconds");
     }
 
     // ==========================================================================

@@ -1,7 +1,9 @@
 package org.watermedia.api.player;
 
 import org.lwjgl.openal.*;
+import org.watermedia.WaterMedia;
 import org.watermedia.api.util.SampleType;
+import org.watermedia.tools.DataTool;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -69,7 +71,7 @@ public final class ALEngine extends SFXEngine {
 
     // SPATIAL MODE PLAYS THROUGH POSITIONAL MONO SINKS
     ALEngine(final int bufferCount, final boolean spatial) {
-        if (bufferCount <= 0) throw new IllegalArgumentException("bufferCount must be positive, got " + bufferCount);
+        if (bufferCount <= 0) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_AL_BUFFER_COUNT) + "Failed to create the ALEngine due to non positive bufferCount: " + bufferCount);
         final ALCapabilities caps = AL.getCapabilities();
         this.supportedChannels = channelTable(caps.AL_EXT_FLOAT32, caps.AL_EXT_DOUBLE, caps.AL_EXT_MCFORMATS, spatial);
         final EnumSet<SampleType> types = EnumSet.noneOf(SampleType.class);
@@ -78,7 +80,7 @@ public final class ALEngine extends SFXEngine {
         this.threadContext = ALC.getCapabilities().ALC_EXT_thread_local_context;
         final long localContext = this.threadContext ? EXTThreadLocalContext.alcGetThreadContext() : 0;
         this.context = localContext != 0 ? localContext : ALC10.alcGetCurrentContext();
-        if (this.context == 0) throw new IllegalStateException("An OpenAL context must be current before creating an ALEngine");
+        if (this.context == 0) throw new IllegalStateException(DataTool.errCode(WaterMedia.ERR_AL_NO_CONTEXT) + "Failed to create the ALEngine, no OpenAL context is current");
         this.spatial = spatial;
         this.efx = caps.ALC_EXT_EFX;
         this.auxiliarySends = this.efx
@@ -136,7 +138,7 @@ public final class ALEngine extends SFXEngine {
      * @throws IllegalStateException when the engine's context is not current or OpenAL cannot create a source
      */
     public synchronized Sink addSink(final Mix mix) {
-        if (mix == null) throw new IllegalArgumentException("A sink needs a mix");
+        if (mix == null) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_AL_SINK_NULL_MIX) + "Failed to add the sink due to null mix");
         if (!this.spatial || this.source == 0) return null;
         this.requireContext();
         AL10.alGetError();
@@ -162,7 +164,7 @@ public final class ALEngine extends SFXEngine {
         // THE BASE ONLY PASSES TABLE COMBINATIONS, AND EVERY ONE HAS A NATIVE FORMAT; SPATIAL SINKS PLAY MONO MIXES OF IT
         if (this.source == 0) return false;
         final int al = alFormatFor(type, this.spatial ? 1 : channels);
-        if (al == AL10.AL_NONE) throw new IllegalStateException("The OpenAL channel table offers " + type + " x" + channels + " without a native format");
+        if (al == AL10.AL_NONE) throw new IllegalStateException(DataTool.errCode(WaterMedia.ERR_AL_NO_NATIVE_FORMAT) + "Failed to resolve the OpenAL format due to no native format: " + type + " x" + channels);
         // A LAYOUT CHANGE WITH QUEUED AUDIO WOULD MAKE THE DRIVER REJECT THE NEXT BUFFER AND THE RETAINED CHUNKS UNREADABLE:
         // DROP THE QUEUE FIRST
         if (this.alFormat != 0 && (al != this.alFormat || channels != this.channels || sampleRate != this.sampleRate) && this.queuedCount > 0)
@@ -354,7 +356,7 @@ public final class ALEngine extends SFXEngine {
     private void requireContext() {
         final long localContext = this.threadContext ? EXTThreadLocalContext.alcGetThreadContext() : 0;
         if ((localContext != 0 ? localContext : ALC10.alcGetCurrentContext()) != this.context)
-            throw new IllegalStateException("The ALEngine's original OpenAL context must be current on this thread");
+            throw new IllegalStateException(DataTool.errCode(WaterMedia.ERR_AL_CONTEXT_NOT_CURRENT) + "Failed to use the ALEngine, its original OpenAL context is not current on this thread");
     }
 
     // PUBLISHES A NEW SINK SET WITH ITS BATCH SOURCE IDS
@@ -383,7 +385,7 @@ public final class ALEngine extends SFXEngine {
     private void reclaimProcessed(final Sink sink) {
         int processed = AL10.alGetSourcei(sink.source, AL10.AL_BUFFERS_PROCESSED);
         checkError("query processed buffers");
-        if (processed > sink.buffers.length - sink.freeCount) throw new IllegalStateException("OpenAL processed-buffer count exceeds the owned queue");
+        if (processed > sink.buffers.length - sink.freeCount) throw new IllegalStateException(DataTool.errCode(WaterMedia.ERR_AL_PROCESSED_EXCEEDS) + "Failed to reclaim the OpenAL buffers due to a processed count that exceeds the owned queue");
         while (processed-- > 0) {
             // DRIVER MISCOUNT GUARD: A FULL FREE STACK MEANS EVERY OWNED BUFFER IS ALREADY RECLAIMED
             if (sink.freeCount == sink.freeIds.length) break;
@@ -496,7 +498,7 @@ public final class ALEngine extends SFXEngine {
                     out.putDouble(i * 8, mono ? (in.getDouble(at) + in.getDouble(at + 8)) * 0.5 : in.getDouble(at + side * 8));
                 }
             }
-            case S32 -> throw new IllegalStateException("OpenAL has no S32 format to mix");
+            case S32 -> throw new IllegalStateException(DataTool.errCode(WaterMedia.ERR_AL_NO_S32_FORMAT) + "Failed to mix S32 samples due to no OpenAL S32 format");
         }
         return out;
     }
@@ -508,7 +510,7 @@ public final class ALEngine extends SFXEngine {
     private static void checkError(final String operation) {
         final int error = AL10.alGetError();
         if (error != AL10.AL_NO_ERROR)
-            throw new IllegalStateException("OpenAL failed to " + operation + " (err=0x" + Integer.toHexString(error) + ")");
+            throw new IllegalStateException(DataTool.errCode(WaterMedia.ERR_AL_CHECK_ERROR) + "Failed to " + operation + " due to an OpenAL error (err=0x" + Integer.toHexString(error) + ")");
     }
 
     private static ChannelSupport[] channelTable(final boolean floating, final boolean doubles, final boolean multichannel, final boolean spatial) {
@@ -612,7 +614,7 @@ public final class ALEngine extends SFXEngine {
                 source = AL10.alGenSources();
                 final int err = AL10.alGetError();
                 if (source == 0 || err != AL10.AL_NO_ERROR)
-                    throw new IllegalStateException("OpenAL source/buffer generation failed (err=0x" + Integer.toHexString(err) + ")");
+                    throw new IllegalStateException(DataTool.errCode(WaterMedia.ERR_AL_GEN_SOURCE) + "Failed to generate the OpenAL source and buffers (err=0x" + Integer.toHexString(err) + ")");
                 engine.clearSpatial(source);
                 AL10.alSourcef(source, AL10.AL_GAIN, engine.volume);
                 AL10.alSourcef(source, AL10.AL_PITCH, engine.speed);
@@ -645,7 +647,7 @@ public final class ALEngine extends SFXEngine {
          * @throws IllegalArgumentException when {@code mix} is null
          */
         public boolean mix(final Mix mix) {
-            if (mix == null) throw new IllegalArgumentException("A sink needs a mix");
+            if (mix == null) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_AL_MIX_NULL_MIX) + "Failed to set the sink mix due to null mix");
             final ALEngine engine = ALEngine.this;
             synchronized (engine) {
                 if (this.released) return false;

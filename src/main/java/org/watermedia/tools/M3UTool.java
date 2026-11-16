@@ -2,6 +2,7 @@ package org.watermedia.tools;
 
 import org.apache.logging.log4j.Marker;
 import org.apache.logging.log4j.MarkerManager;
+import org.watermedia.WaterMedia;
 import org.watermedia.api.util.HttpHeaders;
 import org.watermedia.api.util.NetRequest;
 
@@ -41,7 +42,7 @@ public final class M3UTool {
         try (final NetRequest req = new NetRequest(uri).headers(headers).send()) {
             final int code = req.statusCode();
             if (code != 200)
-                throw new IOException("Cannot fetch playlist from " + uri + ": server returned HTTP " + code + " (expected 200 OK)");
+                throw new IOException(DataTool.errCode(WaterMedia.ERR_M3U_HTTP_STATUS) + "Failed to fetch the playlist from " + uri + " due to HTTP status: " + code + " (expected 200 OK)");
             return parse(req.text(), uri);
         }
     }
@@ -49,7 +50,7 @@ public final class M3UTool {
     /** Parses a playlist body (a leading BOM is tolerated) whose entries resolve against {@code source}; blank text, no {@code #EXTM3U} or no known tag throws. */
     public static Playlist parse(final String raw, final URI source) throws IOException {
         if (raw == null || raw.isBlank())
-            throw new IOException("Empty playlist from " + source + ": the response body was null or blank, nothing to parse");
+            throw new IOException(DataTool.errCode(WaterMedia.ERR_M3U_EMPTY_BODY) + "Failed to parse the playlist from " + source + " due to null or blank body");
 
         // STRIP A LEADING UTF-8 BOM (SOME IPTV PROVIDERS EMIT IT) BEFORE LOOKING FOR THE HEADER
         final String content = raw.charAt(0) == '\uFEFF' ? raw.substring(1) : raw;
@@ -58,8 +59,8 @@ public final class M3UTool {
         if (!head.startsWith("#EXTM3U")) {
             // SHORT, SINGLE-LINE EXCERPT OF THE BODY FOR THE ERROR MESSAGE
             final String preview = head.substring(0, Math.min(32, head.length())).replace('\n', ' ').replace('\r', ' ');
-            throw new IOException("Invalid playlist from " + source + ": missing the mandatory #EXTM3U header (body starts with '"
-                    + preview + "'), so it is not an M3U/M3U8 document");
+            throw new IOException(DataTool.errCode(WaterMedia.ERR_M3U_NO_HEADER) + "Failed to parse the playlist from " + source + " due to missing #EXTM3U header, body starts with '"
+                    + preview + "'");
         }
 
         // STREAM-INF WINS (MASTER); ANY OTHER #EXT-X- MARKS A MEDIA PLAYLIST; ONLY A TAG-LESS #EXTINF LIST IS IPTV
@@ -67,8 +68,8 @@ public final class M3UTool {
         if (content.contains("#EXT-X-"))           return parseMedia(content, source);
         if (content.contains("#EXTINF:"))          return parseIptv(content, source);
 
-        throw new IOException("Unrecognized playlist from " + source
-                + ": has #EXTM3U but none of #EXT-X-STREAM-INF (master), #EXT-X-* (media) or #EXTINF (iptv), so its shape is unknown");
+        throw new IOException(DataTool.errCode(WaterMedia.ERR_M3U_UNKNOWN_SHAPE) + "Failed to parse the playlist from " + source
+                + " due to unknown shape, it has #EXTM3U but none of #EXT-X-STREAM-INF (master), #EXT-X-* (media) or #EXTINF (iptv)");
     }
 
     /** Returns the variants of an HLS master fetched with the stream's {@code headers}, or one variant of {@code source} itself for a media playlist or any failure; never throws. */

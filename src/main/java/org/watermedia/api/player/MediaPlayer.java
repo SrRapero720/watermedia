@@ -6,6 +6,7 @@ import org.watermedia.WaterMedia;
 import org.watermedia.WaterMediaConfig;
 import org.watermedia.api.util.MathUtil;
 import org.watermedia.api.util.MediaQuality;
+import org.watermedia.tools.DataTool;
 import org.watermedia.tools.ThreadTool;
 
 import java.net.URI;
@@ -117,10 +118,10 @@ public abstract sealed class MediaPlayer permits ServerMediaPlayer, FFMediaPlaye
     // MEDIA PLAYERS DECODE AND RENDER, SO THEY ARE CLIENT-ONLY; THE HEADLESS CLOCK BELOW IS THE SERVER-SIDE PLAYER
     MediaPlayer(final MRL mrl, final int sourceIndex, final GFXEngine gfx, final SFXEngine sfx) {
         WaterMedia.checkIsClientSideOrThrow(this.getClass());
-        if (mrl == null) throw new IllegalArgumentException("MediaPlayer must have a valid MRL");
+        if (mrl == null) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_PLAYER_NULL_MRL) + "Failed to create the MediaPlayer due to null MRL");
         final MRL.Source resolved = mrl.source(sourceIndex);
-        if (resolved == null) throw new IllegalArgumentException("Source at index " + sourceIndex + " is not available");
-        if (gfx == null && sfx == null) throw new IllegalArgumentException("MediaPlayer must have a valid GFX or SFX resource");
+        if (resolved == null) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_PLAYER_SOURCE_UNAVAILABLE) + "Failed to create the MediaPlayer due to unavailable source: index " + sourceIndex);
+        if (gfx == null && sfx == null) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_PLAYER_NULL_ENGINES) + "Failed to create the MediaPlayer due to null GFX and SFX engines");
         // A MISSING VIDEO SINK IS WORTH A WARNING; MISSING AUDIO IS THE NORMAL SHAPE OF EVERY IMAGE PLAYER
         if (gfx == null)
             LOGGER.warn(IT, "GFXEngine is null: there will be no video output");
@@ -158,7 +159,7 @@ public abstract sealed class MediaPlayer permits ServerMediaPlayer, FFMediaPlaye
      * @throws IllegalArgumentException when {@code snapshot} is null
      */
     public final void sync(final PlayerState snapshot) {
-        if (snapshot == null) throw new IllegalArgumentException("Snapshot cannot be null");
+        if (snapshot == null) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_PLAYER_NULL_SNAPSHOT) + "Failed to apply the snapshot due to null snapshot");
         synchronized (this.tickLock) {
             if (!this.armed) return;
             this.heard = new Heard(snapshot, System.nanoTime());
@@ -221,7 +222,7 @@ public abstract sealed class MediaPlayer permits ServerMediaPlayer, FFMediaPlaye
      * @param ms drift tolerance in milliseconds, {@code > 0}
      */
     public final void tolerance(final long ms) {
-        if (ms <= 0) throw new IllegalArgumentException("Tolerance must be positive");
+        if (ms <= 0) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_PLAYER_TOLERANCE_RANGE) + "Failed to set the tolerance due to non-positive value");
         this.toleranceMs = ms;
     }
 
@@ -241,7 +242,7 @@ public abstract sealed class MediaPlayer permits ServerMediaPlayer, FFMediaPlaye
      * @throws IllegalArgumentException if {@code quality} is {@code null}
      */
     public void quality(final MediaQuality quality) {
-        if (quality == null) throw new IllegalArgumentException("Quality cannot be null.");
+        if (quality == null) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_PLAYER_NULL_QUALITY) + "Failed to set the quality due to null quality");
         this.quality = quality;
     }
 
@@ -288,7 +289,7 @@ public abstract sealed class MediaPlayer permits ServerMediaPlayer, FFMediaPlaye
      * @throws IllegalArgumentException if {@code track} is null
      */
     public boolean audioTrack(final AudioTrack track) {
-        if (track == null) throw new IllegalArgumentException("Audio track cannot be null");
+        if (track == null) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_PLAYER_NULL_TRACK) + "Failed to set the audio track due to null track");
         return false;
     }
 
@@ -330,7 +331,7 @@ public abstract sealed class MediaPlayer permits ServerMediaPlayer, FFMediaPlaye
      * @throws IllegalArgumentException if width or height is negative
      */
     public void scale(final int width, final int height) {
-        if (width < 0 || height < 0) throw new IllegalArgumentException("Dimensions cannot be negative.");
+        if (width < 0 || height < 0) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_PLAYER_NEGATIVE_SIZE) + "Failed to set the dimensions due to negative size");
         this.scaleWidth = width;
         this.scaleHeight = height;
     }
@@ -351,7 +352,7 @@ public abstract sealed class MediaPlayer permits ServerMediaPlayer, FFMediaPlaye
      * @see #scale(int, int)
      */
     public void lod(final LodLevel lod) {
-        if (lod == null) throw new IllegalArgumentException("LOD level cannot be null.");
+        if (lod == null) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_PLAYER_NULL_LOD) + "Failed to set the LOD level due to null level");
         this.lod = lod;
     }
 
@@ -392,7 +393,7 @@ public abstract sealed class MediaPlayer permits ServerMediaPlayer, FFMediaPlaye
      * @throws IllegalArgumentException when {@code mix} is null
      */
     public ALEngine.Sink addSink(final ALEngine.Mix mix) {
-        if (mix == null) throw new IllegalArgumentException("A sink needs a mix");
+        if (mix == null) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_PLAYER_SINK_NULL_MIX) + "Failed to create the sink due to null mix");
         return this.sfx instanceof final ALEngine al ? al.addSink(mix) : null;
     }
 
@@ -620,7 +621,7 @@ public abstract sealed class MediaPlayer permits ServerMediaPlayer, FFMediaPlaye
      * @throws IllegalArgumentException when {@code listener} is null
      */
     public void onStatus(final StatusListener listener) {
-        if (listener == null) throw new IllegalArgumentException("Listener cannot be null");
+        if (listener == null) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_PLAYER_NULL_LISTENER) + "Failed to add the listener due to null listener");
         synchronized (this.statusEvents) {
             if (!this.statusListeners.contains(listener)) this.statusListeners.add(listener);
         }
@@ -799,7 +800,7 @@ public abstract sealed class MediaPlayer permits ServerMediaPlayer, FFMediaPlaye
                 try {
                     listener.onStatus(this, transition.previous(), transition.current());
                 } catch (final Throwable t) {
-                    LOGGER.error(IT, "Status listener failed", t);
+                    LOGGER.error(IT, DataTool.errCode(WaterMedia.ERR_PLAYER_LISTENER_LOG) + "Failed to run the status listener", t);
                 }
             }
         }
@@ -920,7 +921,7 @@ public abstract sealed class MediaPlayer permits ServerMediaPlayer, FFMediaPlaye
                 player.tickWarned = true;
                 // A SERVER CLOCK CARRIES NO MRL
                 final Object subject = player.mrl != null ? player.mrl.uri() : player.getClass().getSimpleName();
-                LOGGER.error(IT, "Sync tick failed for {}", subject, t);
+                LOGGER.error(IT, DataTool.errCode(WaterMedia.ERR_PLAYER_SYNC_TICK_LOG) + "Failed to run the sync tick for {}", subject, t);
             }
         }
     }
@@ -998,7 +999,7 @@ public abstract sealed class MediaPlayer permits ServerMediaPlayer, FFMediaPlaye
 
         /** Returns the status with this ordinal; throws {@link IllegalArgumentException} when it is out of range. */
         public static Status of(final int value) {
-            if (value < 0 || value >= VALUES.length) throw new IllegalArgumentException("Invalid status ordinal: " + value);
+            if (value < 0 || value >= VALUES.length) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_PLAYER_STATUS_ORDINAL) + "Failed to read the status due to invalid ordinal: " + value);
             return VALUES[value];
         }
 
@@ -1087,10 +1088,10 @@ public abstract sealed class MediaPlayer permits ServerMediaPlayer, FFMediaPlaye
         private static final int LIVE_BIT = 0b10;
 
         public PlayerState {
-            if (status == null) throw new IllegalArgumentException("Status cannot be null");
-            if (time < 0 || duration < 0) throw new IllegalArgumentException("Time and duration cannot be negative");
+            if (status == null) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_PLAYER_STATE_NULL_STATUS) + "Failed to create the player state due to null status");
+            if (time < 0 || duration < 0) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_PLAYER_STATE_NEGATIVE_TIME) + "Failed to create the player state due to negative time or duration");
             // NaN FAILS BOTH COMPARISONS: THIS ALSO SHIELDS AGAINST CORRUPTED FLOAT PAYLOADS
-            if (!(speed > 0f && speed <= 4f)) throw new IllegalArgumentException("Speed must be in (0, 4], got " + speed);
+            if (!(speed > 0f && speed <= 4f)) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_PLAYER_STATE_SPEED) + "Failed to create the player state due to invalid speed: " + speed + " (expected in (0, 4])");
         }
 
         /** Encodes this snapshot into its fixed binary form, a new heap buffer positioned at zero and ready to transmit. */
@@ -1115,12 +1116,12 @@ public abstract sealed class MediaPlayer permits ServerMediaPlayer, FFMediaPlaye
          * @throws IllegalArgumentException if the payload is null, truncated, of another version or holds out-of-range values
          */
         public static PlayerState read(final ByteBuffer buf) {
-            if (buf == null || buf.remaining() < BYTES) throw new IllegalArgumentException("Snapshot payload is null or truncated, needs " + BYTES + " bytes");
+            if (buf == null || buf.remaining() < BYTES) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_PLAYER_SNAPSHOT_PAYLOAD) + "Failed to read the snapshot due to null or truncated payload: " + BYTES + " bytes needed");
             // DECODE FROM A BIG-ENDIAN VIEW SO THE CALLER'S BYTE ORDER NEVER MATTERS, AND ADVANCE THE CALLER'S POSITION ONLY
             // ONCE THE WHOLE SNAPSHOT PARSED
             final ByteBuffer view = buf.duplicate().order(ByteOrder.BIG_ENDIAN);
             final byte version = view.get();
-            if (version != VERSION) throw new IllegalArgumentException("Unsupported snapshot version: " + version);
+            if (version != VERSION) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_PLAYER_SNAPSHOT_VERSION) + "Failed to read the snapshot due to unsupported version: " + version);
             final int revision = view.getInt();
             final Status status = Status.of(view.get() & 0xFF);
             final long time = view.getLong();

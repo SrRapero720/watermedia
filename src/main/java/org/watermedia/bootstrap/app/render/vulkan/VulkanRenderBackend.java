@@ -13,6 +13,7 @@ import org.watermedia.api.player.PlayerAPI;
 import org.watermedia.api.player.VKContext;
 import org.watermedia.api.util.MathUtil;
 import org.watermedia.bootstrap.app.render.RenderBackend;
+import org.watermedia.tools.DataTool;
 import org.watermedia.tools.IOTool;
 
 import java.io.IOException;
@@ -167,7 +168,7 @@ public final class VulkanRenderBackend implements RenderBackend, VKContext {
 
     /** Creates the instance, surface and device for a GLFW window built with {@code GLFW_NO_API}; {@link #init()} builds the rest. */
     public VulkanRenderBackend(final long glfwWindow) {
-        if (!glfwVulkanSupported()) throw new IllegalStateException("VulkanRenderBackend: GLFW reports Vulkan is unavailable");
+        if (!glfwVulkanSupported()) throw new IllegalStateException(DataTool.errCode(WaterMedia.ERR_APP_VK_GLFW_UNSUPPORTED) + "Failed to init Vulkan, GLFW reports Vulkan is unavailable");
         this.window = glfwWindow;
         try {
             this.createInstanceAndSurface();
@@ -789,7 +790,7 @@ public final class VulkanRenderBackend implements RenderBackend, VKContext {
                     .apiVersion(apiVersion);
 
             final PointerBuffer glfwExts = glfwGetRequiredInstanceExtensions();
-            if (glfwExts == null) throw new IllegalStateException("VulkanRenderBackend: glfwGetRequiredInstanceExtensions returned null");
+            if (glfwExts == null) throw new IllegalStateException(DataTool.errCode(WaterMedia.ERR_APP_VK_GLFW_EXTENSIONS) + "Failed to create the Vulkan instance, glfwGetRequiredInstanceExtensions returned null");
 
             // MOLTENVK: LOADERS HIDE PORTABILITY DEVICES UNLESS THE INSTANCE ENABLES VK_KHR_portability_enumeration
             // AND ITS FLAG; WITHOUT IT vkEnumeratePhysicalDevices FINDS NOTHING ON MACOS
@@ -828,7 +829,7 @@ public final class VulkanRenderBackend implements RenderBackend, VKContext {
         try (final MemoryStack stack = stackPush()) {
             final IntBuffer count = stack.mallocInt(1);
             check(vkEnumeratePhysicalDevices(this.instance, count, null), "count physical devices");
-            if (count.get(0) == 0) throw new IllegalStateException("VulkanRenderBackend: no Vulkan physical devices");
+            if (count.get(0) == 0) throw new IllegalStateException(DataTool.errCode(WaterMedia.ERR_APP_VK_NO_DEVICES) + "Failed to pick a Vulkan physical device due to no devices found");
             final PointerBuffer devices = stack.mallocPointer(count.get(0));
             check(vkEnumeratePhysicalDevices(this.instance, count, devices), "enumerate physical devices");
 
@@ -857,7 +858,7 @@ public final class VulkanRenderBackend implements RenderBackend, VKContext {
                     bestHostImport = extHost;
                 }
             }
-            if (best == null) throw new IllegalStateException("VulkanRenderBackend: no device supports graphics+present on a single queue family");
+            if (best == null) throw new IllegalStateException(DataTool.errCode(WaterMedia.ERR_APP_VK_NO_QUEUE_FAMILY) + "Failed to pick a Vulkan physical device due to no device supporting graphics+present on a single queue family");
             this.physicalDevice = best;
             this.queueFamily = bestFamily;
             this.hostImport = bestHostImport;
@@ -1382,7 +1383,7 @@ public final class VulkanRenderBackend implements RenderBackend, VKContext {
             final VkMemoryRequirements req = VkMemoryRequirements.malloc(stack);
             vkGetImageMemoryRequirements(this.device, this.layerImage[index], req);
             final int type = this.memType(req.memoryTypeBits(), VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-            if (type < 0) throw new IllegalStateException("VulkanRenderBackend: no device-local memory for a layer");
+            if (type < 0) throw new IllegalStateException(DataTool.errCode(WaterMedia.ERR_APP_VK_MEMORY_LAYER) + "Failed to create a layer due to no device-local memory");
             final VkMemoryAllocateInfo mai = VkMemoryAllocateInfo.calloc(stack).sType$Default()
                     .allocationSize(req.size()).memoryTypeIndex(type);
             final LongBuffer pMem = stack.mallocLong(1);
@@ -1474,7 +1475,7 @@ public final class VulkanRenderBackend implements RenderBackend, VKContext {
             final VkMemoryRequirements req = VkMemoryRequirements.malloc(stack);
             vkGetBufferMemoryRequirements(this.device, buf, req);
             final int type = this.memType(req.memoryTypeBits(), VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-            if (type < 0) throw new IllegalStateException("VulkanRenderBackend: no host-visible coherent memory for vertices");
+            if (type < 0) throw new IllegalStateException(DataTool.errCode(WaterMedia.ERR_APP_VK_MEMORY_VERTEX) + "Failed to allocate the vertex buffer due to no host-visible coherent memory");
             final VkMemoryAllocateInfo mai = VkMemoryAllocateInfo.calloc(stack).sType$Default()
                     .allocationSize(req.size()).memoryTypeIndex(type);
             final LongBuffer pMem = stack.mallocLong(1);
@@ -1577,7 +1578,7 @@ public final class VulkanRenderBackend implements RenderBackend, VKContext {
             final VkMemoryRequirements req = VkMemoryRequirements.malloc(stack);
             vkGetBufferMemoryRequirements(this.device, staging, req);
             final int type = this.memType(req.memoryTypeBits(), VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-            if (type < 0) throw new IllegalStateException("VulkanRenderBackend: no host-visible coherent memory for staging");
+            if (type < 0) throw new IllegalStateException(DataTool.errCode(WaterMedia.ERR_APP_VK_MEMORY_STAGING) + "Failed to upload the texture due to no host-visible coherent memory for staging");
             final VkMemoryAllocateInfo mai = VkMemoryAllocateInfo.calloc(stack).sType$Default()
                     .allocationSize(req.size()).memoryTypeIndex(type);
             final LongBuffer pMem = stack.mallocLong(1);
@@ -1637,7 +1638,7 @@ public final class VulkanRenderBackend implements RenderBackend, VKContext {
             final VkMemoryRequirements req = VkMemoryRequirements.malloc(stack);
             vkGetImageMemoryRequirements(this.device, img, req);
             final int type = this.memType(req.memoryTypeBits(), VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-            if (type < 0) throw new IllegalStateException("VulkanRenderBackend: no device-local memory for image");
+            if (type < 0) throw new IllegalStateException(DataTool.errCode(WaterMedia.ERR_APP_VK_MEMORY_IMAGE) + "Failed to create the image due to no device-local memory");
             final VkMemoryAllocateInfo mai = VkMemoryAllocateInfo.calloc(stack).sType$Default()
                     .allocationSize(req.size()).memoryTypeIndex(type);
             final LongBuffer pMem = stack.mallocLong(1);
@@ -1680,17 +1681,17 @@ public final class VulkanRenderBackend implements RenderBackend, VKContext {
         // THE BUNDLED GLSL COMPILES TO SPIR-V AT RUNTIME THROUGH shaderc
         final String glsl;
         try { glsl = IOTool.shader(name); }
-        catch (final IOException e) { throw new IllegalStateException("VulkanRenderBackend: cannot read the shader " + name, e); }
+        catch (final IOException e) { throw new IllegalStateException(DataTool.errCode(WaterMedia.ERR_APP_VK_SHADER_READ) + "Failed to read the shader " + name, e); }
         final long compiler = shaderc_compiler_initialize();
-        if (compiler == 0L) throw new IllegalStateException("VulkanRenderBackend: shaderc_compiler_initialize failed");
+        if (compiler == 0L) throw new IllegalStateException(DataTool.errCode(WaterMedia.ERR_APP_VK_SHADERC_INIT) + "Failed to compile the shader due to shaderc_compiler_initialize failure");
         long result = 0L;
         try {
             result = shaderc_compile_into_spv(compiler, glsl, kind, name, "main", 0L);
-            if (result == 0L) throw new IllegalStateException("VulkanRenderBackend: shaderc compile returned null");
+            if (result == 0L) throw new IllegalStateException(DataTool.errCode(WaterMedia.ERR_APP_VK_SHADERC_NULL) + "Failed to compile the shader, shaderc compile returned null");
             if (shaderc_result_get_compilation_status(result) != shaderc_compilation_status_success)
-                throw new IllegalStateException("VulkanRenderBackend: shader compile failed: " + shaderc_result_get_error_message(result));
+                throw new IllegalStateException(DataTool.errCode(WaterMedia.ERR_APP_VK_SHADER_COMPILE) + "Failed to compile the shader: " + shaderc_result_get_error_message(result));
             final ByteBuffer spv = shaderc_result_get_bytes(result);
-            if (spv == null) throw new IllegalStateException("VulkanRenderBackend: shaderc produced no SPIR-V");
+            if (spv == null) throw new IllegalStateException(DataTool.errCode(WaterMedia.ERR_APP_VK_SHADERC_NO_SPIRV) + "Failed to compile the shader, shaderc produced no SPIR-V");
             try (final MemoryStack stack = stackPush()) {
                 final VkShaderModuleCreateInfo smci = VkShaderModuleCreateInfo.calloc(stack).sType$Default().pCode(spv);
                 final LongBuffer p = stack.mallocLong(1);
@@ -1716,7 +1717,7 @@ public final class VulkanRenderBackend implements RenderBackend, VKContext {
     }
 
     private static void check(final int result, final String op) {
-        if (result != VK_SUCCESS) throw new IllegalStateException("VulkanRenderBackend: " + op + " failed (VkResult " + result + ")");
+        if (result != VK_SUCCESS) throw new IllegalStateException(DataTool.errCode(WaterMedia.ERR_APP_VK_CALL_RESULT) + "Failed to run " + op + ": VkResult " + result);
     }
 
     private static void putSoftVertex(final FloatBuffer dst, final float x, final float y) {

@@ -3,6 +3,7 @@ package org.watermedia.api.platform.web;
 import com.google.gson.annotations.SerializedName;
 import org.apache.logging.log4j.Marker;
 import org.apache.logging.log4j.MarkerManager;
+import org.watermedia.WaterMedia;
 import org.watermedia.WaterMediaConfig;
 import org.watermedia.api.platform.*;
 import org.watermedia.api.util.MediaType;
@@ -65,17 +66,17 @@ public final class KickPlatform implements Platform {
             final Channel channel = WebRequests.fetchJson(NAME, String.format(CHANNELS_API, slug), Channel.class);
 
             if (channel.livestream == null || !channel.livestream.live)
-                throw new PlatformException(NAME, "Streamer '" + slug + "' is offline");
+                throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_KICK_STREAMER_OFFLINE) + "Failed to resolve streamer '" + slug + "', it is offline");
 
             if (channel.banned)
-                throw new PlatformException(NAME, "Streamer '" + slug + "' is banned");
+                throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_KICK_STREAMER_BANNED) + "Failed to resolve streamer '" + slug + "', it is banned");
 
             if (channel.livestream.mature && !WaterMediaConfig.platforms.allowMatureContent)
-                throw new MatureContentException(NAME, "Streamer '" + slug + "' is marked as mature content");
+                throw new MatureContentException(NAME, DataTool.errCode(WaterMedia.ERR_KICK_STREAMER_MATURE) + "Failed to resolve streamer '" + slug + "' due to mature content");
 
             final URI playback = DataTool.uri(channel.url);
             if (playback == null)
-                throw new PlatformException(NAME, "Streamer '" + slug + "' is live but exposes no usable playback URL");
+                throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_KICK_LIVE_NO_URL) + "Failed to resolve streamer '" + slug + "' due to no usable playback URL while live");
 
             final String username = channel.user != null ? channel.user.username : slug;
             if (channel.livestream.sessionTitle == null)
@@ -108,16 +109,16 @@ public final class KickPlatform implements Platform {
 
         final URI playback = DataTool.uri(video.source);
         if (video.livestream == null || playback == null)
-            throw new PlatformException(NAME, "VOD '" + id + "' is unavailable (no usable playback URL)");
+            throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_KICK_VOD_NO_URL) + "Failed to resolve VOD '" + id + "' due to no usable playback URL");
 
         final User user = video.livestream.channel != null ? video.livestream.channel.user : null;
         final String username = user != null ? user.username : null;
 
         if (video.livestream.channel != null && video.livestream.channel.banned)
-            throw new PlatformException(NAME, "Streamer '" + username + "' is banned");
+            throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_KICK_USER_BANNED) + "Failed to resolve streamer '" + username + "', it is banned");
 
         if (video.livestream.mature && !WaterMediaConfig.platforms.allowMatureContent)
-            throw new MatureContentException(NAME, "VOD '" + id + "' is marked as mature content");
+            throw new MatureContentException(NAME, DataTool.errCode(WaterMedia.ERR_KICK_VOD_MATURE) + "Failed to resolve VOD '" + id + "' due to mature content");
 
         if (video.livestream.sessionTitle == null)
             LOGGER.warn(IT, "Kick VOD '{}' reports no session_title", id);
@@ -185,14 +186,14 @@ public final class KickPlatform implements Platform {
         final ClipResponse response = WebRequests.fetchJson(NAME, String.format(CLIPS_API, clipId), ClipResponse.class);
         final Clip clip = response.clip;
         if (clip == null)
-            throw new PlatformException(NAME, "Clip '" + clipId + "' is unavailable");
+            throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_KICK_CLIP_UNAVAILABLE) + "Failed to resolve clip '" + clipId + "', it is unavailable");
 
         final URI clipUrl = DataTool.uri(clip.clipUrl);
         if (clipUrl == null)
-            throw new PlatformException(NAME, "Clip '" + clipId + "' has no usable playback URL (removed or still processing)");
+            throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_KICK_CLIP_NO_URL) + "Failed to resolve clip '" + clipId + "' due to no usable playback URL (removed or still processing)");
 
         if (clip.mature && !WaterMediaConfig.platforms.allowMatureContent)
-            throw new MatureContentException(NAME, "Clip '" + clipId + "' is marked as mature content");
+            throw new MatureContentException(NAME, DataTool.errCode(WaterMedia.ERR_KICK_CLIP_MATURE) + "Failed to resolve clip '" + clipId + "' due to mature content");
 
         // CLIP URL MAY BE A DIRECT FILE (mp4/webm) OR AN M3U8 PLAYLIST
         final HttpHeaders headers = HttpHeaders.defaults(uri);

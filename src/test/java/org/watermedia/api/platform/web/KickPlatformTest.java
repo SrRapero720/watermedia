@@ -161,7 +161,7 @@ public class KickPlatformTest {
             final URI uri = URI.create(page);
             final PlatformException thrown = assertThrows(PlatformException.class, () -> platform.resolve(uri));
             assertFalse(thrown instanceof MatureContentException, "An unsupported shape is not a mature block");
-            assertTrue(thrown.getMessage().startsWith(KickPlatform.NAME + ": Unsupported URL: "), thrown.getMessage());
+            assertTrue(thrown.getMessage().startsWith(KickPlatform.NAME + ": (wm_err:2020) Failed to resolve "), thrown.getMessage());
         }
     }
 }

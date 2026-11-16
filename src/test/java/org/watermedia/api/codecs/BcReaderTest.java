@@ -90,7 +90,7 @@ public class BcReaderTest {
         void refusesOversizedTexturesAndNegativeDelays() {
             // HEADER FIELD REFUSALS ARE DdsHeader's, PINNED BY DdsHeaderTest; THESE TWO ARE THE READER'S OWN CHECKS
             final ByteBuffer large = ByteBuffer.wrap(DdsFixture.write(8_192, 8_192, PixelFormat.BC7, 9));
-            assertTrue(assertThrowsExactly(CodecException.class, () -> new BcReader(large)).getMessage().contains("too large"));
+            assertTrue(assertThrowsExactly(CodecException.class, () -> new BcReader(large)).getMessage().startsWith("(wm_err:4000) Failed to read the BC texture due to excessive size"));
             assertThrowsExactly(CodecException.class, () -> new BcReader(texture(1, DdsFixture.writeFooter(-1))));
         }
     }

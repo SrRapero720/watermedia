@@ -1,6 +1,8 @@
 package org.watermedia.api.codecs.common.png;
 
+import org.watermedia.WaterMedia;
 import org.watermedia.api.codecs.CodecException;
+import org.watermedia.tools.DataTool;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -23,7 +25,7 @@ public record ICCP(String profileName, int compressionMethod, byte[] compressedP
 
     /** Converts a generic chunk to iCCP. */
     public static ICCP convert(final PngChunk chunk) throws CodecException {
-        if (chunk.type() != SIGNATURE) throw new IllegalArgumentException("Invalid chunk type for iCCP: 0x" + Integer.toHexString(chunk.type()));
+        if (chunk.type() != SIGNATURE) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_PNG_ICCP_TYPE) + "Failed to read iCCP due to invalid chunk type: 0x" + Integer.toHexString(chunk.type()));
 
         final byte[] data = chunk.data();
         // THE PROFILE NAME TAKES 1-79 BYTES AND ENDS AT A NUL
@@ -34,13 +36,13 @@ public record ICCP(String profileName, int compressionMethod, byte[] compressedP
                 break;
             }
         }
-        if (nullIndex < 1) throw new CodecException("Invalid iCCP: missing or empty profile name");
+        if (nullIndex < 1) throw new CodecException(DataTool.errCode(WaterMedia.ERR_PNG_ICCP_NAME) + "Failed to read iCCP due to missing or empty profile name");
         // NEED THE COMPRESSION-METHOD BYTE AFTER THE NAME NUL; A TRUNCATED PAYLOAD OTHERWISE READS PAST THE ARRAY
-        if (data.length < nullIndex + 2) throw new CodecException("Truncated iCCP: missing compression method");
+        if (data.length < nullIndex + 2) throw new CodecException(DataTool.errCode(WaterMedia.ERR_PNG_ICCP_TRUNCATED) + "Failed to read iCCP due to truncated data: missing compression method");
 
         final String profileName = new String(data, 0, nullIndex, StandardCharsets.ISO_8859_1);
         final int compressionMethod = data[nullIndex + 1] & 0xFF;
-        if (compressionMethod != 0) throw new CodecException("Unknown iCCP compression method: " + compressionMethod);
+        if (compressionMethod != 0) throw new CodecException(DataTool.errCode(WaterMedia.ERR_PNG_ICCP_COMPRESSION) + "Failed to read iCCP due to unknown compression method: " + compressionMethod);
 
         final int profileStart = nullIndex + 2;
         final byte[] compressedProfile = new byte[data.length - profileStart];

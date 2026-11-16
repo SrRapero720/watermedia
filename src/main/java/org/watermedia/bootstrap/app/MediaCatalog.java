@@ -3,6 +3,7 @@ package org.watermedia.bootstrap.app;
 import org.apache.logging.log4j.Marker;
 import org.apache.logging.log4j.MarkerManager;
 import org.watermedia.WaterMedia;
+import org.watermedia.tools.DataTool;
 import org.watermedia.tools.IOTool;
 import org.watermedia.tools.JSONTool;
 
@@ -22,7 +23,7 @@ public final class MediaCatalog {
     /** Reads the bundled groups and channels; without DEBUG logging the debug-only links are left out. */
     public void load() {
         try { this.uriGroups = JSONTool.parse(IOTool.jarRead("assets/watermedia/catalog/uris.json"), URIGroup[].class); }
-        catch (final IOException e) { throw new IllegalStateException("Cannot read the bundled uris.json", e); }
+        catch (final IOException e) { throw new IllegalStateException(DataTool.errCode(WaterMedia.ERR_APP_CATALOG_URIS) + "Failed to read the bundled uris.json", e); }
         try {
             final IptvCatalog catalog = JSONTool.parse(IOTool.jarRead("assets/watermedia/catalog/iptv.json"), IptvCatalog.class);
             this.iptvChannels = catalog == null || catalog.channels() == null ? new IptvChannel[0] : catalog.channels();

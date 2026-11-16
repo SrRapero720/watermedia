@@ -1,5 +1,6 @@
 package org.watermedia.api.codecs.common.gif;
 
+import org.watermedia.WaterMedia;
 import org.watermedia.api.codecs.CodecException;
 import org.watermedia.tools.DataTool;
 
@@ -17,12 +18,12 @@ public record ScreenDescriptor(
     /** Reads the {@value #LENGTH}-byte descriptor that follows the GIF signature at the buffer position, advancing past it. */
     public static ScreenDescriptor read(final ByteBuffer buffer) throws CodecException {
         // VALIDATION LIVES HERE: A RECORD CANONICAL CONSTRUCTOR CANNOT THROW CodecException
-        if (buffer.remaining() < LENGTH) throw new CodecException("Truncated GIF screen descriptor");
+        if (buffer.remaining() < LENGTH) throw new CodecException(DataTool.errCode(WaterMedia.ERR_GIF_SCREEN_TRUNCATED) + "Failed to read the GIF screen descriptor due to truncated data");
         final int at = buffer.position();
         final int width = DataTool.u16(buffer, at, ByteOrder.LITTLE_ENDIAN);
         final int height = DataTool.u16(buffer, at + 2, ByteOrder.LITTLE_ENDIAN);
         final int packedFields = buffer.get(at + 4) & 0xFF;
-        if (width <= 0 || height <= 0) throw new CodecException("Width and height must be positive integers");
+        if (width <= 0 || height <= 0) throw new CodecException(DataTool.errCode(WaterMedia.ERR_GIF_SCREEN_SIZE) + "Failed to read the GIF screen descriptor due to non-positive width or height");
         buffer.position(at + LENGTH);
         return new ScreenDescriptor(width, height, (packedFields & 0b1000_0000) != 0, ((packedFields & 0b0111_0000) >> 4) + 1,
                 (packedFields & 0b0000_1000) != 0, packedFields & 0b0000_0111, buffer.get(at + 5) & 0xFF, buffer.get(at + 6) & 0xFF);

@@ -5,6 +5,7 @@ import org.apache.logging.log4j.MarkerManager;
 import org.watermedia.WaterMedia;
 import org.watermedia.api.codecs.CodecsAPI;
 import org.watermedia.api.util.MediaType;
+import org.watermedia.tools.DataTool;
 import org.watermedia.tools.ThreadTool;
 
 import java.net.URI;
@@ -24,7 +25,7 @@ public final class PlayerAPI extends WaterMedia.Module {
 
     /** Creates the player module; {@link WaterMedia#start} calls it once per process and a second call throws. */
     public PlayerAPI() {
-        if (!LOADED.compareAndSet(false, true)) throw new IllegalStateException("PlayerAPI is already loaded");
+        if (!LOADED.compareAndSet(false, true)) throw new IllegalStateException(DataTool.errCode(WaterMedia.ERR_PLAYERAPI_LOADED) + "Failed to load PlayerAPI, it is already loaded");
     }
 
     // ==========================================================================
@@ -48,7 +49,7 @@ public final class PlayerAPI extends WaterMedia.Module {
      * @throws IllegalStateException before the player module loads, and on dedicated servers
      */
     public static MRL mrl(final String uri) {
-        if (uri == null) throw new IllegalArgumentException("URI cannot be null");
+        if (uri == null) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_PLAYERAPI_NULL_URI) + "Failed to create the player due to null URI");
         try {
             final Path file = WaterMedia.cwd().resolve(uri);
             if (Files.isRegularFile(file)) return MRL.get(file.toAbsolutePath().normalize().toUri());
@@ -109,7 +110,7 @@ public final class PlayerAPI extends WaterMedia.Module {
      * @throws IllegalArgumentException when {@code mrl}, {@code gfx} or {@code sfx} is null
      */
     public static MediaPlayer player(final MRL mrl, final int sourceIndex, final Supplier<GFXEngine> gfx, final Supplier<SFXEngine> sfx) {
-        if (mrl == null || gfx == null || sfx == null) throw new IllegalArgumentException("The MRL and both engine suppliers are required");
+        if (mrl == null || gfx == null || sfx == null) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_PLAYERAPI_NULL_ARGS) + "Failed to create the player due to null MRL or engine suppliers");
         final MRL.Source source = mrl.source(sourceIndex);
         if (source == null) {
             // STILL FETCHING IS A NORMAL TRANSIENT STATE: DON'T SPAM WARNINGS FOR IT
@@ -138,14 +139,14 @@ public final class PlayerAPI extends WaterMedia.Module {
                 return new FFMediaPlayer(mrl, sourceIndex, gfxEngine, sfxEngine);
             }
 
-            LOGGER.error(IT, "No media backend available for: {}", mrl.uri());
+            LOGGER.error(IT, DataTool.errCode(WaterMedia.ERR_PLAYERAPI_NO_BACKEND) + "Failed to create the player due to no media backend available: {}", mrl.uri());
             return null;
         } catch (final Exception e) { // VM AND LINKAGE ERRORS MUST PROPAGATE.
             try { if (gfxEngine != null) gfxEngine.release(); }
             catch (final Exception cleanup) { LOGGER.warn(IT, "Failed to release GFX engine after construction failure", cleanup); }
             try { if (sfxEngine != null) sfxEngine.release(); }
             catch (final Exception cleanup) { LOGGER.warn(IT, "Failed to release SFX engine after construction failure", cleanup); }
-            LOGGER.error(IT, "Player construction failed for: {}", mrl.uri(), e);
+            LOGGER.error(IT, DataTool.errCode(WaterMedia.ERR_PLAYERAPI_CREATE_LOG) + "Failed to create the player: {}", mrl.uri(), e);
             return null;
         }
     }
@@ -179,7 +180,7 @@ public final class PlayerAPI extends WaterMedia.Module {
     public static JFXEngine jfxEngine(final Runnable onFrame) {
         // JFXEngine LINKS JAVAFX TYPES WHEN IT LOADS AND NEEDS PixelBuffer (JAVAFX 13+), SO A MISSING TOOLKIT FAILS HERE
         try { Class.forName("javafx.scene.image.PixelBuffer", false, PlayerAPI.class.getClassLoader()); }
-        catch (final ClassNotFoundException | LinkageError e) { throw new IllegalStateException("JavaFX 13 or newer is not on the class path", e); }
+        catch (final ClassNotFoundException | LinkageError e) { throw new IllegalStateException(DataTool.errCode(WaterMedia.ERR_PLAYERAPI_JAVAFX) + "Failed to load JavaFX, version 13 or newer is not on the class path", e); }
         return new JFXEngine(onFrame);
     }
 
@@ -237,6 +238,6 @@ public final class PlayerAPI extends WaterMedia.Module {
         // A DEDICATED SERVER PLAYS NOTHING: THE RESOLVER AND THE CACHE STAY OFF
         if (!clientSide) return;
         MRL.start();
-        ThreadTool.safeCall(() -> NetworkCache.start(tmp.resolve("cache")), IT, "The media cache did not start; playback continues without it");
+        ThreadTool.safeCall(() -> NetworkCache.start(tmp.resolve("cache")), IT, DataTool.errCode(WaterMedia.ERR_PLAYERAPI_CACHE_START) + "Failed to start the media cache, playback continues without it");
     }
 }

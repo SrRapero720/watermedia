@@ -1,6 +1,8 @@
 package org.watermedia.api.codecs.readers.svg;
 
+import org.watermedia.WaterMedia;
 import org.watermedia.api.codecs.CodecException;
+import org.watermedia.tools.DataTool;
 
 /**
  * Parses the full SVG {@code d} grammar ({@code M L H V C S Q T A Z}, absolute and relative, implicit lineto,
@@ -260,7 +262,7 @@ final class PathParser {
         catch (final NumberFormatException e) { return 0; }
         // NaN IS THE "COMMAND RAN OUT OF OPERANDS" SENTINEL ABOVE AND THE SCANNER CANNOT SPELL IT HERE.
         // AN INFINITY ("1e999") CAN BE SPELLED, AND IT POISONS FLATNESS AND SCANLINE MATH ALIKE
-        if (Double.isInfinite(v)) throw new CodecException("Non-finite path coordinate");
+        if (Double.isInfinite(v)) throw new CodecException(DataTool.errCode(WaterMedia.ERR_SVG_PATHPARSER_NON_FINITE) + "Failed to parse the SVG path due to non-finite coordinate");
         return v;
     }
 

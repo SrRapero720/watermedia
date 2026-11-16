@@ -306,6 +306,9 @@ Los loggers del proyecto son `watermedia` y `watermedia_binaries`; ponlos en DEB
   se reportan una vez al final.
 - _FFmpeg_ todavía escribe sus propios logs en la salida de error, fuera de los loggers del proyecto
   y de su filtro de secretos.
+- Cada mensaje de excepción y cada línea de error lleva un código como `(wm_err:0720)`. Cada código es una constante
+  `WaterMedia.ERR_*` que señala un solo lugar de WATERMeDIA, así que cítalo en los reportes de bugs; **Upload Logs**
+  de la app lista los que encuentra.
 - `-Dwatermedia.glchecks=true` activa las comprobaciones de errores de OpenGL al subir cuadros.
 
 `src/test/java/org/watermedia/ApiGuideExample.java` tiene ejemplos que compilan para cada motor y para la

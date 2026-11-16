@@ -2,6 +2,8 @@ package org.watermedia.api.codecs.decoders;
 
 import org.bytedeco.ffmpeg.avutil.AVFrame;
 import org.bytedeco.ffmpeg.global.avutil;
+import org.watermedia.WaterMedia;
+import org.watermedia.tools.DataTool;
 
 /**
  * Thread-safe ring buffer of decoded AVFrames, following the ffplay pattern of pre-allocated slots with explicit
@@ -24,7 +26,7 @@ public final class FrameQueue {
 
     /** Creates a ring of {@code capacity} pre-allocated slots, typically 3 for video or 9 for audio. */
     public FrameQueue(final int capacity) {
-        if (capacity <= 0) throw new IllegalArgumentException("Frame queue capacity must be positive");
+        if (capacity <= 0) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_FRAMEQUEUE_CAPACITY) + "Failed to create the frame queue due to non-positive capacity");
         this.capacity = capacity;
         this.queue = new Slot[capacity];
         try {
@@ -62,7 +64,7 @@ public final class FrameQueue {
     public void push() {
         synchronized (this.lock) {
             // A PUSH WITHOUT A GRANTED SLOT WOULD SILENTLY OVERWRITE UNREAD FRAMES, SO IT FAILS LOUD
-            if (this.size >= this.capacity) throw new IllegalStateException("push() without a writable slot (queue full)");
+            if (this.size >= this.capacity) throw new IllegalStateException(DataTool.errCode(WaterMedia.ERR_FRAMEQUEUE_PUSH_FULL) + "Failed to push the frame, the queue is full");
             this.writeIndex = (this.writeIndex + 1) % this.capacity;
             this.size++;
             this.lock.notifyAll();
@@ -173,7 +175,7 @@ public final class FrameQueue {
 
         Slot() {
             this.frame = avutil.av_frame_alloc();
-            if (this.frame == null) throw new OutOfMemoryError("av_frame_alloc failed");
+            if (this.frame == null) throw new OutOfMemoryError(DataTool.errCode(WaterMedia.ERR_FRAMEQUEUE_FRAME_ALLOC) + "Failed to allocate the frame slot due to av_frame_alloc failure");
         }
 
         void destroy() {

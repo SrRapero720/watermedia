@@ -2,7 +2,9 @@ package org.watermedia.api.player;
 
 import org.apache.logging.log4j.Marker;
 import org.apache.logging.log4j.MarkerManager;
+import org.watermedia.WaterMedia;
 import org.watermedia.api.util.SampleType;
+import org.watermedia.tools.DataTool;
 
 import javax.sound.sampled.AudioFormat;
 import javax.sound.sampled.AudioSystem;
@@ -61,7 +63,7 @@ public final class JSEngine extends SFXEngine {
 
     // JAVA SOUND HAS NO OPENAL-STYLE SOURCE ID, SO source() STAYS 0
     JSEngine(final int bufferMs) {
-        if (bufferMs <= 0) throw new IllegalArgumentException("bufferMs must be positive, got " + bufferMs);
+        if (bufferMs <= 0) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_JS_BUFFER_MS) + "Failed to create the JSEngine due to non positive bufferMs: " + bufferMs);
         this.bufferMs = bufferMs;
     }
 
@@ -100,7 +102,7 @@ public final class JSEngine extends SFXEngine {
         if (!reusable && !this.openLine(fmt, (int) ((long) sampleRate * frameSize * this.bufferMs / 1_000L))) {
             // NO OPENABLE LINE FOR THIS FORMAT (NO DEVICE, UNSUPPORTED COMBINATION, ...): REPORT NO AUDIO
             // INSTEAD OF CRASHING PLAYER CREATION
-            LOGGER.error(IT, "Java Sound line unavailable for type={} ch={} rate={}", type, channels, sampleRate);
+            LOGGER.error(IT, DataTool.errCode(WaterMedia.ERR_JS_NO_LINE) + "Failed to open a Java Sound line due to no line available for type={} ch={} rate={}", type, channels, sampleRate);
             return false;
         }
         this.channels = channels;

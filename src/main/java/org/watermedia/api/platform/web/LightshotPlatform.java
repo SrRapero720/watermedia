@@ -2,6 +2,7 @@ package org.watermedia.api.platform.web;
 
 import org.apache.logging.log4j.Marker;
 import org.apache.logging.log4j.MarkerManager;
+import org.watermedia.WaterMedia;
 import org.watermedia.api.platform.*;
 import org.watermedia.api.util.MediaType;
 import org.watermedia.api.util.HttpHeaders;
@@ -32,15 +33,15 @@ public final class LightshotPlatform implements Platform {
         if (uri.getPath() == null || uri.getPath().length() < 2) throw PlatformException.unsupported(NAME, uri);
 
         try (final NetRequest req = new NetRequest(uri).accept("text/html").send()) {
-            if (req.statusCode() != 200) throw new PlatformException(NAME, "Page request for " + uri + " returned HTTP " + req.statusCode());
+            if (req.statusCode() != 200) throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_LIGHTSHOT_PAGE_STATUS) + "Failed to request the page " + uri + " due to HTTP " + req.statusCode());
 
             final String html = req.text();
             final Matcher matcher = IMG_PATTERN.matcher(html);
             if (!matcher.find())
-                throw new PlatformException(NAME, "Screenshot image not found in page (expired, removed, or markup changed): " + uri);
+                throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_LIGHTSHOT_IMAGE_MISSING) + "Failed to resolve the screenshot image due to a missing image in page (expired, removed, or markup changed): " + uri);
 
             final URI image = DataTool.uri(matcher.group(1));
-            if (image == null) throw new PlatformException(NAME, "Screenshot image URL '" + matcher.group(1) + "' is malformed: " + uri);
+            if (image == null) throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_LIGHTSHOT_IMAGE_MALFORMED) + "Failed to resolve the screenshot image due to malformed URL '" + matcher.group(1) + "': " + uri);
             LOGGER.debug(IT, "Lightshot resolved screenshot image {} for {}", image, uri);
 
             final var entry = new Source(MediaType.IMAGE, null, null,
@@ -51,7 +52,7 @@ public final class LightshotPlatform implements Platform {
         } catch (final PlatformException e) {
             throw e;
         } catch (final IOException | RuntimeException e) {
-            throw new PlatformException(NAME, "Failed to resolve " + uri, e);
+            throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_LIGHTSHOT_RESOLVE) + "Failed to resolve " + uri, e);
         }
     }
 }

@@ -1,6 +1,8 @@
 package org.watermedia.api.platform;
 
+import org.watermedia.WaterMedia;
 import org.watermedia.api.player.MRL;
+import org.watermedia.tools.DataTool;
 
 import java.net.URI;
 
@@ -15,6 +17,6 @@ import java.net.URI;
  */
 public record PlatformResult(Platform platform, String title, URI thumbnail, URI uri) {
     public PlatformResult {
-        if (platform == null || uri == null) throw new IllegalArgumentException("PlatformResult requires a platform and a URI");
+        if (platform == null || uri == null) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_PLATFORMRESULT_ARGS_NULL) + "Failed to create the platform result due to null platform or URI");
     }
 }

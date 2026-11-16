@@ -12,6 +12,8 @@ import java.nio.file.Path;
 import java.nio.file.attribute.FileTime;
 import java.util.AbstractList;
 import java.util.List;
+import java.util.Set;
+import java.util.TreeSet;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -279,6 +281,21 @@ public class LogUploaderTest {
         }
 
         @Test
+        @DisplayName("the wm_err codes of every file read are collected once and sorted, and only four-digit ones count")
+        void collectsErrorCodes() throws IOException {
+            write(this.instance.resolve("logs/latest.log"), "[ERROR] (wm_err:4750) Failed to parse the JPEG stream\n[ERROR] (wm_err:0720) Failed to stop\nwm_err:99 wm_err:12345\n");
+            write(this.instance.resolve("crash-reports/crash-1.txt"), "IllegalStateException: (wm_err:0720) Failed to stop the file server\nCaused by: (wm_err:0005) Failed to load\n");
+
+            final LogUploader uploader = new LogUploader(() -> {});
+            uploader.scan(this.instance.resolve("mods"), true);
+            assertEquals(Set.of(), uploader.codes);
+            uploader.readContent(uploader.files.get(0));
+            uploader.readContent(uploader.files.get(1));
+
+            assertEquals(List.of("0005", "0720", "4750"), List.copyOf(uploader.codes));
+        }
+
+        @Test
         @DisplayName("a file is read with the user name of its paths masked and the rest of every path kept")
         void masksUserPaths() throws IOException {
             write(this.instance.resolve("logs/latest.log"), "Game dir C:\\Users\\Steve\\AppData\\Roaming\\.minecraft\nNatives at /home/alex/.cache/natives\n");
@@ -326,6 +343,9 @@ public class LogUploaderTest {
                     - FancyMenu (`Keksuccino/FancyMenu`)
                     - WaterFrames (`SrRapero720/waterframes`)
 
+                    ## Error codes
+                    - `wm_err:0720`, `wm_err:4750`
+
                     ## Files
                     - Game log: https://mclo.gs/abc1234
                     - Crash report: N/A
@@ -345,7 +365,7 @@ public class LogUploaderTest {
                     - OS: Windows 10
                     - CPU: 8 threads
                     """, LogUploader.body("\n  The video freezes after a minute.\nIt never happens in windowed mode.\n\n", info,
-                    List.of("waterframes-2.1.jar", "sodium-0.5.jar", "fancymenu-forge-1.20.1.jar"), List.of(log, crash)));
+                    List.of("waterframes-2.1.jar", "sodium-0.5.jar", "fancymenu-forge-1.20.1.jar"), List.of(log, crash), new TreeSet<>(List.of("4750", "0720"))));
         }
 
         @Test
@@ -359,6 +379,9 @@ public class LogUploaderTest {
                     ## Suspected mods
                     - None detected
 
+                    ## Error codes
+                    - None detected
+
                     ## Files
                     - App log: N/A
 
@@ -368,7 +391,7 @@ public class LogUploaderTest {
 
                     ## System Properties
                     - OS: Linux
-                    """, LogUploader.body(" \n\t", info, List.of("frames.jar", "watermedia-3.0.0.jar"), List.of(new LogUploader.FileEntry("watermedia-app.log", "App log", null))));
+                    """, LogUploader.body(" \n\t", info, List.of("frames.jar", "watermedia-3.0.0.jar"), List.of(new LogUploader.FileEntry("watermedia-app.log", "App log", null)), Set.of()));
         }
 
         @Test
@@ -376,7 +399,7 @@ public class LogUploaderTest {
         void pendingFiles() {
             final LogUploader.FileEntry entry = new LogUploader.FileEntry("latest.log", "Game log", null);
             entry.url = "https://mclo.gs/old";
-            final String body = LogUploader.body("", new SystemInfo(List.of(), "", null, ""), List.of(), List.of(entry));
+            final String body = LogUploader.body("", new SystemInfo(List.of(), "", null, ""), List.of(), List.of(entry), Set.of());
             assertTrue(body.contains("## Files\n- Game log: N/A\n"), body);
         }
 
@@ -384,7 +407,7 @@ public class LogUploaderTest {
         @DisplayName("the body masks the user name of the paths in the system facts and in the description")
         void masksUserPaths() {
             final SystemInfo info = new SystemInfo(List.of(), "- FFmpeg Path: C:\\Users\\Steve\\AppData\\Local\\Temp\\watermedia\n", null, "- Java Home: /Users/alex/jdk-21\n");
-            final String body = LogUploader.body("It reads D:/Users/Steve/video.mp4", info, List.of(), List.of());
+            final String body = LogUploader.body("It reads D:/Users/Steve/video.mp4", info, List.of(), List.of(), Set.of());
             assertTrue(body.startsWith("It reads D:/Users/********/video.mp4\n"), body);
             assertTrue(body.contains("- FFmpeg Path: C:\\Users\\********\\AppData\\Local\\Temp\\watermedia\n"), body);
             assertTrue(body.endsWith("- Java Home: /Users/********/jdk-21\n"), body);

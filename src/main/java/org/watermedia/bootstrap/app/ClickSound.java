@@ -8,6 +8,7 @@ import org.lwjgl.openal.ALC10;
 import org.lwjgl.stb.STBVorbis;
 import org.lwjgl.system.MemoryUtil;
 import org.watermedia.WaterMedia;
+import org.watermedia.tools.DataTool;
 import org.watermedia.tools.IOTool;
 
 import java.io.InputStream;
@@ -29,7 +30,7 @@ public final class ClickSound {
     public void open() {
         try {
             final long device = ALC10.alcOpenDevice((ByteBuffer) null);
-            if (device == 0L) throw new IllegalStateException("Failed to open a new Audio Device");
+            if (device == 0L) throw new IllegalStateException(DataTool.errCode(WaterMedia.ERR_APP_SOUND_DEVICE) + "Failed to open a new Audio Device");
             final long context = ALC10.alcCreateContext(device, (IntBuffer) null);
             ALC10.alcMakeContextCurrent(context);
             AL.createCapabilities(ALC.createCapabilities(device));

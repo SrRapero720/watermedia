@@ -1,6 +1,8 @@
 package org.watermedia.api.codecs.common.png;
 
+import org.watermedia.WaterMedia;
 import org.watermedia.api.codecs.CodecException;
+import org.watermedia.tools.DataTool;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -38,28 +40,28 @@ public record TRNS(int gray, int red, int green, int blue, byte[] alphaPerPalett
 
     /** Converts a generic chunk to tRNS for the color type. */
     public static TRNS convert(final PngChunk chunk, final int colorType) throws CodecException {
-        if (chunk.type() != SIGNATURE) throw new IllegalArgumentException("Invalid chunk type for tRNS: 0x" + Integer.toHexString(chunk.type()));
+        if (chunk.type() != SIGNATURE) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_PNG_TRNS_TYPE) + "Failed to read tRNS due to invalid chunk type: 0x" + Integer.toHexString(chunk.type()));
 
         final byte[] data = chunk.data();
         final ByteBuffer buffer = ByteBuffer.wrap(data).order(ByteOrder.BIG_ENDIAN);
         return switch (ColorType.of(colorType)) {
             case GREYSCALE -> {
-                if (data.length != 2) throw new CodecException("tRNS for greyscale must be 2 bytes, got " + data.length);
+                if (data.length != 2) throw new CodecException(DataTool.errCode(WaterMedia.ERR_PNG_TRNS_LENGTH_GREYSCALE) + "Failed to read tRNS due to invalid length: " + data.length + " bytes (expected 2 for greyscale)");
                 final int gray = buffer.getShort() & 0xFFFF;
                 yield new TRNS(gray);
             }
             case TRUECOLOR -> {
-                if (data.length != 6) throw new CodecException("tRNS for truecolor must be 6 bytes, got " + data.length);
+                if (data.length != 6) throw new CodecException(DataTool.errCode(WaterMedia.ERR_PNG_TRNS_LENGTH_TRUECOLOR) + "Failed to read tRNS due to invalid length: " + data.length + " bytes (expected 6 for truecolor)");
                 final int red = buffer.getShort() & 0xFFFF;
                 final int green = buffer.getShort() & 0xFFFF;
                 final int blue = buffer.getShort() & 0xFFFF;
                 yield new TRNS(red, green, blue);
             }
             case INDEXED -> {
-                if (data.length > MAX_PALETTE_ALPHAS) throw new CodecException("tRNS holds more than 256 palette alphas: " + data.length);
+                if (data.length > MAX_PALETTE_ALPHAS) throw new CodecException(DataTool.errCode(WaterMedia.ERR_PNG_TRNS_ENTRIES) + "Failed to read tRNS due to more than 256 palette alphas: " + data.length);
                 yield new TRNS(data.clone());
             }
-            default -> throw new CodecException("tRNS not allowed for color type " + colorType);
+            default -> throw new CodecException(DataTool.errCode(WaterMedia.ERR_PNG_TRNS_COLOR_TYPE) + "Failed to read tRNS due to disallowed color type: " + colorType);
         };
     }
 

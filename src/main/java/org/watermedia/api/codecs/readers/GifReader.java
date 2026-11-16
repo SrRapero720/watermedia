@@ -2,6 +2,7 @@ package org.watermedia.api.codecs.readers;
 
 import org.apache.logging.log4j.Marker;
 import org.apache.logging.log4j.MarkerManager;
+import org.watermedia.WaterMedia;
 import org.watermedia.api.codecs.CodecException;
 import org.watermedia.api.codecs.CodecsAPI;
 import org.watermedia.api.codecs.ImageData;
@@ -111,7 +112,7 @@ public final class GifReader extends ImageReader {
         // CAP THE CANVAS BEFORE ANYTHING IS ALLOCATED: A 7-BYTE SCREEN DESCRIPTOR DECLARING 16K x 16K BUYS 1 GiB OF
         // CANVAS, 1 GiB OF DIRECT BUFFER AND 1 GiB OF DISPOSAL-3 SNAPSHOT BEFORE ANY FRAME BYTE IS PARSED
         if (!Limits.fits(this.lsd.width(), this.lsd.height()))
-            throw new CodecException("GIF canvas too big: " + this.lsd.width() + "x" + this.lsd.height()
+            throw new CodecException(DataTool.errCode(WaterMedia.ERR_GIFREADER_CANVAS_SIZE) + "Failed to read GIF due to oversized canvas: " + this.lsd.width() + "x" + this.lsd.height()
                     + " (max " + Limits.MAX_DIM + " per axis, " + Limits.MAX_PIXELS + " pixels)");
         this.globalColorTable = this.lsd.globalColorTableFlag() ? ColorTable.read(this.lsd.globalColorCount(), this.data) : null;
         this.backgroundColor = this.globalColorTable != null && this.lsd.backgroundColorIndex() < this.globalColorTable.size()
@@ -142,7 +143,7 @@ public final class GifReader extends ImageReader {
             } else if (b == IMAGE_SEPARATOR) {
                 // COUNTED ONCE PER FRAME: nextReady ABSORBS REPEATED hasNext() CALLS
                 if (++this.frames > MAX_FRAMES)
-                    throw new CodecException("GIF frame count exceeds limit: " + this.frames + " (max " + MAX_FRAMES + ")");
+                    throw new CodecException(DataTool.errCode(WaterMedia.ERR_GIFREADER_FRAME_LIMIT) + "Failed to read GIF due to frame count over the limit: " + this.frames + " (max " + MAX_FRAMES + ")");
                 this.nextReady = true;
             } else if (b == EXTENSION_INTRODUCER) {
                 // THE GRAPHIC CONTROL EXTENSION DRIVES THE NEXT FRAME; scan() ALREADY READ EVERY OTHER EXTENSION
@@ -162,15 +163,15 @@ public final class GifReader extends ImageReader {
         // A DESCRIPTOR MAY HANG PAST THE CANVAS (REAL ENCODERS DO IT): THE RASTER DECODES AT ITS OWN SIZE AND
         // blitRow CLIPS IT, SO ONLY ITS AREA NEEDS A BUDGET. 16-BIT AXES MULTIPLY TO 4 GIGAPIXELS OF LZW SCRATCH
         if ((long) id.width() * id.height() > Limits.MAX_PIXELS)
-            throw new CodecException("GIF frame too big: " + id.width() + "x" + id.height() + " (max " + Limits.MAX_PIXELS + " pixels)");
+            throw new CodecException(DataTool.errCode(WaterMedia.ERR_GIFREADER_FRAME_SIZE) + "Failed to read the GIF frame due to oversized dimensions: " + id.width() + "x" + id.height() + " (max " + Limits.MAX_PIXELS + " pixels)");
         final ColorTable colorTable = id.localColorTableFlag() ? ColorTable.read(id.localColorCount(), this.data) : this.globalColorTable;
-        if (colorTable == null) throw new CodecException("GIF frame has no color table");
+        if (colorTable == null) throw new CodecException(DataTool.errCode(WaterMedia.ERR_GIFREADER_NO_COLOR_TABLE) + "Failed to read the GIF frame due to missing color table");
 
         // LZW: 1 BYTE MIN CODE SIZE + SUB-BLOCKS
-        if (!this.data.hasRemaining()) throw new CodecException("EOF before LZW min code size");
+        if (!this.data.hasRemaining()) throw new CodecException(DataTool.errCode(WaterMedia.ERR_GIFREADER_LZW_EOF) + "Failed to read the LZW minimum code size due to unexpected end of data");
         final int lzwMinCodeSize = this.data.get() & 0xFF;
         if (lzwMinCodeSize < MIN_LZW_CODE_SIZE || lzwMinCodeSize > MAX_LZW_CODE_SIZE)
-            throw new CodecException("Invalid LZW minimum code size: " + lzwMinCodeSize);
+            throw new CodecException(DataTool.errCode(WaterMedia.ERR_GIFREADER_LZW_MIN_CODE) + "Failed to read the LZW minimum code size due to invalid value: " + lzwMinCodeSize);
         final int lzwDataLength = this.readSubBlocks();
 
         // ONLY THE ROWS THAT LAND ON THE CANVAS ARE DECODED: LZW IS SEQUENTIAL, SO THE STREAM STOPS AFTER THE LAST
@@ -351,7 +352,7 @@ public final class GifReader extends ImageReader {
                 // THE FIRST CODE AFTER A CLEAR MUST BE A LITERAL. code == available (clearCode + 2) PASSES THE
                 // BOUNDS CHECK ABOVE AND WOULD READ A DICTIONARY SLOT THIS FRAME NEVER DEFINED; THE TABLE IS
                 // LONG-LIVED, SO THAT SLOT STILL HOLDS THE PREVIOUS FRAME'S DATA. REJECT INSTEAD OF LEAKING IT
-                if (code >= clearCode) throw new CodecException("LZW first code references undefined entry: " + code);
+                if (code >= clearCode) throw new CodecException(DataTool.errCode(WaterMedia.ERR_GIFREADER_LZW_FIRST_CODE) + "Failed to decode LZW data due to first code referencing an undefined entry: " + code);
                 pixelStack[top++] = suffix[code];
                 oldCode = code;
                 first = code;
@@ -363,7 +364,7 @@ public final class GifReader extends ImageReader {
                 code = oldCode;
             }
             while (code > clearCode) {
-                if (top >= MAX_STACK_SIZE) throw new CodecException("LZW stack overflow");
+                if (top >= MAX_STACK_SIZE) throw new CodecException(DataTool.errCode(WaterMedia.ERR_GIFREADER_LZW_STACK) + "Failed to decode LZW data due to stack overflow");
                 pixelStack[top++] = suffix[code];
                 code = prefix[code];
             }
@@ -390,13 +391,13 @@ public final class GifReader extends ImageReader {
     private int readSubBlocks() throws CodecException {
         int total = 0;
         while (true) {
-            if (!this.data.hasRemaining()) throw new CodecException("EOF in GIF sub-block chain");
+            if (!this.data.hasRemaining()) throw new CodecException(DataTool.errCode(WaterMedia.ERR_GIFREADER_SUBBLOCK_EOF) + "Failed to read the GIF sub-block chain due to unexpected end of data");
             final int size = this.data.get() & 0xFF;
             if (size == 0) return total;
             if (this.data.remaining() < size)
-                throw new CodecException("Truncated GIF sub-block: " + size + " bytes declared, " + this.data.remaining() + " available");
+                throw new CodecException(DataTool.errCode(WaterMedia.ERR_GIFREADER_SUBBLOCK_TRUNCATED) + "Failed to read the GIF sub-block due to truncated data: " + size + " bytes declared, " + this.data.remaining() + " available");
             final int need = total + size;
-            if (need < 0 || need > MAX_SUBBLOCK_BYTES) throw new CodecException("GIF sub-block data too large: " + need);
+            if (need < 0 || need > MAX_SUBBLOCK_BYTES) throw new CodecException(DataTool.errCode(WaterMedia.ERR_GIFREADER_SUBBLOCK_SIZE) + "Failed to read the GIF sub-block due to oversized data: " + need);
             if (this.subBlockBuffer.length < need) {
                 // DOUBLING CAN OVERFLOW PAST Integer.MAX_VALUE INTO A NEGATIVE SIZE; FALL BACK TO THE EXACT NEED
                 int next = this.subBlockBuffer.length;

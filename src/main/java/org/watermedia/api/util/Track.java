@@ -1,7 +1,9 @@
 package org.watermedia.api.util;
 
+import org.watermedia.WaterMedia;
 import org.watermedia.api.player.MRL;
 import org.watermedia.api.platform.Platform;
+import org.watermedia.tools.DataTool;
 
 import java.net.URI;
 
@@ -16,6 +18,6 @@ import java.net.URI;
  */
 public record Track(String name, String lang, URI uri) {
     public Track {
-        if (uri == null) throw new IllegalArgumentException("Track requires a URI");
+        if (uri == null) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_TRACK_NULL_URI) + "Failed to create the track due to null URI");
     }
 }

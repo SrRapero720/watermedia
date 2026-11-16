@@ -2,10 +2,12 @@ package org.watermedia.bootstrap.app.render;
 
 import org.joml.Matrix4f;
 import org.joml.Vector4f;
+import org.watermedia.WaterMedia;
 import org.watermedia.api.player.GFXEngine;
 import org.watermedia.api.util.MathUtil;
 import org.watermedia.bootstrap.app.render.RenderBackend.DrawMode;
 import org.watermedia.bootstrap.app.render.RenderBackend.TextureHandle;
+import org.watermedia.tools.DataTool;
 
 import java.awt.Color;
 import java.nio.ByteBuffer;
@@ -530,7 +532,7 @@ public final class RenderEngine {
     private void draw(final DrawMode mode, final int count, final boolean textured) {
         if (count <= 0) return;
         // GUARD THE SCRATCH AND BATCH ARRAYS (AND THE GL VBO) AT THE SINGLE EMIT SEAM SO NO PRIMITIVE OVERFLOWS
-        if (count > MAX_VERTICES) throw new IllegalArgumentException("UI draw exceeds vertex capacity: " + count + " > " + MAX_VERTICES);
+        if (count > MAX_VERTICES) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_APP_RENDER_VERTEX_CAP) + "Failed to draw the UI due to exceeded vertex capacity: " + count + " > " + MAX_VERTICES);
         if (mode != DrawMode.TRIANGLES && mode != DrawMode.LINES) {
             this.flush();
             this.backend.draw(mode, this.vertices, count, textured);

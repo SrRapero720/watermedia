@@ -260,7 +260,7 @@ public class AppBootstrapDependenciesTest {
             final var failure = assertThrows(InvocationTargetException.class,
                     () -> extract.invoke(null, "/META-INF/jarjar/missing.jar", directory));
             assertInstanceOf(IOException.class, failure.getCause());
-            assertTrue(failure.getCause().getMessage().contains("Missing bundled library"));
+            assertTrue(failure.getCause().getMessage().contains("(wm_err:8005) Failed to extract the bundled library"));
             try (final var files = Files.list(directory)) { assertEquals(0, files.count()); }
         }
     }

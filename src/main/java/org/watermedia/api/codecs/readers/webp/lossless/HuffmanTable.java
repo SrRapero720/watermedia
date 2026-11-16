@@ -1,6 +1,8 @@
 package org.watermedia.api.codecs.readers.webp.lossless;
 
+import org.watermedia.WaterMedia;
 import org.watermedia.api.codecs.CodecException;
+import org.watermedia.tools.DataTool;
 
 /** Canonical LSB-first VP8L prefix code: a 7-bit lookup resolves short codes, a per-length scan the longer ones. */
 public final class HuffmanTable {
@@ -64,7 +66,7 @@ public final class HuffmanTable {
         for (int len = 1; len <= maxLen; len++) {
             left <<= 1;
             left -= lengthCount[len];
-            if (left < 0) throw new CodecException("Over-subscribed huffman code at length " + len);
+            if (left < 0) throw new CodecException(DataTool.errCode(WaterMedia.ERR_VP8L_TABLE_OVERSUBSCRIBED) + "Failed to build the huffman table due to over-subscribed code at length " + len);
         }
 
         // COMPUTE FIRST CODE FOR EACH LENGTH
@@ -184,7 +186,7 @@ public final class HuffmanTable {
                 for (int j = this.longStart[curLen]; j < this.longStart[curLen + 1]; j++)
                     if (this.longCodes[j] == code) return this.longSymbols[j];
             }
-            throw new CodecException("Invalid huffman code (code=" + code + ")");
+            throw new CodecException(DataTool.errCode(WaterMedia.ERR_VP8L_TABLE_CODE_LONG) + "Failed to read the huffman code due to invalid code (code=" + code + ")");
         }
 
         // SLOW SAFE PATH: NEAR EOF, READ BIT-BY-BIT WHILE PROPAGATING EOF EXCEPTIONS
@@ -201,7 +203,7 @@ public final class HuffmanTable {
                     if (this.longCodes[j] == code) return this.longSymbols[j];
             }
         }
-        throw new CodecException("Invalid huffman code (code=" + code + ")");
+        throw new CodecException(DataTool.errCode(WaterMedia.ERR_VP8L_TABLE_CODE_SLOW) + "Failed to read the huffman code due to invalid code (code=" + code + ")");
     }
 
     // ==========================================================================

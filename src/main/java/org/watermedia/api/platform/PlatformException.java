@@ -1,5 +1,8 @@
 package org.watermedia.api.platform;
 
+import org.watermedia.WaterMedia;
+import org.watermedia.tools.DataTool;
+
 import java.io.IOException;
 import java.net.URI;
 
@@ -17,6 +20,6 @@ public class PlatformException extends IOException {
 
     /** Creates the failure a handler throws for a URL of its own host whose shape it does not support. */
     public static PlatformException unsupported(final String platform, final URI uri) {
-        return new PlatformException(platform, "Unsupported URL: " + uri);
+        return new PlatformException(platform, DataTool.errCode(WaterMedia.ERR_PLATFORMEXCEPTION_UNSUPPORTED) + "Failed to resolve " + uri + " due to unsupported URL");
     }
 }

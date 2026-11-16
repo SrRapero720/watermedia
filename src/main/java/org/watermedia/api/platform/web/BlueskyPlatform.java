@@ -5,6 +5,7 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import org.apache.logging.log4j.Marker;
 import org.apache.logging.log4j.MarkerManager;
+import org.watermedia.WaterMedia;
 import org.watermedia.WaterMediaConfig;
 import org.watermedia.api.platform.*;
 import org.watermedia.api.util.MediaType;
@@ -74,7 +75,7 @@ public final class BlueskyPlatform implements Platform {
             final String atUri = "at://" + handle + "/app.bsky.feed.post/" + postId;
             final JsonObject post = obj(WebRequests.fetchJson(NAME, API_URL + "?uri=" + enc(atUri) + "&depth=0&parentHeight=0", JsonObject.class), "thread", "post");
             if (post == null)
-                throw new PlatformException(NAME, "Post '" + postId + "' by '" + handle + "' was not found, blocked, or deleted");
+                throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_BLUESKY_POST_MISSING) + "Failed to resolve post '" + postId + "' by '" + handle + "' due to a missing, blocked or deleted post");
             ensureNotMature(post, postId);
             final HttpHeaders headers = HttpHeaders.defaults(uri);
 
@@ -108,12 +109,12 @@ public final class BlueskyPlatform implements Platform {
             }
 
             if (entries.isEmpty())
-                throw new PlatformException(NAME, "Post '" + postId + "' has no playable media (text-only, external link, or unsupported embed): " + uri);
+                throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_BLUESKY_NO_MEDIA) + "Failed to resolve post '" + postId + "' due to no playable media (text-only, external link, or unsupported embed): " + uri);
 
             LOGGER.debug(IT, "Bluesky resolved {} media entry(es) for post '{}'", entries.size(), postId);
             return new Resolution(Instant.now().plus(TTL), entries);
         } catch (final RuntimeException e) {
-            throw new PlatformException(NAME, "Failed to resolve " + uri, e);
+            throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_BLUESKY_RESOLVE) + "Failed to resolve " + uri, e);
         }
     }
 
@@ -130,7 +131,7 @@ public final class BlueskyPlatform implements Platform {
             for (final JsonElement label: labels) {
                 final String value = str(obj(label), "val");
                 if (value != null && MATURE_LABELS.contains(value))
-                    throw new MatureContentException(NAME, "Post '" + postId + "' is labelled '" + value + "'");
+                    throw new MatureContentException(NAME, DataTool.errCode(WaterMedia.ERR_BLUESKY_MATURE) + "Failed to resolve post '" + postId + "' due to label '" + value + "'");
             }
         }
     }

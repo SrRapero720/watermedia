@@ -3,6 +3,7 @@ package org.watermedia.api.platform.web;
 import com.google.gson.annotations.SerializedName;
 import org.apache.logging.log4j.Marker;
 import org.apache.logging.log4j.MarkerManager;
+import org.watermedia.WaterMedia;
 import org.watermedia.WaterMediaConfig;
 import org.watermedia.api.platform.*;
 import org.watermedia.api.util.MediaType;
@@ -41,20 +42,20 @@ public final class PornHubPlatform implements Platform {
         if (viewkey == null || viewkey.isEmpty()) throw PlatformException.unsupported(NAME, uri);
 
         if (!WaterMediaConfig.platforms.allowMatureContent)
-            throw new MatureContentException(NAME, "Mature content is disabled in config (this platform serves mature content exclusively)");
+            throw new MatureContentException(NAME, DataTool.errCode(WaterMedia.ERR_PORNHUB_MATURE) + "Failed to resolve " + uri + " due to mature content disabled in config (this platform serves mature content exclusively)");
 
         try (final NetRequest req = new NetRequest(uri).accept("text/html").send()) {
-            if (req.statusCode() != 200) throw new PlatformException(NAME, "Page request for viewkey '" + viewkey + "' returned HTTP " + req.statusCode());
+            if (req.statusCode() != 200) throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_PORNHUB_PAGE_STATUS) + "Failed to request the page of viewkey '" + viewkey + "' due to HTTP " + req.statusCode());
 
             final String html = req.text();
             final Matcher matcher = FLASHVARS_PATTERN.matcher(html);
             if (!matcher.find())
-                throw new PlatformException(NAME, "flashvars block not found for viewkey '" + viewkey + "' (geo-blocked, removed, or markup changed)");
+                throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_PORNHUB_FLASHVARS_MISSING) + "Failed to read flashvars of viewkey '" + viewkey + "' due to block not found (geo-blocked, removed, or markup changed)");
 
             final FlashVars flashVars = JSONTool.parse(matcher.group(1), FlashVars.class);
 
             if (flashVars == null || flashVars.mediaDefinitions == null || flashVars.mediaDefinitions.length == 0)
-                throw new PlatformException(NAME, "flashvars carry no media definitions for viewkey '" + viewkey + "'");
+                throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_PORNHUB_NO_MEDIA_DEFS) + "Failed to read flashvars of viewkey '" + viewkey + "' due to no media definitions");
 
             final List<Quality> variants = new ArrayList<>(flashVars.mediaDefinitions.length);
             int skipped = 0;
@@ -72,8 +73,8 @@ public final class PornHubPlatform implements Platform {
             }
 
             if (variants.isEmpty())
-                throw new PlatformException(NAME, "Viewkey '" + viewkey + "' exposed " + flashVars.mediaDefinitions.length
-                        + " media definition(s) but none were playable CDN links (" + skipped + " skipped)");
+                throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_PORNHUB_NO_CDN_LINKS) + "Failed to resolve viewkey '" + viewkey + "' due to no playable CDN links: " + flashVars.mediaDefinitions.length
+                        + " media definition(s), " + skipped + " skipped");
 
             URI thumbnail = null;
             Metadata metadata = null;
@@ -94,7 +95,7 @@ public final class PornHubPlatform implements Platform {
         } catch (final PlatformException e) {
             throw e;
         } catch (final IOException | RuntimeException e) {
-            throw new PlatformException(NAME, "Failed to resolve " + uri, e);
+            throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_PORNHUB_RESOLVE) + "Failed to resolve " + uri, e);
         }
     }
 

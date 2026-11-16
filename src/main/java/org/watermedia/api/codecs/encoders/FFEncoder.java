@@ -25,11 +25,13 @@ import org.bytedeco.javacpp.BytePointer;
 import org.bytedeco.javacpp.IntPointer;
 import org.bytedeco.javacpp.Pointer;
 import org.bytedeco.javacpp.PointerPointer;
+import org.watermedia.WaterMedia;
 import org.watermedia.api.codecs.CodecsAPI;
 import org.watermedia.api.codecs.Container;
 import org.watermedia.api.codecs.Encoder;
 import org.watermedia.api.codecs.VideoCodec;
 import org.watermedia.api.util.PixelFormat;
+import org.watermedia.tools.DataTool;
 import org.watermedia.tools.FFTool;
 
 import java.io.IOException;
@@ -89,8 +91,8 @@ public final class FFEncoder extends Encoder {
     /** Opens the encode into a temporary file that replaces {@code file} or is copied into {@code out} once finished. */
     public FFEncoder(final Container container, final Path file, final OutputStream out, final Video video, final Audio audio) throws IOException {
         super(container, video, audio);
-        if ((file == null) == (out == null)) throw new IllegalArgumentException("Exactly one of the file and the stream is the target");
-        if (!CodecsAPI.ffmpegLoaded()) throw new IOException("FFmpeg is not available");
+        if ((file == null) == (out == null)) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_FFENCODER_TARGET) + "Failed to create the encoder due to invalid target, exactly one of the file and the stream is needed");
+        if (!CodecsAPI.ffmpegLoaded()) throw new IOException(DataTool.errCode(WaterMedia.ERR_FFENCODER_NO_FFMPEG) + "Failed to create the encoder due to unavailable FFmpeg");
         this.file = file;
         this.out = out;
 
@@ -100,7 +102,7 @@ public final class FFEncoder extends Encoder {
             case MKV -> "matroska";
             case WEBM -> "webm";
             case OGG -> "ogg";
-            default -> throw new IllegalArgumentException(container + " is not an FFmpeg container");
+            default -> throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_FFENCODER_CONTAINER) + "Failed to create the encoder due to non-FFmpeg container: " + container);
         };
         try {
             // A SEEKABLE FILE, SINCE MP4 AND MATROSKA PATCH THEIR HEADER: NEXT TO THE TARGET SO IT ONLY APPEARS FINISHED, OR A
@@ -113,10 +115,10 @@ public final class FFEncoder extends Encoder {
                  final BytePointer path = new BytePointer(this.tempFile.toString(), StandardCharsets.UTF_8)) {
                 this.muxer = new AVFormatContext(null);
                 if (avformat.avformat_alloc_output_context2(this.muxer, null, name, path) < 0 || this.muxer.isNull())
-                    throw new IOException("Failed to allocate the " + format + " muxer");
+                    throw new IOException(DataTool.errCode(WaterMedia.ERR_FFENCODER_MUXER_ALLOC) + "Failed to allocate the " + format + " muxer");
                 final boolean globalHeader = (this.muxer.oformat().flags() & avformat.AVFMT_GLOBALHEADER) != 0;
                 this.packet = avcodec.av_packet_alloc();
-                if (FFTool.isNull(this.packet)) throw new IOException("Failed to allocate a packet");
+                if (FFTool.isNull(this.packet)) throw new IOException(DataTool.errCode(WaterMedia.ERR_FFENCODER_PACKET_ALLOC) + "Failed to allocate a packet");
 
                 // TRACKS OPEN BEFORE THE FILE, SO A CODEC THAT REFUSES ITS TRACK CREATES NOTHING
                 if (video != null) this.openVideo(video, globalHeader);
@@ -162,7 +164,7 @@ public final class FFEncoder extends Encoder {
         }
         try (final BytePointer bound = new BytePointer(pixels)) {
             if (avutil.av_image_fill_arrays(this.source.data(), this.source.linesize(), bound, this.sourceFormat, this.video.width(), this.video.height(), 1) < 0)
-                throw new IOException("Failed to bind the frame pixels");
+                throw new IOException(DataTool.errCode(WaterMedia.ERR_FFENCODER_BIND_PIXELS) + "Failed to bind the frame pixels");
             final int writable = avutil.av_frame_make_writable(this.converted);
             if (writable < 0) throw FFTool.failure("av_frame_make_writable", writable);
             swscale.sws_scale(this.scaler, this.source.data(), this.source.linesize(), 0, this.video.height(),
@@ -201,7 +203,7 @@ public final class FFEncoder extends Encoder {
     @Override
     protected void finish() throws IOException {
         try {
-            if (!this.written) throw new IllegalStateException(this.container + " needs at least one frame or sample");
+            if (!this.written) throw new IllegalStateException(DataTool.errCode(WaterMedia.ERR_FFENCODER_NO_FRAMES) + "Failed to finish the " + this.container + " encoding due to no frames or samples, at least one is needed");
 
             // FLUSH THE RESAMPLER TAIL AND THE LAST SHORT CHUNK, THEN EVERY ENCODER'S LOOKAHEAD
             if (this.sound != null) {
@@ -242,10 +244,10 @@ public final class FFEncoder extends Encoder {
             case VP8 -> new String[] { "libvpx" };
             case VP9 -> new String[] { "libvpx-vp9" };
             case PRORES -> new String[] { "prores_ks" };
-            case PNG, GIF -> throw new IllegalArgumentException(video.codec() + " is encoded in pure Java");
+            case PNG, GIF -> throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_FFENCODER_PURE_JAVA) + "Failed to create the video encoder due to pure Java codec: " + video.codec());
         });
         this.picture = avcodec.avcodec_alloc_context3(codec);
-        if (FFTool.isNull(this.picture)) throw new IOException("Failed to allocate the " + video.codec() + " encoder");
+        if (FFTool.isNull(this.picture)) throw new IOException(DataTool.errCode(WaterMedia.ERR_FFENCODER_VIDEO_ENC_ALLOC) + "Failed to allocate the " + video.codec() + " encoder");
 
         // PIXEL FORMAT: YUV 4:2:0 WHEN THE CODEC TAKES IT, ITS FIRST FORMAT OTHERWISE (PRORES IS 4:2:2 10-BIT)
         final int[] formats = supported(this.picture, codec, avcodec.AV_CODEC_CONFIG_PIX_FORMAT);
@@ -285,16 +287,16 @@ public final class FFEncoder extends Encoder {
         this.sourceFormat = FFTool.avPixelFormat(video.format());
         this.scaler = swscale.sws_getContext(video.width(), video.height(), this.sourceFormat, width, height, target,
                 swscale.SWS_BILINEAR, null, null, (double[]) null);
-        if (FFTool.isNull(this.scaler)) throw new IOException("Failed to create the pixel converter");
+        if (FFTool.isNull(this.scaler)) throw new IOException(DataTool.errCode(WaterMedia.ERR_FFENCODER_SCALER_CREATE) + "Failed to create the pixel converter");
         final PixelFormat input = video.format();
         if (input == PixelFormat.RGB || input == PixelFormat.RGBA || input == PixelFormat.BGRA) {
             final IntPointer bt709 = swscale.sws_getCoefficients(swscale.SWS_CS_ITU709);
             final int details = swscale.sws_setColorspaceDetails(this.scaler, bt709, 1, bt709, 0, 0, 1 << 16, 1 << 16);
-            if (details < 0) throw new IOException("sws_setColorspaceDetails refused the BT.709 conversion (code " + details + ")");
+            if (details < 0) throw new IOException(DataTool.errCode(WaterMedia.ERR_FFENCODER_BT709) + "Failed to set the BT.709 conversion due to sws_setColorspaceDetails refusal: code " + details);
         }
         this.source = avutil.av_frame_alloc();
         this.converted = avutil.av_frame_alloc();
-        if (FFTool.isNull(this.source) || FFTool.isNull(this.converted)) throw new IOException("Failed to allocate the video frames");
+        if (FFTool.isNull(this.source) || FFTool.isNull(this.converted)) throw new IOException(DataTool.errCode(WaterMedia.ERR_FFENCODER_FRAMES_ALLOC) + "Failed to allocate the video frames");
         this.converted.format(target);
         this.converted.width(width);
         this.converted.height(height);
@@ -311,7 +313,7 @@ public final class FFEncoder extends Encoder {
             case FLAC -> new String[] { "flac" };
         });
         this.sound = avcodec.avcodec_alloc_context3(codec);
-        if (FFTool.isNull(this.sound)) throw new IOException("Failed to allocate the " + audio.codec() + " encoder");
+        if (FFTool.isNull(this.sound)) throw new IOException(DataTool.errCode(WaterMedia.ERR_FFENCODER_AUDIO_ENC_ALLOC) + "Failed to allocate the " + audio.codec() + " encoder");
 
         // SAMPLE FORMAT: THE INPUT'S OWN WHEN THE CODEC TAKES IT, ITS FIRST ONE OTHERWISE
         final int inputFormat = FFTool.avSampleFormat(audio.type());
@@ -374,7 +376,7 @@ public final class FFEncoder extends Encoder {
         this.fifo = avutil.av_audio_fifo_alloc(format, this.sound.ch_layout().nb_channels(), this.chunkSamples * 2);
         this.chunk = this.audioFrame(this.chunkSamples);
         this.resampled = this.audioFrame(this.chunkSamples);
-        if (FFTool.isNull(this.fifo)) throw new IOException("Failed to allocate the audio FIFO");
+        if (FFTool.isNull(this.fifo)) throw new IOException(DataTool.errCode(WaterMedia.ERR_FFENCODER_FIFO_ALLOC) + "Failed to allocate the audio FIFO");
     }
 
     // PICKS THE CODEC'S OWN LAYOUT FOR THE TRACK'S CHANNEL COUNT, OR THE DEFAULT ONE WHEN THE CODEC TAKES ANY
@@ -396,13 +398,13 @@ public final class FFEncoder extends Encoder {
                 }
                 offered.append(offered.isEmpty() ? "" : ", ").append(channels);
             }
-            throw new IllegalArgumentException(audio.codec() + " encodes " + offered + " channels, not " + audio.channels());
+            throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_FFENCODER_CHANNELS) + "Failed to create the audio encoder due to unsupported channels, " + audio.codec() + " encodes " + offered + " channels, not " + audio.channels());
         }
     }
 
     private AVStream stream(final AVCodecContext context) throws IOException {
         final AVStream stream = avformat.avformat_new_stream(this.muxer, null);
-        if (FFTool.isNull(stream)) throw new IOException("Failed to create a stream");
+        if (FFTool.isNull(stream)) throw new IOException(DataTool.errCode(WaterMedia.ERR_FFENCODER_STREAM_CREATE) + "Failed to create a stream");
         stream.time_base(context.time_base());
         final int parameters = avcodec.avcodec_parameters_from_context(stream.codecpar(), context);
         if (parameters < 0) throw FFTool.failure("avcodec_parameters_from_context", parameters);
@@ -411,7 +413,7 @@ public final class FFEncoder extends Encoder {
 
     private AVFrame audioFrame(final int samples) throws IOException {
         final AVFrame frame = avutil.av_frame_alloc();
-        if (FFTool.isNull(frame)) throw new IOException("Failed to allocate an audio frame");
+        if (FFTool.isNull(frame)) throw new IOException(DataTool.errCode(WaterMedia.ERR_FFENCODER_AUDIO_FRAME_ALLOC) + "Failed to allocate an audio frame");
         frame.format(this.sound.sample_fmt());
         frame.sample_rate(this.sound.sample_rate());
         frame.nb_samples(samples);
@@ -439,7 +441,7 @@ public final class FFEncoder extends Encoder {
         final int converted = swresample.swr_convert(this.resampler, this.resampled.data(), capacity, input, count);
         if (converted < 0) throw FFTool.failure("swr_convert", converted);
         if (converted > 0 && avutil.av_audio_fifo_write(this.fifo, this.resampled.data(), converted) < converted)
-            throw new IOException("Failed to queue the resampled audio");
+            throw new IOException(DataTool.errCode(WaterMedia.ERR_FFENCODER_QUEUE_AUDIO) + "Failed to queue the resampled audio");
     }
 
     // SENDS EVERY FULL CHUNK THE FIFO HOLDS; THE LAST ONE GOES SHORT OR PADDED WITH SILENCE WHEN drain IS SET
@@ -450,7 +452,7 @@ public final class FFEncoder extends Encoder {
             final int writable = avutil.av_frame_make_writable(this.chunk);
             if (writable < 0) throw FFTool.failure("av_frame_make_writable", writable);
             final int read = avutil.av_audio_fifo_read(this.fifo, this.chunk.data(), Math.min(queued, this.chunkSamples));
-            if (read <= 0) throw new IOException("Failed to read the queued audio");
+            if (read <= 0) throw new IOException(DataTool.errCode(WaterMedia.ERR_FFENCODER_READ_AUDIO) + "Failed to read the queued audio");
             int samples = read;
             if (read < this.chunkSamples && !this.shortLast) {
                 avutil.av_samples_set_silence(this.chunk.data(), read, this.chunkSamples - read, this.sound.ch_layout().nb_channels(), this.sound.sample_fmt());
@@ -514,7 +516,7 @@ public final class FFEncoder extends Encoder {
             final AVCodec found = avcodec.avcodec_find_encoder_by_name(name);
             if (!FFTool.isNull(found)) return found;
         }
-        throw new IOException("No " + codec + " encoder in these natives (tried " + String.join(", ", names) + ")");
+        throw new IOException(DataTool.errCode(WaterMedia.ERR_FFENCODER_ENCODER_MISSING) + "Failed to find the " + codec + " encoder due to missing natives, tried " + String.join(", ", names));
     }
 
     // READS ONE INTEGER LIST OF avcodec_get_supported_config; EMPTY WHEN THE CODEC TAKES ANY VALUE

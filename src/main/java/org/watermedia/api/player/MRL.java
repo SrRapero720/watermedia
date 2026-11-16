@@ -2,6 +2,7 @@ package org.watermedia.api.player;
 
 import org.apache.logging.log4j.Marker;
 import org.apache.logging.log4j.MarkerManager;
+import org.watermedia.WaterMedia;
 import org.watermedia.WaterMediaConfig;
 import org.watermedia.api.codecs.CodecsAPI;
 import org.watermedia.api.platform.*;
@@ -54,7 +55,7 @@ public final class MRL {
     private boolean reloadPending;
 
     private MRL(final URI uri, final Session owner) {
-        if (uri == null) throw new IllegalArgumentException("URI cannot be null");
+        if (uri == null) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_MRL_CREATE_NULL_URI) + "Failed to create the MRL due to null URI");
         this.uri = uri;
         this.owner = owner;
     }
@@ -107,7 +108,7 @@ public final class MRL {
         }
         // ANY NON-FETCHING STATE IS TERMINAL: fireListeners() ALREADY RAN, SO FIRE ON THE CALLING THREAD
         try { listener.accept(this); }
-        catch (final Throwable t) { LOGGER.error(IT, "Listener failed for {}", this.uri, t); }
+        catch (final Throwable t) { LOGGER.error(IT, DataTool.errCode(WaterMedia.ERR_MRL_SUBSCRIBE_LISTENER) + "Failed to run the MRL listener for {}", this.uri, t); }
     }
 
     /** Returns the link this MRL stands for: the caller's URI, the file URI a relative path resolved to, or an {@code mrl-error:} marker around input that never resolved. */
@@ -188,17 +189,17 @@ public final class MRL {
     // ==========================================================================
 
     static synchronized void start() {
-        if (session != null) throw new IllegalStateException("The player module has already started");
+        if (session != null) throw new IllegalStateException(DataTool.errCode(WaterMedia.ERR_MRL_ALREADY_STARTED) + "Failed to start the player module, it has already started");
         session = new Session();
     }
 
     // CACHE LOOKUPS RETURN IMMEDIATELY; NEW SOURCES START PLATFORM DISCOVERY ASYNCHRONOUSLY.
     static MRL get(final URI uri) {
-        if (uri == null) throw new IllegalArgumentException("URI cannot be null");
+        if (uri == null) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_MRL_GET_NULL_URI) + "Failed to get the MRL due to null URI");
         final Session current = session;
-        if (current == null) throw new IllegalStateException("The player module is not loaded");
+        if (current == null) throw new IllegalStateException(DataTool.errCode(WaterMedia.ERR_MRL_NOT_LOADED) + "Failed to get the MRL, the player module is not loaded");
         // A RELATIVE URI CAN NEVER RESOLVE: BORN IN ERROR INSTEAD OF CACHED AND FAILING LATE
-        if (!uri.isAbsolute()) return error(uri.toString(), new IllegalArgumentException("URI must be absolute: " + uri));
+        if (!uri.isAbsolute()) return error(uri.toString(), new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_MRL_RELATIVE_URI) + "Failed to get the MRL due to a relative URI: " + uri));
         synchronized (current) {
             return current.loaded.compute(uri, (key, existing) -> {
                 if (existing != null) {
@@ -304,7 +305,7 @@ public final class MRL {
             }
         } catch (final Throwable ex) {
             // CLEANUP OF UNRELATED, EXPIRED MRLs FAILED: NON-FATAL FOR THIS LOAD, KEEP GOING.
-            LOGGER.error(IT, "Failed to dispose forgotten MRLs", ex);
+            LOGGER.error(IT, DataTool.errCode(WaterMedia.ERR_MRL_DISPOSE_FORGOTTEN) + "Failed to dispose forgotten MRLs", ex);
         }
         try {
             // NO HANDLER CLAIMS A DIRECT LINK; THE PROBE BELOW RESOLVES IT FROM ITS CONTENT TYPE
@@ -314,7 +315,7 @@ public final class MRL {
                     LOGGER.debug(IT, "Connected to {} with content type {}", this.uri, req.contentType());
 
                     // FAIL FAST ON HTTP ERRORS
-                    if (req.statusCode() >= 400) throw new IOException("HTTP " + req.statusCode() + " for " + this.uri);
+                    if (req.statusCode() >= 400) throw new IOException(DataTool.errCode(WaterMedia.ERR_MRL_PROBE_HTTP) + "Failed to probe the source due to HTTP " + req.statusCode() + ": " + this.uri);
 
                     // ONLY DOCUMENT TYPES (HTML, JSON, SCRIPTS) ARE REJECTED, WHATEVER THEIR CASING OR PARAMETERS; text/plain
                     // AND XML PASS BECAUSE MISCONFIGURED HOSTS SERVE MEDIA UNDER THEM AND THE BYTE SNIFF SETTLES THE TYPE
@@ -324,7 +325,7 @@ public final class MRL {
                             || mime.equals("application/xhtml+xml") || mime.equals("application/javascript")
                             || mime.equals("application/x-javascript") || mime.equals("application/ecmascript")
                             || mime.equals("application/json") || mime.endsWith("+json"))
-                        throw new IOException("Content is not multimedia (received content-type '" + contentType + "'): " + this.uri);
+                        throw new IOException(DataTool.errCode(WaterMedia.ERR_MRL_PROBE_CONTENT_TYPE) + "Failed to probe the source due to non multimedia content (received content-type '" + contentType + "'): " + this.uri);
 
                     // DETECT HLS/IPTV AND PARSE IT
                     final String pathLower = this.uri.getPath() == null ? "" : this.uri.getPath().toLowerCase(Locale.ROOT);
@@ -345,7 +346,7 @@ public final class MRL {
                         if (parsed instanceof final M3UTool.Iptv iptv) {
                             final List<M3UTool.Channel> channels = iptv.channels();
                             if (channels.isEmpty())
-                                throw new IOException("IPTV playlist contained no entries: " + this.uri);
+                                throw new IOException(DataTool.errCode(WaterMedia.ERR_MRL_IPTV_EMPTY) + "Failed to read the IPTV playlist due to no entries: " + this.uri);
                             final List<Platform.Source> sources = new ArrayList<>(channels.size());
                             for (final M3UTool.Channel e: channels) {
                                 // CHANNEL URLS ARE ALREADY ABSOLUTE AND VALIDATED BY M3UTool (MALFORMED ONES WERE DROPPED DURING PARSE)
@@ -388,12 +389,12 @@ public final class MRL {
                 }
             }
 
-            if (data.sourceCount() <= 0) throw new IllegalStateException("[INTERNAL] Platform resolution has no sources for " + this.uri);
+            if (data.sourceCount() <= 0) throw new IllegalStateException(DataTool.errCode(WaterMedia.ERR_MRL_PLATFORM_NO_SOURCES) + "Failed to resolve the platform due to no sources: " + this.uri);
             final List<Platform.Source> entries = data.sources();
             final Source[] sources = new Source[entries.size()];
             for (int i = 0; i < entries.size(); i++) {
                 final Platform.Source entry = entries.get(i);
-                if (entry == null) throw new IllegalArgumentException("[INTERNAL] Platform delivered a null entry");
+                if (entry == null) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_MRL_PLATFORM_NULL_ENTRY) + "Failed to resolve the platform due to a null entry");
                 // ONE URL PER BUCKET: THE WIDEST RENDITION WINS, THEN THE TALLEST, THEN THE HIGHER FRAME RATE, THEN THE FIRST
                 final EnumMap<MediaQuality, Platform.Quality> best = new EnumMap<>(MediaQuality.class);
                 for (final Platform.Quality v: entry.qualities()) {
@@ -426,7 +427,7 @@ public final class MRL {
             if (t instanceof MatureContentException)
                 LOGGER.warn(IT, "Blocked (mature content disabled) {}: {}", this.uri, t.getMessage());
             else
-                LOGGER.error(IT, "Failed to resolve {}", this.uri, t);
+                LOGGER.error(IT, DataTool.errCode(WaterMedia.ERR_MRL_RESOLVE) + "Failed to resolve {}", this.uri, t);
 
             this.fireListeners();
         }
@@ -438,7 +439,7 @@ public final class MRL {
         for (final Consumer<MRL> c: this.listeners) {
             if (!this.listeners.remove(c)) continue;
             try { c.accept(this); }
-            catch (final Throwable t) { LOGGER.error(IT, "Listener failed for {}", this.uri, t); }
+            catch (final Throwable t) { LOGGER.error(IT, DataTool.errCode(WaterMedia.ERR_MRL_FIRE_LISTENER) + "Failed to run the MRL listener for {}", this.uri, t); }
         }
     }
 
@@ -476,7 +477,7 @@ public final class MRL {
 
         public Source {
             if (qualities.isEmpty())
-                throw new IllegalArgumentException("Source constructed with no qualities");
+                throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_MRL_SOURCE_NO_QUALITIES) + "Failed to create the Source due to no qualities");
 
             // DEFENSIVE UNMODIFIABLE COPY: Source IS CACHED AND SHARED ACROSS DECODE THREADS, THE MAP MUST NOT LEAK MUTABLE
             // ENUMMAP KEPT INTERNALLY FOR ORDERING/PERF; keySet() OF AN UNMODIFIABLE MAP IS ALSO SAFE TO EXPOSE
@@ -493,7 +494,7 @@ public final class MRL {
             final MediaQuality closest = MediaQuality.closest(this.qualities.keySet(), quality);
 
             if (closest == null)
-                throw new IllegalStateException("No quality was found");
+                throw new IllegalStateException(DataTool.errCode(WaterMedia.ERR_MRL_SOURCE_NO_QUALITY) + "Failed to resolve the Source URI due to no quality found");
 
             return this.qualities.get(closest);
         }

@@ -26,6 +26,7 @@ import org.watermedia.bootstrap.app.element.Button;
 import org.watermedia.bootstrap.app.element.Dialog;
 import org.watermedia.bootstrap.app.element.Parent;
 import org.watermedia.bootstrap.app.element.Text;
+import org.watermedia.tools.DataTool;
 import org.watermedia.tools.ThreadTool;
 
 import java.io.File;
@@ -177,7 +178,7 @@ public class WaterMediaApp {
         if (t != null) {
             if (t instanceof final RuntimeException re) throw re;
             if (t instanceof final Error err) throw err;
-            throw new RuntimeException(t);
+            throw new RuntimeException(DataTool.errCode(WaterMedia.ERR_APP_MAIN_LOADER) + "Failed to start the app due to a checked loader failure", t);
         }
     }
 
@@ -195,8 +196,8 @@ public class WaterMediaApp {
 
     private static void initWindow() {
         GLFWErrorCallback.create((code, description) ->
-                WaterMedia.LOGGER.error(IT, "GLFW error 0x{}: {}", Integer.toHexString(code), GLFWErrorCallback.getDescription(description))).set();
-        if (!glfwInit()) throw new IllegalStateException("Unable to initialize GLFW");
+                WaterMedia.LOGGER.error(IT, DataTool.errCode(WaterMedia.ERR_APP_MAIN_GLFW_CALLBACK) + "Failed to run GLFW, error 0x{}: {}", Integer.toHexString(code), GLFWErrorCallback.getDescription(description))).set();
+        if (!glfwInit()) throw new IllegalStateException(DataTool.errCode(WaterMedia.ERR_APP_MAIN_GLFW_INIT) + "Failed to initialize GLFW");
 
         // THE LAUNCHER FORWARDS THE SAVED ENGINE; A LAUNCH WITHOUT IT READS THE SPEC, WHOSE LOAD MAY STILL BE RUNNING
         final String forwarded = System.getProperty(AppBootstrap.ENGINE_PROP);
@@ -232,7 +233,7 @@ public class WaterMediaApp {
         RenderSystem.applyWindowHints();
 
         ctx.windowHandle = glfwCreateWindow(1_280, 720, AppContext.APP_NAME, NULL, NULL);
-        if (ctx.windowHandle == NULL) throw new RuntimeException("Failed to create the GLFW window");
+        if (ctx.windowHandle == NULL) throw new RuntimeException(DataTool.errCode(WaterMedia.ERR_APP_MAIN_GLFW_WINDOW) + "Failed to create the GLFW window");
         maximized = true;
         ctx.windowMaximized = true;
 
@@ -545,7 +546,7 @@ public class WaterMediaApp {
                         "Vulkan could not be initialized on this system.\nThe app is running on OpenGL.", null);
             WaterMedia.LOGGER.info(IT, "Render engine hot-swap complete: {}", RenderSystem.engineName());
         } catch (final Throwable t) {
-            WaterMedia.LOGGER.error(IT, "Render engine hot-swap failed; attempting OpenGL recovery", t);
+            WaterMedia.LOGGER.error(IT, DataTool.errCode(WaterMedia.ERR_APP_MAIN_SWAP) + "Failed to hot-swap the render engine, attempting OpenGL recovery", t);
             // LAST RESORT: FORCE OPENGL AND REBUILD FROM WHATEVER THE SWAP LEFT; A ZEROED HANDLE MEANS THE SWAP ALREADY
             // DESTROYED THE WINDOW
             try {
@@ -554,7 +555,7 @@ public class WaterMediaApp {
                 ctx.showError("Engine switch failed",
                         "The render engine could not be switched.\nThe app recovered on OpenGL.", null);
             } catch (final Throwable recovery) {
-                WaterMedia.LOGGER.error(IT, "OpenGL recovery after a failed hot-swap also failed; shutting down", recovery);
+                WaterMedia.LOGGER.error(IT, DataTool.errCode(WaterMedia.ERR_APP_MAIN_SWAP_RECOVERY) + "Failed to recover on OpenGL after a failed hot-swap, shutting down", recovery);
                 running = false; // LET THE MAIN LOOP EXIT SO cleanup() TEARS DOWN CLEANLY
             }
         } finally {

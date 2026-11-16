@@ -19,6 +19,7 @@ import org.watermedia.api.player.GFXEngine;
 import org.watermedia.api.player.PlayerAPI;
 import org.watermedia.bootstrap.app.render.RenderBackend;
 import org.watermedia.bootstrap.app.render.RenderSystem;
+import org.watermedia.tools.DataTool;
 import org.watermedia.tools.IOTool;
 
 import java.io.IOException;
@@ -145,7 +146,7 @@ public final class OpenGLRenderBackend implements RenderBackend {
         GL20.glBindAttribLocation(this.program, 2, "vertColor");
         GL20.glLinkProgram(this.program);
         if (GL20.glGetProgrami(this.program, GL20.GL_LINK_STATUS) == GL11.GL_FALSE)
-            throw new IllegalStateException("OpenGL renderer link failed: " + GL20.glGetProgramInfoLog(this.program, 2_048));
+            throw new IllegalStateException(DataTool.errCode(WaterMedia.ERR_APP_GL_LINK_PROGRAM) + "Failed to link the renderer program: " + GL20.glGetProgramInfoLog(this.program, 2_048));
 
         GL20.glDetachShader(this.program, vertexShader);
         GL20.glDetachShader(this.program, fragmentShader);
@@ -168,7 +169,7 @@ public final class OpenGLRenderBackend implements RenderBackend {
         GL20.glBindAttribLocation(this.sdfProgram, 0, "position");
         GL20.glLinkProgram(this.sdfProgram);
         if (GL20.glGetProgrami(this.sdfProgram, GL20.GL_LINK_STATUS) == GL11.GL_FALSE)
-            throw new IllegalStateException("OpenGL SDF program link failed: " + GL20.glGetProgramInfoLog(this.sdfProgram, 2_048));
+            throw new IllegalStateException(DataTool.errCode(WaterMedia.ERR_APP_GL_LINK_SDF) + "Failed to link the SDF program: " + GL20.glGetProgramInfoLog(this.sdfProgram, 2_048));
         GL20.glDetachShader(this.sdfProgram, sdfVertex);
         GL20.glDetachShader(this.sdfProgram, sdfFragment);
         GL20.glDeleteShader(sdfVertex);
@@ -350,7 +351,7 @@ public final class OpenGLRenderBackend implements RenderBackend {
 
         final int floats = vertexCount * FLOATS_PER_VERTEX;
         if (floats > this.uploadBuffer.capacity())
-            throw new IllegalArgumentException("Too many UI vertices in one draw call: " + vertexCount);
+            throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_APP_GL_DRAW_VERTICES) + "Failed to draw the UI due to too many vertices in one draw call: " + vertexCount);
 
         // OUTSIDE A FRAME (A FLUSH FROM createTexture DURING LOADING) BIND AND UNBIND LOCALLY;
         // INSIDE ONE beginFrame ALREADY BOUND THE PROGRAM, VAO AND VBO AND present() UNBINDS THEM
@@ -582,14 +583,14 @@ public final class OpenGLRenderBackend implements RenderBackend {
         // THE UI CANNOT DRAW WITHOUT ITS BUNDLED SHADERS, SO ANY FAILURE ABORTS THE BACKEND
         final String source;
         try { source = IOTool.shader(name); }
-        catch (final IOException e) { throw new IllegalStateException("OpenGL renderer shader unavailable: " + name, e); }
+        catch (final IOException e) { throw new IllegalStateException(DataTool.errCode(WaterMedia.ERR_APP_GL_SHADER_READ) + "Failed to read the renderer shader: " + name, e); }
         final int shader = GL20.glCreateShader(type);
         GL20.glShaderSource(shader, source);
         GL20.glCompileShader(shader);
         if (GL20.glGetShaderi(shader, GL20.GL_COMPILE_STATUS) == GL11.GL_FALSE) {
             final String log = GL20.glGetShaderInfoLog(shader, 2_048);
             GL20.glDeleteShader(shader);
-            throw new IllegalStateException("OpenGL renderer shader " + name + " failed: " + log);
+            throw new IllegalStateException(DataTool.errCode(WaterMedia.ERR_APP_GL_SHADER_COMPILE) + "Failed to compile the renderer shader " + name + ": " + log);
         }
         return shader;
     }

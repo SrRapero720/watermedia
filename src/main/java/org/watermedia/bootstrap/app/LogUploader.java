@@ -24,8 +24,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
+import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Predicate;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
@@ -64,6 +67,8 @@ public final class LogUploader {
     private static final Pattern USER_ENV = Pattern.compile("(?m)^((?:USERNAME|USER|LOGNAME)=).+$");
     private static final Pattern HOME_PATH = homePath(System.getProperty("user.home"));
     private static final String USER_MASK = "$1********";
+    // A CODE OF DataTool.errCode INSIDE A LOG LINE OR AN EXCEPTION MESSAGE
+    private static final Pattern ERROR_CODE = Pattern.compile("\\bwm_err:(\\d{4})\\b");
 
     public volatile boolean visible;
     public volatile boolean working;
@@ -85,8 +90,8 @@ public final class LogUploader {
     private volatile SystemInfo info;
     // WAKES THE RENDER LOOP AFTER A WORKER STAGE CHANGES WHAT THE DIALOG SHOWS
     private final Runnable repaint;
-    // PENDING: ERROR CODES ARE NOT LOGGED YET (THE SORTED wm_err CODES OF THE UPLOADED FILES)
-    // private final Set<String> codes = new ConcurrentSkipListSet<>();
+    // THE SORTED wm_err CODES FOUND IN THE FILES READ FOR THE UPLOAD
+    final Set<String> codes = new ConcurrentSkipListSet<>();
 
     LogUploader(final Runnable repaint) {
         this.repaint = repaint;
@@ -132,8 +137,7 @@ public final class LogUploader {
             this.browserFailed = false;
             this.stage = 1;
             this.files.clear();
-            // PENDING: ERROR CODES ARE NOT LOGGED YET
-            // this.codes.clear();
+            this.codes.clear();
             this.visible = true;
             this.working = true;
             ThreadTool.thread("LogUploader-Scan", () -> this.scan(Path.of("").toAbsolutePath(), WORKDIR_IS_MODS));
@@ -200,26 +204,30 @@ public final class LogUploader {
     }
 
     // FILE TEXT WITH ITS SECRETS AND THE USER NAME OF ITS PATHS MASKED BEFORE IT LEAVES THE MACHINE, OR null (AND A READ
-    // ERROR ROW): hs_err DUMPS AND LAUNCH LOGS CARRY THE FULL --accessToken, CONFIG COPIES THE FILE-SERVER TOKEN AND COOKIES
+    // ERROR ROW): hs_err DUMPS AND LAUNCH LOGS CARRY THE FULL --accessToken, CONFIG COPIES THE FILE-SERVER TOKEN AND COOKIES.
+    // ITS wm_err CODES JOIN THE ONES THE REPORT LISTS
     String readContent(final FileEntry entry) {
         try (final BufferedReader reader = lenientReader(entry.path)) {
             final StringBuilder sb = new StringBuilder();
             final char[] buf = new char[8_192];
             int n;
             while ((n = reader.read(buf)) != -1) sb.append(buf, 0, n);
-            return maskUser(DataTool.redact(sb.toString()), HOME_PATH);
+            final String content = maskUser(DataTool.redact(sb.toString()), HOME_PATH);
+            final Matcher found = ERROR_CODE.matcher(content);
+            while (found.find()) this.codes.add(found.group(1));
+            return content;
         } catch (final Exception e) {
             entry.state = "READ ERROR";
             entry.progress = 0;
             this.error = true;
-            WaterMedia.LOGGER.error(IT, "Failed to read {}", entry.name, e);
+            WaterMedia.LOGGER.error(IT, DataTool.errCode(WaterMedia.ERR_APP_UPLOADER_READ) + "Failed to read {}", entry.name, e);
             return null;
         }
     }
 
-    // ISSUE BODY IN GITHUB MARKDOWN: THE DESCRIPTION WHEN THERE IS ONE, THEN THE ALERTS, THE SUSPECTED MODS, THE FILE
-    // LINKS AND THE SYSTEM FACTS, WITH THE USER NAME OF EVERY PATH MASKED
-    static String body(final String description, final SystemInfo info, final List<String> jars, final List<FileEntry> files) {
+    // ISSUE BODY IN GITHUB MARKDOWN: THE DESCRIPTION WHEN THERE IS ONE, THEN THE ALERTS, THE SUSPECTED MODS, THE ERROR
+    // CODES, THE FILE LINKS AND THE SYSTEM FACTS, WITH THE USER NAME OF EVERY PATH MASKED
+    static String body(final String description, final SystemInfo info, final List<String> jars, final List<FileEntry> files, final Set<String> codes) {
         final StringBuilder sb = new StringBuilder();
         final String text = description.strip();
         if (!text.isEmpty()) sb.append(text).append("\n\n");
@@ -234,9 +242,8 @@ public final class LogUploader {
         for (final SuspectMod mod: suspects) sb.append("- ").append(mod.name()).append(" (`").append(mod.slug()).append("`)\n");
         if (suspects.isEmpty()) sb.append("- None detected\n");
 
-        // PENDING: ERROR CODES ARE NOT LOGGED YET (body() TAKES final Set<String> codes LAST AND submit() PASSES this.codes)
-        // sb.append("\n## Error codes\n");
-        // sb.append(codes.isEmpty() ? "- None detected\n" : "- `wm_err:" + String.join("`, `wm_err:", codes) + "`\n");
+        sb.append("\n## Error codes\n");
+        sb.append(codes.isEmpty() ? "- None detected\n" : "- `wm_err:" + String.join("`, `wm_err:", codes) + "`\n");
 
         sb.append("\n## Files\n");
         for (final FileEntry entry: files) sb.append("- ").append(entry.label).append(": ").append(entry.uploaded ? entry.url : "N/A").append('\n');
@@ -300,7 +307,7 @@ public final class LogUploader {
                 entry.state = "READ ERROR";
                 entry.sizeLabel = "-";
                 this.error = true;
-                WaterMedia.LOGGER.error(IT, "Failed to measure {}", name, e);
+                WaterMedia.LOGGER.error(IT, DataTool.errCode(WaterMedia.ERR_APP_UPLOADER_MEASURE) + "Failed to measure {}", name, e);
             }
         } else {
             entry.state = "NOT FOUND";
@@ -321,9 +328,6 @@ public final class LogUploader {
                 entry.progress = 18;
                 final String content = this.readContent(entry);
                 if (content == null) continue;
-                // PENDING: ERROR CODES ARE NOT LOGGED YET
-                // final Matcher codes = Pattern.compile("\\bwm_err:(\\d{4})\\b").matcher(content);
-                // while (codes.find()) this.codes.add(codes.group(1));
                 entry.progress = 64;
                 anyUploaded |= this.uploadToMclogs(content, entry);
             }
@@ -333,7 +337,7 @@ public final class LogUploader {
             this.uploadsDone = !this.error;
         } catch (final Exception e) {
             this.error = true;
-            WaterMedia.LOGGER.error(IT, "The upload stage failed", e);
+            WaterMedia.LOGGER.error(IT, DataTool.errCode(WaterMedia.ERR_APP_UPLOADER_STAGE) + "Failed to run the upload stage", e);
         } finally {
             this.working = false;
             this.repaint.run();
@@ -356,7 +360,7 @@ public final class LogUploader {
             }
             WaterMedia.LOGGER.warn(IT, "mclo.gs refused {} with status {}", entry.name, req.statusCode());
         } catch (final Exception e) {
-            WaterMedia.LOGGER.error(IT, "Failed to upload {}", entry.name, e);
+            WaterMedia.LOGGER.error(IT, DataTool.errCode(WaterMedia.ERR_APP_UPLOADER_UPLOAD) + "Failed to upload {}", entry.name, e);
         }
         entry.progress = 0;
         entry.state = "FAILED";
@@ -371,7 +375,7 @@ public final class LogUploader {
             // NO SYSTEM FACTS, NO REPORT, WHATEVER BROKE: THE STAGE SHOWS THE FAILURE AND ITS NEXT step() READS THEM AGAIN.
             // AN Error LEFT UNCAUGHT WOULD LEAVE THE STRIP PREPARING FOREVER NEXT TO A RETRY BUTTON
             this.error = true;
-            WaterMedia.LOGGER.error(IT, "Failed to read the system for the report", t);
+            WaterMedia.LOGGER.error(IT, DataTool.errCode(WaterMedia.ERR_APP_UPLOADER_SYSTEM) + "Failed to read the system for the report", t);
         } finally {
             this.working = false;
             this.repaint.run();
@@ -383,12 +387,12 @@ public final class LogUploader {
         boolean browsing = false;
         try {
             final String title = this.title.strip();
-            final String body = body(this.description, this.info, this.jars, this.files);
+            final String body = body(this.description, this.info, this.jars, this.files, this.codes);
             final String url = issueUrl(title, body);
             final String note = issueUrl(title, PASTE_NOTE);
             // THE FULL REPORT GOES TO THE CLIPBOARD FIRST; WITHOUT IT ONLY A LINK THAT CARRIES THE REPORT IS WORTH OPENING
             this.issueCopied = AppContext.clipboard(body);
-            if (!this.issueCopied && url.equals(note)) throw new IOException("The report fits neither the clipboard nor the link");
+            if (!this.issueCopied && url.equals(note)) throw new IOException(DataTool.errCode(WaterMedia.ERR_APP_UPLOADER_REPORT_SIZE) + "Failed to open the issue page, the report fits neither the clipboard nor the link");
             browsing = true;
             try { Desktop.getDesktop().browse(URI.create(url)); }
             catch (final Exception e) {
@@ -402,7 +406,7 @@ public final class LogUploader {
         } catch (final Exception e) {
             this.error = true;
             this.browserFailed = browsing;
-            WaterMedia.LOGGER.error(IT, "Failed to open the issue page", e);
+            WaterMedia.LOGGER.error(IT, DataTool.errCode(WaterMedia.ERR_APP_UPLOADER_ISSUE_PAGE) + "Failed to open the issue page", e);
         } finally {
             this.working = false;
             this.repaint.run();

@@ -6,6 +6,7 @@ import me.srrapero720.waterconfig.api.Control;
 import me.srrapero720.waterconfig.api.annotations.*;
 import me.srrapero720.waterconfig.impl.fields.StringField;
 import org.watermedia.api.util.MediaQuality;
+import org.watermedia.tools.DataTool;
 
 import java.io.File;
 import java.nio.file.Path;
@@ -38,7 +39,7 @@ public final class WaterMediaConfig extends WaterMedia.Module {
 
     /** Creates the configuration module; {@link WaterMedia#start} calls it once per process and a second call throws. */
     public WaterMediaConfig() {
-        if (!LOADED.compareAndSet(false, true)) throw new IllegalStateException("WaterMediaConfig is already loaded");
+        if (!LOADED.compareAndSet(false, true)) throw new IllegalStateException(DataTool.errCode(WaterMedia.ERR_CONFIG_LOADED) + "Failed to load WaterMediaConfig, it is already loaded");
     }
 
     // ==========================================================================
@@ -54,7 +55,7 @@ public final class WaterMediaConfig extends WaterMedia.Module {
             // THE HOST CONFIGURATION SERVICE IS PROCESS-SCOPED; NEVER REGISTER A SECOND WRITER.
             synchronized (existing) {
                 while (!existing.isLoaded() && existing.status() != ConfigSpec.Status.FAILED) existing.wait();
-                if (!existing.isLoaded()) throw new IllegalStateException("WaterMedia configuration failed", existing.loadError());
+                if (!existing.isLoaded()) throw new IllegalStateException(DataTool.errCode(WaterMedia.ERR_CONFIG_LOAD) + "Failed to load the WaterMedia configuration", existing.loadError());
                 existing.refresh();
             }
         }

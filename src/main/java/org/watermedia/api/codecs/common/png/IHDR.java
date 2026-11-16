@@ -1,6 +1,8 @@
 package org.watermedia.api.codecs.common.png;
 
+import org.watermedia.WaterMedia;
 import org.watermedia.api.codecs.CodecException;
+import org.watermedia.tools.DataTool;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -22,9 +24,9 @@ public record IHDR(int width, int height, int depth, int colorType, int compress
 
     /** Converts a generic chunk to IHDR. */
     public static IHDR convert(final PngChunk chunk) throws CodecException {
-        if (chunk.type() != SIGNATURE) throw new IllegalArgumentException("Invalid chunk type for IHDR: 0x" + Integer.toHexString(chunk.type()));
+        if (chunk.type() != SIGNATURE) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_PNG_IHDR_TYPE) + "Failed to read IHDR due to invalid chunk type: 0x" + Integer.toHexString(chunk.type()));
         final byte[] data = chunk.data();
-        if (data.length != LENGTH) throw new CodecException("Invalid IHDR data length: " + data.length + " (expected 13)");
+        if (data.length != LENGTH) throw new CodecException(DataTool.errCode(WaterMedia.ERR_PNG_IHDR_LENGTH) + "Failed to read IHDR due to invalid length: " + data.length + " bytes (expected 13)");
 
         final ByteBuffer buffer = ByteBuffer.wrap(data).order(ByteOrder.BIG_ENDIAN);
         return new IHDR(
@@ -45,7 +47,7 @@ public record IHDR(int width, int height, int depth, int colorType, int compress
             case TRUECOLOR -> 3;
             case GREYSCALE_ALPHA -> 2;
             case TRUECOLOR_ALPHA -> 4;
-            case FORBIDDEN_1, FORBIDDEN_5 -> throw new CodecException("Forbidden color type: " + this.colorType);
+            case FORBIDDEN_1, FORBIDDEN_5 -> throw new CodecException(DataTool.errCode(WaterMedia.ERR_PNG_IHDR_COLOR_TYPE) + "Failed to read IHDR due to forbidden color type: " + this.colorType);
         };
         return Math.max(1, (samplesPerPixel * this.depth) / 8);
     }

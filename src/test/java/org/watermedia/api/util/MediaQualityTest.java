@@ -120,7 +120,7 @@ public class MediaQualityTest {
         void nullPreferredRejected() {
             final IllegalArgumentException failure = assertThrows(IllegalArgumentException.class,
                     () -> MediaQuality.closest(EnumSet.of(MediaQuality.MEDIUM), null));
-            assertEquals("Preferred quality cannot be null", failure.getMessage());
+            assertEquals("(wm_err:0410) Failed to pick the quality due to null preferred quality", failure.getMessage());
         }
 
         @Test

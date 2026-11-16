@@ -5,6 +5,7 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import org.apache.logging.log4j.Marker;
 import org.apache.logging.log4j.MarkerManager;
+import org.watermedia.WaterMedia;
 import org.watermedia.WaterMediaConfig;
 import org.watermedia.api.platform.*;
 import org.watermedia.api.util.MediaType;
@@ -139,7 +140,7 @@ public final class TwitchPlatform implements Platform {
         } catch (final PlatformException e) {
             throw e;
         } catch (final IOException | RuntimeException e) {
-            throw new PlatformException(NAME, "Failed to resolve " + uri, e);
+            throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_TWITCH_RESOLVE) + "Failed to resolve " + uri, e);
         }
     }
 
@@ -154,7 +155,7 @@ public final class TwitchPlatform implements Platform {
         try {
             data = obj(gql(body, JsonObject.class, PlatformAPI.SEARCH_TIMEOUT_MS), "data");
         } catch (final IOException | RuntimeException e) {
-            throw new PlatformException(NAME, "Search for '" + query + "' failed", e);
+            throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_TWITCH_SEARCH) + "Failed to search for '" + query + "'", e);
         }
         return this.hits(data, limit);
     }
@@ -214,8 +215,8 @@ public final class TwitchPlatform implements Platform {
 
         // ONLY THE API CAN DECLARE A CHANNEL MISSING OR OFFLINE (CLEAR ERROR, NO USHER CALL); WHEN IT DID NOT ANSWER,
         // THE STREAM RESOLVES RESILIENTLY AND PLAYBACK FAILS ON ITS OWN IF IT TURNS OUT NOT TO WORK
-        if (apiAnswered && mwt == null) throw new PlatformException(NAME, "Channel '" + channel + "' does not exist");
-        if (apiAnswered && !mwt.online()) throw new PlatformException(NAME, "Streamer '" + channel + "' is offline");
+        if (apiAnswered && mwt == null) throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_TWITCH_NO_CHANNEL) + "Failed to resolve channel '" + channel + "', it does not exist");
+        if (apiAnswered && !mwt.online()) throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_TWITCH_OFFLINE) + "Failed to resolve streamer '" + channel + "', it is offline");
 
         final HttpHeaders headers = HttpHeaders.defaults(URI.create(SITE));
         final List<Quality> variants = WebRequests.hls(playlist(channel, false), headers);
@@ -252,12 +253,12 @@ public final class TwitchPlatform implements Platform {
     private Resolution resolveClip(final String slug) throws IOException {
         ensureNotMature(ContentKind.CLIP, slug);
         final JsonObject clip = obj(gql(List.of(persistedQuery("ShareClipRenderStatus", HASH_CLIP, Map.of("slug", slug))), JsonArray.class).get(0), "data", "clip");
-        if (clip == null) throw new PlatformException(NAME, "Clip not found or no longer available: " + slug);
+        if (clip == null) throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_TWITCH_CLIP_MISSING) + "Failed to resolve clip " + slug + " due to not found or no longer available");
 
         final JsonObject accessToken = obj(clip, "playbackAccessToken");
         final String sig = str(accessToken, "signature");
         final String token = str(accessToken, "value");
-        if (sig == null || token == null) throw new PlatformException(NAME, "No access token for clip: " + slug);
+        if (sig == null || token == null) throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_TWITCH_CLIP_NO_TOKEN) + "Failed to resolve clip " + slug + " due to no access token");
         final String accessQuery = "sig=" + URLEncoder.encode(sig, StandardCharsets.UTF_8)
                 + "&token=" + URLEncoder.encode(token, StandardCharsets.UTF_8);
 
@@ -275,7 +276,7 @@ public final class TwitchPlatform implements Platform {
                 if (url != null) clipVariants.add(new Quality(url, 0, height));
             }
         }
-        if (clipVariants.isEmpty()) throw new PlatformException(NAME, "No video qualities found for clip: " + slug);
+        if (clipVariants.isEmpty()) throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_TWITCH_CLIP_NO_QUALITY) + "Failed to resolve clip " + slug + " due to no video qualities");
 
         // TWITCH REPORTS clip durationSeconds IN SECONDS; Metadata IS MILLISECONDS
         final long durationMs = Math.max(0, intOr(clip, "durationSeconds", 0)) * 1_000L;
@@ -318,7 +319,7 @@ public final class TwitchPlatform implements Platform {
         final JsonObject token = obj(gql(body, JsonObject.class), "data", tokenKey);
         final String signature = str(token, "signature");
         final String value = str(token, "value");
-        if (signature == null || value == null) throw new PlatformException(NAME, "Access token not found (key: " + tokenKey + ")");
+        if (signature == null || value == null) throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_TWITCH_TOKEN_MISSING) + "Failed to read the access token due to not found (key: " + tokenKey + ")");
 
         final long p = ThreadLocalRandom.current().nextLong(1_000_000, 10_000_001);
         final String sessionId = UUID.randomUUID().toString().replace("-", "");
@@ -361,7 +362,7 @@ public final class TwitchPlatform implements Platform {
 
         // STREAM METADATA: USER EXISTENCE + STREAM STATE; A MISSING data IS A GQL ERROR, NOT A MISSING CHANNEL
         final JsonObject data = obj(results.get(0), "data");
-        if (data == null) throw new IOException("Twitch StreamMetadata for '" + channel + "' answered without data");
+        if (data == null) throw new IOException(DataTool.errCode(WaterMedia.ERR_TWITCH_METADATA_NO_DATA) + "Failed to fetch StreamMetadata for '" + channel + "' due to answer without data");
         final JsonObject user = obj(data, "user");
         if (user == null) return null;
         final JsonObject stream = obj(user, "stream");
@@ -434,8 +435,8 @@ public final class TwitchPlatform implements Platform {
 
         final JsonObject data = obj(gql(List.of(persistedQuery("ContentClassificationContext", HASH_CONTENT_CLASS, vars)), JsonArray.class).get(0), "data");
         // THE GATE FAILS CLOSED: WITHOUT A CLASSIFICATION (A ROTATED PERSISTED QUERY, A GQL ERROR) NOTHING IS PLAYED
-        if (data == null) throw new PlatformException(NAME, "Content classification of " + kind.name().toLowerCase(Locale.ROOT) + " '" + id
-                + "' is unavailable; enable platforms.allowMatureContent to skip the check");
+        if (data == null) throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_TWITCH_CLASS_UNAVAILABLE) + "Failed to check the content classification of " + kind.name().toLowerCase(Locale.ROOT) + " '" + id
+                + "' due to unavailable classification, enable platforms.allowMatureContent to skip the check");
 
         // STREAM NESTS UNDER user.stream; VOD UNDER video; CLIP UNDER clip
         final JsonObject node = switch (kind) {
@@ -444,7 +445,7 @@ public final class TwitchPlatform implements Platform {
             case CLIP -> obj(data, "clip");
         };
         if (MATURE_SIGN_POST.equals(str(obj(node, "contentClassificationLabelPolicyProperties", "signPostProperties"), "signPost")))
-            throw new MatureContentException(NAME, kind.name().toLowerCase(Locale.ROOT) + " '" + id + "' is marked as mature content");
+            throw new MatureContentException(NAME, DataTool.errCode(WaterMedia.ERR_TWITCH_MATURE) + "Failed to resolve " + kind.name().toLowerCase(Locale.ROOT) + " '" + id + "' due to mature content mark");
     }
 
     // ==========================================================================

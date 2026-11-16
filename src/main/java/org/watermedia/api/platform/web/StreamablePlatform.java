@@ -3,6 +3,7 @@ package org.watermedia.api.platform.web;
 import com.google.gson.annotations.SerializedName;
 import org.apache.logging.log4j.Marker;
 import org.apache.logging.log4j.MarkerManager;
+import org.watermedia.WaterMedia;
 import org.watermedia.api.platform.*;
 import org.watermedia.api.util.MediaType;
 import org.watermedia.api.util.Metadata;
@@ -44,11 +45,11 @@ public final class StreamablePlatform implements Platform {
 
         // A VIDEO STILL PROCESSING HAS NO files YET
         if (video.status != STATUS_READY)
-            throw new PlatformException(NAME, "Video '" + videoId + "' is not ready (status=" + video.status
+            throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_STREAMABLE_NOT_READY) + "Failed to resolve video '" + videoId + "', it is not ready (status=" + video.status
                     + ", " + video.percent + "%" + (video.message != null ? ", message: " + video.message : "") + ")");
 
         final URI main = video.files == null || video.files.mp4 == null ? null : DataTool.uri(video.files.mp4.url);
-        if (main == null) throw new PlatformException(NAME, "Video '" + videoId + "' is marked ready but exposes no mp4 rendition");
+        if (main == null) throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_STREAMABLE_NO_MP4) + "Failed to resolve video '" + videoId + "' due to no mp4 rendition, it is marked ready");
 
         final List<Quality> variants = new ArrayList<>(2);
         variants.add(new Quality(main, Math.max(0, video.files.mp4.width), Math.max(0, video.files.mp4.height)));

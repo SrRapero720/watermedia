@@ -170,18 +170,18 @@ public final class HttpHeaders implements Iterable<HttpHeaders.Entry> {
     /** One header field: an HTTP token name and a value free of control characters. */
     public record Entry(String name, String value) {
         public Entry {
-            if (name == null || value == null) throw new IllegalArgumentException("Header name and value are required");
-            if (name.isEmpty()) throw new IllegalArgumentException("Header name cannot be empty");
+            if (name == null || value == null) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_HEADERS_NULL_ARGS) + "Failed to add the header due to null name or value");
+            if (name.isEmpty()) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_HEADERS_EMPTY_NAME) + "Failed to add the header due to empty name");
             for (int i = 0; i < name.length(); i++) {
                 final char c = name.charAt(i);
                 if (!(c >= 'a' && c <= 'z') && !(c >= 'A' && c <= 'Z') && !(c >= '0' && c <= '9') && "!#$%&'*+-.^_`|~".indexOf(c) < 0)
-                    throw new IllegalArgumentException("Header name must be an HTTP token");
+                    throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_HEADERS_NAME_TOKEN) + "Failed to add the header due to name that is not an HTTP token");
             }
             // RAW NATIVE CONSUMERS REQUIRE THE SAME FIELD BOUNDARIES AS HTTP CONNECTIONS.
             for (int i = 0; i < value.length(); i++) {
                 final char c = value.charAt(i);
                 if ((c < 0x20 && c != '\t') || c == 0x7f)
-                    throw new IllegalArgumentException("Header value contains a prohibited control character");
+                    throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_HEADERS_VALUE_CONTROL) + "Failed to add the header due to prohibited control character in the value");
             }
         }
 

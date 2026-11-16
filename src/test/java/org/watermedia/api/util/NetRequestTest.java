@@ -261,7 +261,7 @@ public class NetRequestTest {
             for (final String location: List.of(secret.toUri().toString(), "jar:" + archive.toUri() + "!/x")) {
                 try (final LocalHttp server = redirect(location)) {
                     final IOException failure = assertThrows(IOException.class, () -> new NetRequest(server.uri("/start")).send());
-                    assertTrue(failure.getMessage().startsWith("Redirect to unsupported scheme"), failure.getMessage());
+                    assertTrue(failure.getMessage().startsWith("(wm_err:0437) Failed to follow the redirect due to unsupported scheme"), failure.getMessage());
                 }
             }
             // A FOLLOWED jar: HOP CACHES AN OPEN JarFile, WHICH WOULD KEEP THE ARCHIVE LOCKED ON WINDOWS
@@ -295,7 +295,7 @@ public class NetRequestTest {
                 // THE PLAIN SERVER CANNOT SPEAK TLS: THE HTTPS HOP IS ATTEMPTED AND FAILS ON THE WIRE, NOT ON THE SCHEME RULE
                 final IOException failure = assertThrows(IOException.class,
                         () -> new NetRequest(server.uri("/secure")).connectTimeout(1_000).readTimeout(1_000).send());
-                assertFalse(String.valueOf(failure.getMessage()).startsWith("Redirect to unsupported scheme"), failure.getMessage());
+                assertFalse(String.valueOf(failure.getMessage()).startsWith("(wm_err:0437) Failed to follow the redirect due to unsupported scheme"), failure.getMessage());
             }
         }
     }
@@ -377,7 +377,7 @@ public class NetRequestTest {
                     ex -> LocalHttp.respond(ex, "application/json", "{\"a\":".getBytes(StandardCharsets.UTF_8), 0));
                  final NetRequest req = new NetRequest(server.uri("/broken")).send()) {
                 final IOException failure = assertThrows(IOException.class, () -> req.json(Map.class));
-                assertTrue(failure.getMessage().startsWith("Malformed JSON"), failure.getMessage());
+                assertTrue(failure.getMessage().startsWith("(wm_err:0445) Failed to parse the JSON response"), failure.getMessage());
             }
         }
 
@@ -414,7 +414,7 @@ public class NetRequestTest {
                 assertTrue(String.valueOf(req.contentType()).contains("text/plain"));
                 assertEquals("hello", req.text());
                 final IllegalStateException again = assertThrows(IllegalStateException.class, req::text);
-                assertEquals("The response body was already read", again.getMessage());
+                assertEquals("(wm_err:0439) Failed to read the response body, it was already read", again.getMessage());
                 assertThrows(IllegalStateException.class, req::inputStream);
                 assertThrows(IllegalStateException.class, () -> req.json(Map.class));
             }

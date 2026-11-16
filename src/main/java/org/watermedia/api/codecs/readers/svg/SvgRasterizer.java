@@ -1,7 +1,9 @@
 package org.watermedia.api.codecs.readers.svg;
 
+import org.watermedia.WaterMedia;
 import org.watermedia.api.codecs.CodecException;
 import org.watermedia.api.util.MathUtil;
+import org.watermedia.tools.DataTool;
 
 import java.util.Arrays;
 import java.util.List;
@@ -138,7 +140,7 @@ final class SvgRasterizer {
         if (ya == yb || !Double.isFinite(xa) || !Double.isFinite(ya) || !Double.isFinite(xb) || !Double.isFinite(yb)) return;
         final double dxdy = (xb - xa) / (yb - ya);
         if (!Double.isFinite(dxdy)) return;
-        if (this.edgeN == MAX_EDGES) throw new CodecException("SVG shape exceeds " + MAX_EDGES + " edges");
+        if (this.edgeN == MAX_EDGES) throw new CodecException(DataTool.errCode(WaterMedia.ERR_SVG_RASTERIZER_EDGES) + "Failed to rasterize the SVG shape due to too many edges (max " + MAX_EDGES + ")");
         if (this.edgeN == this.edir.length) {
             final int cap = this.edir.length * 2;
             this.eyTop = Arrays.copyOf(this.eyTop, cap);
@@ -202,7 +204,7 @@ final class SvgRasterizer {
                 // CHARGED BEFORE THE WORK IS DONE, AND ACROSS EVERY SHAPE OF THE DOCUMENT: THIS IS THE
                 // ONLY BOUND THAT SURVIVES ANY ARRANGEMENT OF EDGES (ONE HUGE FILL OR THOUSANDS OF THEM)
                 this.crossWork += activeN;
-                if (this.crossWork > MAX_CROSSINGS) throw new CodecException("SVG rasterization exceeds " + MAX_CROSSINGS + " edge crossings");
+                if (this.crossWork > MAX_CROSSINGS) throw new CodecException(DataTool.errCode(WaterMedia.ERR_SVG_RASTERIZER_CROSSINGS) + "Failed to rasterize the SVG due to too many edge crossings (max " + MAX_CROSSINGS + ")");
 
                 this.crossings(ys, activeN);
                 int wind = 0;

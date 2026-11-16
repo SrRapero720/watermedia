@@ -300,6 +300,9 @@ Os loggers do projeto são `watermedia` e `watermedia_binaries`; coloque esses n
   registrado na primeira vez em cada engine, player, servidor ou cache. As iterações lentas são contadas e relatadas uma
   vez no final.
 - O _FFmpeg_ ainda escreve os seus próprios logs na saída de erro, fora dos loggers do projeto e do filtro de segredos.
+- Toda mensagem de exceção e toda linha de erro traz um código como `(wm_err:0720)`. Cada código é uma constante
+  `WaterMedia.ERR_*` que aponta um único lugar do WATERMeDIA, então cite-o nos relatos de bugs; o **Upload Logs** do
+  app lista os que encontra.
 - `-Dwatermedia.glchecks=true` ativa as verificações de erro do OpenGL no upload dos frames.
 
 `src/test/java/org/watermedia/ApiGuideExample.java` tem exemplos que compilam para todas as engines e para a reprodução

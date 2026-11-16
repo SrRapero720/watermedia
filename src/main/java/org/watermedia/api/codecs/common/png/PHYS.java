@@ -1,6 +1,8 @@
 package org.watermedia.api.codecs.common.png;
 
+import org.watermedia.WaterMedia;
 import org.watermedia.api.codecs.CodecException;
+import org.watermedia.tools.DataTool;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -26,10 +28,10 @@ public record PHYS(long pixelsPerUnitX, long pixelsPerUnitY, int unit) implement
 
     /** Converts a generic chunk to pHYs. */
     public static PHYS convert(final PngChunk chunk) throws CodecException {
-        if (chunk.type() != SIGNATURE) throw new IllegalArgumentException("Invalid chunk type for pHYs: 0x" + Integer.toHexString(chunk.type()));
+        if (chunk.type() != SIGNATURE) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_PNG_PHYS_TYPE) + "Failed to read pHYs due to invalid chunk type: 0x" + Integer.toHexString(chunk.type()));
 
         final byte[] data = chunk.data();
-        if (data.length != LENGTH) throw new CodecException("pHYs data must be 9 bytes, got " + data.length);
+        if (data.length != LENGTH) throw new CodecException(DataTool.errCode(WaterMedia.ERR_PNG_PHYS_LENGTH) + "Failed to read pHYs due to invalid length: " + data.length + " bytes (expected 9)");
 
         final ByteBuffer buffer = ByteBuffer.wrap(data).order(ByteOrder.BIG_ENDIAN);
         return new PHYS(

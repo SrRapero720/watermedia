@@ -1,6 +1,8 @@
 package org.watermedia.api.codecs.common.png;
 
+import org.watermedia.WaterMedia;
 import org.watermedia.api.codecs.CodecException;
+import org.watermedia.tools.DataTool;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -22,10 +24,10 @@ public record CHRM(int whiteX, int whiteY, int redX, int redY, int greenX, int g
 
     /** Converts a generic chunk to cHRM. */
     public static CHRM convert(final PngChunk chunk) throws CodecException {
-        if (chunk.type() != SIGNATURE) throw new IllegalArgumentException("Invalid chunk type for cHRM: 0x" + Integer.toHexString(chunk.type()));
+        if (chunk.type() != SIGNATURE) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_PNG_CHRM_TYPE) + "Failed to read cHRM due to invalid chunk type: 0x" + Integer.toHexString(chunk.type()));
 
         final byte[] data = chunk.data();
-        if (data.length != LENGTH) throw new CodecException("cHRM data must be 32 bytes, got " + data.length);
+        if (data.length != LENGTH) throw new CodecException(DataTool.errCode(WaterMedia.ERR_PNG_CHRM_LENGTH) + "Failed to read cHRM due to invalid length: " + data.length + " bytes (expected 32)");
 
         final ByteBuffer buffer = ByteBuffer.wrap(data).order(ByteOrder.BIG_ENDIAN);
         return new CHRM(

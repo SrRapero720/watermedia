@@ -5,6 +5,7 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import org.apache.logging.log4j.Marker;
 import org.apache.logging.log4j.MarkerManager;
+import org.watermedia.WaterMedia;
 import org.watermedia.WaterMediaConfig;
 import org.watermedia.api.platform.MatureContentException;
 import org.watermedia.api.platform.PlatformAPI;
@@ -79,7 +80,7 @@ public final class YouTubePlatform extends YtDlpPlatform {
             final String message = e.getMessage() == null ? "" : e.getMessage().toLowerCase(Locale.ROOT);
             if (message.contains("not a bot") || message.contains("sign in to confirm") || message.contains("po_token"))
                 return this.retryWithPoToken(uri, args);
-            throw new PlatformException(NAME, "yt-dlp could not resolve " + uri + ": " + e.getMessage(), e);
+            throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_YOUTUBE_RESOLVE) + "Failed to resolve " + uri + " with yt-dlp: " + e.getMessage(), e);
         }
         return this.extract(info);
     }
@@ -92,7 +93,7 @@ public final class YouTubePlatform extends YtDlpPlatform {
         try {
             info = this.info("ytsearch" + limit + ":" + query, List.of("--flat-playlist"), PlatformAPI.SEARCH_TIMEOUT_MS);
         } catch (final IOException e) {
-            throw new PlatformException(NAME, "yt-dlp could not search '" + query + "': " + e.getMessage(), e);
+            throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_YOUTUBE_SEARCH) + "Failed to search '" + query + "' with yt-dlp: " + e.getMessage(), e);
         }
 
         final JsonArray entries = arr(info, "entries");
@@ -145,9 +146,9 @@ public final class YouTubePlatform extends YtDlpPlatform {
         } catch (final IOException retry) {
             final PlatformException gate = ageGate(uri, retry);
             if (gate != null) throw gate;
-            throw new PlatformException(NAME, "YouTube blocked this request and the po_token retry failed: " + retry.getMessage(), retry);
+            throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_YOUTUBE_RETRY_IO) + "Failed to retry the blocked request with a po_token: " + retry.getMessage(), retry);
         } catch (final RuntimeException retry) {
-            throw new PlatformException(NAME, "YouTube blocked this request and the po_token retry failed: " + retry.getMessage(), retry);
+            throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_YOUTUBE_RETRY_RUNTIME) + "Failed to retry the blocked request with a po_token: " + retry.getMessage(), retry);
         }
         return this.extract(info);
     }
@@ -161,7 +162,7 @@ public final class YouTubePlatform extends YtDlpPlatform {
             exe = this.botGuard.executable();
             snapshot = this.botGuard.snapshot();
         } catch (final IOException e) {
-            throw new IOException("Failed to provision rustypipe-botguard: " + e.getMessage(), e);
+            throw new IOException(DataTool.errCode(WaterMedia.ERR_YOUTUBE_BOTGUARD_PROVISION) + "Failed to provision rustypipe-botguard: " + e.getMessage(), e);
         }
 
         final List<String> command = List.of(exe.toString(), "--snapshot-file", snapshot.toString(), "--", visitorData);
@@ -176,7 +177,7 @@ public final class YouTubePlatform extends YtDlpPlatform {
                 if (!token.isEmpty()) return token;
             }
         }
-        throw new IOException("rustypipe-botguard produced no token");
+        throw new IOException(DataTool.errCode(WaterMedia.ERR_YOUTUBE_NO_TOKEN) + "Failed to mint a po_token due to no token from rustypipe-botguard");
     }
 
     // ==========================================================================
@@ -189,8 +190,8 @@ public final class YouTubePlatform extends YtDlpPlatform {
         final String message = e.getMessage() == null ? "" : e.getMessage().toLowerCase(Locale.ROOT);
         if (!message.contains("confirm your age") && !message.contains("age-restricted") && !message.contains("inappropriate for some users"))
             return null;
-        if (!WaterMediaConfig.platforms.allowMatureContent) return new MatureContentException(NAME, "Age-restricted: " + uri, e);
-        return new PlatformException(NAME, "Age-restricted video " + uri + " needs a signed-in session, which WaterMedia cannot provide", e);
+        if (!WaterMediaConfig.platforms.allowMatureContent) return new MatureContentException(NAME, DataTool.errCode(WaterMedia.ERR_YOUTUBE_MATURE) + "Failed to resolve " + uri + " due to age restriction", e);
+        return new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_YOUTUBE_AGE_GATE) + "Failed to resolve video " + uri + " due to age restriction, it needs a signed-in session, which WaterMedia cannot provide", e);
     }
 
     // A FRESH visitorData FROM YOUTUBE'S INNERTUBE visitor_id ENDPOINT; THE po_token MUST BE BOUND TO THE SAME
@@ -204,7 +205,7 @@ public final class YouTubePlatform extends YtDlpPlatform {
                 .header("X-YouTube-Client-Version", CLIENT_VERSION)
                 .body(VISITOR_BODY), JsonObject.class);
         final String visitorData = str(obj(json, "responseContext"), "visitorData");
-        if (visitorData == null) throw new IOException("visitor_id endpoint answered without visitorData");
+        if (visitorData == null) throw new IOException(DataTool.errCode(WaterMedia.ERR_YOUTUBE_NO_VISITOR_DATA) + "Failed to fetch visitorData due to visitor_id endpoint answer without it");
         return visitorData;
     }
 }

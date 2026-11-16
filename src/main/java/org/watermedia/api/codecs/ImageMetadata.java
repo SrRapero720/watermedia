@@ -1,5 +1,8 @@
 package org.watermedia.api.codecs;
 
+import org.watermedia.WaterMedia;
+import org.watermedia.tools.DataTool;
+
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -202,7 +205,7 @@ public final class ImageMetadata {
     // HELPERS
     // ==========================================================================
     private void checkMutable() {
-        if (this.readOnly) throw new UnsupportedOperationException("This ImageMetadata is read-only");
+        if (this.readOnly) throw new UnsupportedOperationException(DataTool.errCode(WaterMedia.ERR_IMAGEMETADATA_READ_ONLY) + "Failed to modify the ImageMetadata, it is read-only");
     }
 
     // ==========================================================================

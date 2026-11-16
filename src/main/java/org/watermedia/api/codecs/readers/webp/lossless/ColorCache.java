@@ -1,6 +1,8 @@
 package org.watermedia.api.codecs.readers.webp.lossless;
 
+import org.watermedia.WaterMedia;
 import org.watermedia.api.codecs.CodecException;
+import org.watermedia.tools.DataTool;
 
 // VP8L COLOR CACHE: RECENTLY USED ARGB COLORS IN A POWER-OF-TWO TABLE INDEXED BY A MULTIPLICATIVE HASH
 final class ColorCache {
@@ -12,7 +14,7 @@ final class ColorCache {
 
     // CACHE BITS 1-11 CREATE 2^BITS SLOTS
     ColorCache(final int cacheBits) throws CodecException {
-        if (cacheBits < 1 || cacheBits > 11) throw new CodecException("Invalid color cache bits: " + cacheBits);
+        if (cacheBits < 1 || cacheBits > 11) throw new CodecException(DataTool.errCode(WaterMedia.ERR_VP8L_CACHE_BITS) + "Failed to create the color cache due to invalid cache bits: " + cacheBits);
         final int size = 1 << cacheBits;
         this.colors = new int[size];
         this.hashShift = 32 - cacheBits;

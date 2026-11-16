@@ -1,5 +1,6 @@
 package org.watermedia.api.codecs;
 
+import org.watermedia.WaterMedia;
 import org.watermedia.tools.DataTool;
 
 import java.nio.ByteBuffer;
@@ -15,7 +16,7 @@ public final class DownscaleFilter implements ReaderFilter {
 
     /** Creates a filter shrinking each frame by {@code scale}, within {@code (0, 1]}. */
     public DownscaleFilter(final float scale) {
-        if (!(scale > 0f && scale <= 1f)) throw new IllegalArgumentException("Scale must be within (0, 1], got " + scale);
+        if (!(scale > 0f && scale <= 1f)) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_DOWNSCALE_SCALE) + "Failed to create the downscale filter due to scale out of range (0, 1]: " + scale);
         this.scale = scale;
         this.outWidth = -1;
         this.outHeight = -1;
@@ -23,7 +24,7 @@ public final class DownscaleFilter implements ReaderFilter {
 
     /** Creates a filter resizing each frame to at most {@code width} by {@code height} pixels. */
     public DownscaleFilter(final int width, final int height) {
-        if (width < 1 || height < 1) throw new IllegalArgumentException("Target size must be positive, got " + width + "x" + height);
+        if (width < 1 || height < 1) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_DOWNSCALE_TARGET_SIZE) + "Failed to create the downscale filter due to non-positive target size: " + width + "x" + height);
         this.outWidth = width;
         this.outHeight = height;
         this.scale = -1f;
@@ -31,8 +32,8 @@ public final class DownscaleFilter implements ReaderFilter {
 
     /** Creates a filter resizing each frame to the source size {@code width} by {@code height} pre-multiplied by {@code scale}. */
     public DownscaleFilter(final int width, final int height, final float scale) {
-        if (width < 1 || height < 1) throw new IllegalArgumentException("Source size must be positive, got " + width + "x" + height);
-        if (!(scale > 0f && scale <= 1f)) throw new IllegalArgumentException("Scale must be within (0, 1], got " + scale);
+        if (width < 1 || height < 1) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_DOWNSCALE_SOURCE_SIZE) + "Failed to create the downscale filter due to non-positive source size: " + width + "x" + height);
+        if (!(scale > 0f && scale <= 1f)) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_DOWNSCALE_SOURCE_SCALE) + "Failed to create the downscale filter due to scale out of range (0, 1]: " + scale);
         this.outWidth = Math.max(1, Math.round(width * scale));
         this.outHeight = Math.max(1, Math.round(height * scale));
         this.scale = -1f;

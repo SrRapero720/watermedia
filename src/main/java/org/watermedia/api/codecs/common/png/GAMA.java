@@ -1,6 +1,8 @@
 package org.watermedia.api.codecs.common.png;
 
+import org.watermedia.WaterMedia;
 import org.watermedia.api.codecs.CodecException;
+import org.watermedia.tools.DataTool;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -24,15 +26,15 @@ public record GAMA(int gamma) implements IChunk {
 
     /** Converts a generic chunk to gAMA. */
     public static GAMA convert(final PngChunk chunk) throws CodecException {
-        if (chunk.type() != SIGNATURE) throw new IllegalArgumentException("Invalid chunk type for gAMA: 0x" + Integer.toHexString(chunk.type()));
+        if (chunk.type() != SIGNATURE) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_PNG_GAMA_TYPE) + "Failed to read gAMA due to invalid chunk type: 0x" + Integer.toHexString(chunk.type()));
 
         final byte[] data = chunk.data();
-        if (data.length != LENGTH) throw new CodecException("gAMA data must be 4 bytes, got " + data.length);
+        if (data.length != LENGTH) throw new CodecException(DataTool.errCode(WaterMedia.ERR_PNG_GAMA_LENGTH) + "Failed to read gAMA due to invalid length: " + data.length + " bytes (expected 4)");
 
         // THE FIELD IS UNSIGNED gamma * 100000: 0x80000000 READS BACK NEGATIVE AND FEEDS A NEGATIVE EXPONENT
         // TO Math.pow, WHOSE +Infinity SATURATES THE DECODER'S GAMMA LUT AND BLEEDS OVER THE ALPHA BYTE
         final int gamma = ByteBuffer.wrap(data).order(ByteOrder.BIG_ENDIAN).getInt();
-        if (gamma <= 0 || gamma > MAX_GAMMA) throw new CodecException("Invalid gAMA value: " + Integer.toUnsignedString(gamma));
+        if (gamma <= 0 || gamma > MAX_GAMMA) throw new CodecException(DataTool.errCode(WaterMedia.ERR_PNG_GAMA_VALUE) + "Failed to read gAMA due to invalid value: " + Integer.toUnsignedString(gamma));
         return new GAMA(gamma);
     }
 

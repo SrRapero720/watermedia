@@ -1,7 +1,9 @@
 package org.watermedia.api.codecs.common.png;
 
+import org.watermedia.WaterMedia;
 import org.watermedia.api.codecs.CodecException;
 import org.watermedia.api.codecs.common.Tiff;
+import org.watermedia.tools.DataTool;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -25,14 +27,14 @@ public record EXIF(byte[] data) implements IChunk {
 
     /** Converts a generic chunk to eXIf. */
     public static EXIF convert(final PngChunk chunk) throws CodecException {
-        if (chunk.type() != SIGNATURE) throw new IllegalArgumentException("Invalid chunk type for eXIf: 0x" + Integer.toHexString(chunk.type()));
+        if (chunk.type() != SIGNATURE) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_PNG_EXIF_TYPE) + "Failed to read eXIf due to invalid chunk type: 0x" + Integer.toHexString(chunk.type()));
 
         final byte[] data = chunk.data();
         // AT LEAST THE 8-BYTE TIFF HEADER
-        if (data.length < 8) throw new CodecException("eXIf data too short: " + data.length + " bytes");
+        if (data.length < 8) throw new CodecException(DataTool.errCode(WaterMedia.ERR_PNG_EXIF_TRUNCATED) + "Failed to read eXIf due to truncated data: " + data.length + " bytes");
         // "MM" AND "II" READ THE SAME IN EITHER BYTE ORDER
         final short byteOrder = (short) ((data[0] << 8) | (data[1] & 0xFF));
-        if (byteOrder != BIG_ENDIAN_MARKER && byteOrder != LITTLE_ENDIAN_MARKER) throw new CodecException("Invalid EXIF byte order marker");
+        if (byteOrder != BIG_ENDIAN_MARKER && byteOrder != LITTLE_ENDIAN_MARKER) throw new CodecException(DataTool.errCode(WaterMedia.ERR_PNG_EXIF_BYTE_ORDER) + "Failed to read eXIf due to invalid byte order marker");
         return new EXIF(data.clone());
     }
 

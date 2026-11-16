@@ -1,6 +1,8 @@
 package org.watermedia.api.codecs.readers.svg;
 
+import org.watermedia.WaterMedia;
 import org.watermedia.api.util.MathUtil;
+import org.watermedia.tools.DataTool;
 
 import java.util.Locale;
 import java.util.Map;
@@ -198,7 +200,7 @@ final class SvgColor {
         if (ch >= '0' && ch <= '9') return ch - '0';
         if (ch >= 'a' && ch <= 'f') return ch - 'a' + 10;
         if (ch >= 'A' && ch <= 'F') return ch - 'A' + 10;
-        throw new NumberFormatException("bad hex: " + ch);
+        throw new NumberFormatException(DataTool.errCode(WaterMedia.ERR_SVG_COLOR_HEX_DIGIT) + "Failed to parse the SVG color due to invalid hex digit: " + ch);
     }
 
     private static int argb(final int a, final int r, final int g, final int b) {

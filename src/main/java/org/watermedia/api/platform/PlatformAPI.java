@@ -2,6 +2,7 @@ package org.watermedia.api.platform;
 
 import org.apache.logging.log4j.Marker;
 import org.apache.logging.log4j.MarkerManager;
+import org.watermedia.WaterMedia;
 import org.watermedia.WaterMediaConfig;
 import org.watermedia.api.player.MRL;
 import org.watermedia.api.platform.internal.WaterPlatform;
@@ -133,7 +134,7 @@ public final class PlatformAPI {
      * @throws IllegalArgumentException when {@code limit} is below one
      */
     public static List<PlatformResult> search(final String query, final int limit, final boolean reSearch) {
-        if (limit < 1) throw new IllegalArgumentException("Limit must be at least 1");
+        if (limit < 1) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_PLATFORMAPI_LIMIT_LOW) + "Failed to set the limit due to a value below 1");
         if (query == null || query.isBlank()) return List.of();
         final String text = query.strip();
         final int perPlatform = Math.min(limit, WaterMediaConfig.platforms.searchLimit);
@@ -221,15 +222,15 @@ public final class PlatformAPI {
      * @throws IllegalArgumentException when {@code uri} is null
      */
     public static Platform.Resolution fetch(final URI uri) throws PlatformException {
-        if (uri == null) throw new IllegalArgumentException("URI cannot be null");
+        if (uri == null) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_PLATFORMAPI_URI_NULL) + "Failed to resolve the URI due to null URI");
         for (final Platform platform: probeOrder()) {
             final Platform.Resolution data;
             try {
                 data = platform.resolve(uri);
             } catch (final RuntimeException | LinkageError e) {
                 // A BUG IN THE HANDLER, OR A CANCELLED WAIT IT DID NOT TRANSLATE; A PlatformException PASSES THROUGH
-                if (Thread.currentThread().isInterrupted()) throw new PlatformException(platform.name(), "Resolution of " + uri + " was cancelled", e);
-                throw new PlatformException(platform.name(), "Unexpected error resolving " + uri + " (" + e + ")", e);
+                if (Thread.currentThread().isInterrupted()) throw new PlatformException(platform.name(), DataTool.errCode(WaterMedia.ERR_PLATFORMAPI_RESOLVE_CANCELLED) + "Failed to resolve " + uri + ", it was cancelled", e);
+                throw new PlatformException(platform.name(), DataTool.errCode(WaterMedia.ERR_PLATFORMAPI_RESOLVE_UNEXPECTED) + "Failed to resolve " + uri + " due to an unexpected error (" + e + ")", e);
             }
             if (data != null) {
                 LOGGER.debug(IT, "Fetched data from {} for {}", platform.name(), uri);
@@ -245,7 +246,7 @@ public final class PlatformAPI {
      * are dropped. Throws {@link IllegalArgumentException} when {@code platform} is null.
      */
     public static void register(final Platform platform) {
-        if (platform == null) throw new IllegalArgumentException("Platform cannot be null");
+        if (platform == null) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_PLATFORMAPI_REGISTER_NULL) + "Failed to register the platform due to null platform");
         if (!CUSTOM.addIfAbsent(platform)) return;
         synchronized (SEARCH_LOCK) {
             SEARCH_CACHE.clear();

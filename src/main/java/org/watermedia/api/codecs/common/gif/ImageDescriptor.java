@@ -1,5 +1,6 @@
 package org.watermedia.api.codecs.common.gif;
 
+import org.watermedia.WaterMedia;
 import org.watermedia.api.codecs.CodecException;
 import org.watermedia.tools.DataTool;
 
@@ -17,7 +18,7 @@ public record ImageDescriptor(
 
     /** Reads and validates the {@value #LENGTH}-byte descriptor after the image separator at the buffer position, advancing past it. */
     public static ImageDescriptor read(final ByteBuffer buffer) throws CodecException {
-        if (buffer.remaining() < LENGTH) throw new CodecException("Truncated GIF image descriptor");
+        if (buffer.remaining() < LENGTH) throw new CodecException(DataTool.errCode(WaterMedia.ERR_GIF_IMAGE_TRUNCATED) + "Failed to read the GIF image descriptor due to truncated data");
         final int at = buffer.position();
         final int packedFields = buffer.get(at + 8) & 0xFF;
         final ImageDescriptor id = new ImageDescriptor(DataTool.u16(buffer, at, ByteOrder.LITTLE_ENDIAN),
@@ -38,9 +39,9 @@ public record ImageDescriptor(
     public void validate() throws CodecException {
         // A RECORD CANONICAL CONSTRUCTOR CANNOT THROW CodecException, SO read() CALLS THIS AT THE PARSE BOUNDARY
         if (this.left < 0 || this.top < 0 || this.width <= 0 || this.height <= 0)
-            throw new CodecException("Invalid dimensions for ImageDescriptor");
+            throw new CodecException(DataTool.errCode(WaterMedia.ERR_GIF_IMAGE_DIMENSIONS) + "Failed to validate the GIF image descriptor due to invalid dimensions");
         if (this.localColorTableSize < 0 || this.localColorTableSize >= LOCAL_COLOR_TABLE_SIZE_CODES)
-            throw new CodecException("Local color table size must be between 0 and " + (LOCAL_COLOR_TABLE_SIZE_CODES - 1));
+            throw new CodecException(DataTool.errCode(WaterMedia.ERR_GIF_IMAGE_PALETTE_SIZE) + "Failed to validate the GIF image descriptor due to invalid local color table size, it must be between 0 and " + (LOCAL_COLOR_TABLE_SIZE_CODES - 1));
     }
 
     @Override

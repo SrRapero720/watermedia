@@ -7,6 +7,7 @@ import org.watermedia.WaterMediaConfig;
 import org.watermedia.api.platform.internal.WaterPlatform;
 import org.watermedia.api.util.MathUtil;
 import org.watermedia.api.util.NetRequest;
+import org.watermedia.tools.DataTool;
 import org.watermedia.tools.ThreadTool;
 
 import java.io.File;
@@ -37,7 +38,8 @@ public final class NetworkAPI extends WaterMedia.Module {
 
     /** Creates the network module; {@link WaterMedia#start} calls it once per process and a second call throws. */
     public NetworkAPI() {
-        if (!LOADED.compareAndSet(false, true)) throw new IllegalStateException("NetworkAPI is already loaded");
+        if (!LOADED.compareAndSet(false, true))
+            throw new IllegalStateException(DataTool.errCode(WaterMedia.ERR_NETWORK_ALREADY_LOADED) + "Failed to load NetworkAPI, it is already loaded");
     }
 
     // ==========================================================================
@@ -45,8 +47,8 @@ public final class NetworkAPI extends WaterMedia.Module {
     // ==========================================================================
     /** Uploads every file to the remote WaterMedia server, one status each; all of them are checked before the first upload starts. */
     public static UploadStatus[] upload(final File... files) {
-        if (files == null) throw new IllegalArgumentException("Files cannot be null");
-        for (final File file: files) if (file == null || !file.isFile()) throw new IllegalArgumentException("Not a file: " + file);
+        if (files == null) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_NETWORK_UPLOAD_NULL_FILES) + "Failed to upload due to null files");
+        for (final File file: files) if (file == null || !file.isFile()) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_NETWORK_UPLOAD_NOT_FILE_BATCH) + "Failed to upload, not a file: " + file);
         final UploadStatus[] statuses = new UploadStatus[files.length];
         for (int i = 0; i < files.length; i++) statuses[i] = upload(files[i]);
         return statuses;
@@ -54,15 +56,15 @@ public final class NetworkAPI extends WaterMedia.Module {
 
     /** Uploads a file to the remote WaterMedia server in the background; an unreachable or misconfigured server fails the returned status instead of throwing. */
     public static UploadStatus upload(final File file) {
-        if (file == null || !file.isFile()) throw new IllegalArgumentException("Not a file: " + file);
+        if (file == null || !file.isFile()) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_NETWORK_UPLOAD_NOT_FILE) + "Failed to upload, not a file: " + file);
         final ExecutorService workers = uploads;
-        if (workers == null) throw new IllegalStateException("The network module is not loaded");
+        if (workers == null) throw new IllegalStateException(DataTool.errCode(WaterMedia.ERR_NETWORK_UPLOAD_NOT_LOADED) + "Failed to upload, the network module is not loaded");
         final UploadStatus status = new UploadStatus(file.length());
         workers.execute(() -> {
             try {
                 upload(file, status);
             } finally {
-                if (!status.completed() && !status.failed()) status.fail("Upload ended before completion");
+                if (!status.completed() && !status.failed()) status.fail(DataTool.errCode(WaterMedia.ERR_NETWORK_UPLOAD_UNFINISHED) + "Failed to upload, it ended before completion");
             }
         });
         return status;
@@ -72,7 +74,7 @@ public final class NetworkAPI extends WaterMedia.Module {
     public static String remoteUrl() {
         final String base = WaterMediaConfig.network.remoteUrl;
         if (base == null || base.isBlank() || !(base.startsWith("http://") || base.startsWith("https://")))
-            throw new IllegalStateException("network.remoteUrl is not an absolute http(s) URL: " + base);
+            throw new IllegalStateException(DataTool.errCode(WaterMedia.ERR_NETWORK_REMOTE_URL) + "Failed to read network.remoteUrl, it is not an absolute http(s) URL: " + base);
         return base.endsWith("/") ? base.substring(0, base.length() - 1) : base;
     }
 
@@ -87,7 +89,7 @@ public final class NetworkAPI extends WaterMedia.Module {
         try {
             NetworkServer.start(WaterMediaConfig.network.serverPort, cwd);
         } catch (final Exception failure) { // UPLOADS STILL WORK WITHOUT THE LOCAL SERVER
-            LOGGER.error(IT, "The local file server did not start; uploads still work without it", failure);
+            LOGGER.error(IT, DataTool.errCode(WaterMedia.ERR_NETWORK_SERVER_START) + "Failed to start the local file server, uploads still work without it", failure);
         }
     }
 
@@ -134,7 +136,7 @@ public final class NetworkAPI extends WaterMedia.Module {
                 int read;
 
                 while ((read = fis.read(buffer)) != -1) {
-                    if (status.cancelled) throw new IOException("Upload cancelled");
+                    if (status.cancelled) throw new IOException(DataTool.errCode(WaterMedia.ERR_NETWORK_UPLOAD_CANCELLED_WRITING) + "Failed to upload, it was cancelled");
                     os.write(buffer, 0, read);
                     uploaded += read;
                     status.uploadedBytes(uploaded);
@@ -150,17 +152,19 @@ public final class NetworkAPI extends WaterMedia.Module {
                 }
             }
 
-            if (status.cancelled) throw new IOException("Upload cancelled");
+            if (status.cancelled) throw new IOException(DataTool.errCode(WaterMedia.ERR_NETWORK_UPLOAD_CANCELLED) + "Failed to upload, it was cancelled");
             final int code = conn.getResponseCode();
             if (code == 200) {
                 final String id;
                 try (final var is = conn.getInputStream()) {
                     id = new String(is.readNBytes(9), StandardCharsets.US_ASCII);
                 }
-                if (!id.matches("[A-Za-z0-9]{8}")) throw new IOException("Server returned an invalid upload identifier");
+                if (!id.matches("[A-Za-z0-9]{8}")) throw new IOException(DataTool.errCode(WaterMedia.ERR_NETWORK_UPLOAD_INVALID_ID) + "Failed to upload due to invalid identifier from the server");
                 status.complete(id);
+            } else if (code == HttpURLConnection.HTTP_UNAVAILABLE) {
+                status.fail(DataTool.errCode(WaterMedia.ERR_NETWORK_UPLOAD_SERVER_BUSY) + "Failed to upload due to busy server, try again!");
             } else {
-                status.fail(code == HttpURLConnection.HTTP_UNAVAILABLE ? "The server is busy, try again in a moment" : "Server returned HTTP " + code);
+                status.fail(DataTool.errCode(WaterMedia.ERR_NETWORK_UPLOAD_HTTP_STATUS) + "Failed to upload, the server returned HTTP " + code);
             }
         } catch (final ConnectException | UnknownHostException | SocketTimeoutException unreachable) {
             if (status.cancelled) return;
@@ -170,7 +174,7 @@ public final class NetworkAPI extends WaterMedia.Module {
         } catch (final Exception e) {
             if (status.cancelled) return; // THE POOL CLEARS A LATE CANCEL INTERRUPT BEFORE ITS NEXT UPLOAD
             // e.getMessage() IS OFTEN null (E.G. NPE); e.toString() KEEPS THE EXCEPTION TYPE FOR DIAGNOSIS
-            LOGGER.error(IT, "Failed to upload '{}' to remote server", file.getName(), e);
+            LOGGER.error(IT, DataTool.errCode(WaterMedia.ERR_NETWORK_UPLOAD_LOG) + "Failed to upload '{}' to remote server", file.getName(), e);
             status.fail(e.toString());
         } finally {
             // A cancel() THAT LANDS AFTER THIS UPLOAD MUST NOT INTERRUPT THE WORKER'S NEXT ONE

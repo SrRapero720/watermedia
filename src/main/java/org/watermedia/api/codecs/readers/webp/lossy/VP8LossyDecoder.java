@@ -2,6 +2,7 @@ package org.watermedia.api.codecs.readers.webp.lossy;
 
 import org.apache.logging.log4j.Marker;
 import org.apache.logging.log4j.MarkerManager;
+import org.watermedia.WaterMedia;
 import org.watermedia.WaterMediaConfig;
 import org.watermedia.api.codecs.CodecException;
 import org.watermedia.api.codecs.UnsupportedFormatException;
@@ -37,18 +38,18 @@ public final class VP8LossyDecoder {
 
         // RFC6386 SECTION 9.1: PARSE UNCOMPRESSED FRAME HEADER
         final FrameInfo frm = parseFrameHeader(buf);
-        if (!frm.keyFrame) throw new UnsupportedFormatException("VP8 interframes are not supported, only key frames");
+        if (!frm.keyFrame) throw new UnsupportedFormatException(DataTool.errCode(WaterMedia.ERR_VP8_DECODER_INTERFRAME) + "Failed to decode the VP8 frame due to unsupported interframes, only key frames are supported");
         if (frm.w <= 0 || frm.h <= 0)
-            throw new CodecException("Invalid VP8 frame size: " + frm.w + "x" + frm.h);
+            throw new CodecException(DataTool.errCode(WaterMedia.ERR_VP8_DECODER_FRAME_SIZE) + "Failed to decode the VP8 frame due to invalid frame size: " + frm.w + "x" + frm.h);
         // THE CONTAINER (SIMPLE HEADER, VP8X CANVAS OR ANMF FRAME) AND THE BITSTREAM MUST AGREE:
         // CALLERS SIZE THEIR OUTPUT BUFFERS FROM THE CONTAINER, SO A MISMATCH WOULD OVERRUN THEM
         if (frm.w != expW || frm.h != expH)
-            throw new CodecException("VP8 frame is " + frm.w + "x" + frm.h + ", container declares " + expW + "x" + expH);
+            throw new CodecException(DataTool.errCode(WaterMedia.ERR_VP8_DECODER_MISMATCH) + "Failed to decode the VP8 frame due to size mismatch with the container: frame is " + frm.w + "x" + frm.h + ", container declares " + expW + "x" + expH);
 
         // PARTITION 0 IS THE COMPRESSED HEADER. p0Sz COMES FROM THE FRAME TAG AND CAN OVERRUN THE CHUNK
         if (frm.hdrSz + frm.p0Sz > buf.limit()) {
             if (!WaterMediaConfig.codecs.vp8.brokenTokens)
-                throw new CodecException("Broken VP8 partition 0: declared " + frm.p0Sz + " bytes, chunk has " + (buf.limit() - frm.hdrSz));
+                throw new CodecException(DataTool.errCode(WaterMedia.ERR_VP8_DECODER_PARTITION_0) + "Failed to decode the VP8 frame due to broken partition 0: declared " + frm.p0Sz + " bytes, chunk has " + (buf.limit() - frm.hdrSz));
             repaired(warned, "Broken VP8 partition 0: declared {} bytes, only {} available; clamping", frm.p0Sz, buf.limit() - frm.hdrSz);
             frm.p0Sz = buf.limit() - frm.hdrSz;
         }
@@ -63,7 +64,7 @@ public final class VP8LossyDecoder {
         // OUT WHILE PARSING IT MEANS EVERY FIELD BELOW WAS INVENTED. FAIL HERE, BEFORE THE
         // FRAME-SIZED PLANES ARE ALLOCATED FROM THOSE FIELDS
         if (hdrBr.eof())
-            throw new CodecException("VP8 bitstream truncated: bool decoder ran past partition 0 end");
+            throw new CodecException(DataTool.errCode(WaterMedia.ERR_VP8_DECODER_HEADER_EOF) + "Failed to decode the VP8 frame due to truncated bitstream, bool decoder ran past partition 0 end");
 
         // RFC6386 SECTION 9.5: TOKEN PARTITION SIZES AND DECODERS
         buf.position(frm.hdrSz + frm.p0Sz);
@@ -113,7 +114,7 @@ public final class VP8LossyDecoder {
         final int tableLen = (numParts - 1) * 3;
         if (buf.remaining() < tableLen) {
             if (!repair)
-                throw new CodecException("Truncated VP8 partition size table: " + buf.remaining() + " of " + tableLen + " bytes");
+                throw new CodecException(DataTool.errCode(WaterMedia.ERR_VP8_DECODER_SIZE_TABLE) + "Failed to read the VP8 partition size table due to truncated data: " + buf.remaining() + " of " + tableLen + " bytes");
             repaired(warned, "Truncated VP8 partition size table ({} of {} bytes); missing sizes assumed 0", buf.remaining(), tableLen);
         }
         final int[] partSz = new int[numParts];
@@ -127,7 +128,7 @@ public final class VP8LossyDecoder {
         for (int i = 0; i < numParts - 1; i++) {
             if (partSz[i] > avail) {
                 if (!repair)
-                    throw new CodecException("Broken VP8 token partition " + i + ": declared " + partSz[i] + " bytes, only " + avail + " available");
+                    throw new CodecException(DataTool.errCode(WaterMedia.ERR_VP8_DECODER_TOKEN_DECLARED) + "Failed to read the VP8 token partition " + i + " due to broken size: declared " + partSz[i] + " bytes, only " + avail + " available");
                 repaired(warned, "Broken VP8 token partition {}: declared {} bytes, only {} available; clamping", i, partSz[i], avail);
                 partSz[i] = avail;
             }
@@ -147,7 +148,7 @@ public final class VP8LossyDecoder {
             // PARTITION BYTES OR, WHEN THERE IS NO PREVIOUS ONE, BY FAKING ZEROED DATA
             if (partSz[i] < 2) {
                 if (!repair)
-                    throw new CodecException("Broken VP8 token partition " + i + ": only " + partSz[i] + " bytes");
+                    throw new CodecException(DataTool.errCode(WaterMedia.ERR_VP8_DECODER_TOKEN_SMALL) + "Failed to read the VP8 token partition " + i + " due to broken size: only " + partSz[i] + " bytes");
                 repaired(warned, "Empty VP8 token partition {}; {}", i, prev != null ? "duplicating previous partition" : "faking zeroed data");
                 pb = prev != null ? prev.duplicate() : ByteBuffer.allocate(2).order(ByteOrder.LITTLE_ENDIAN);
             }
@@ -166,7 +167,7 @@ public final class VP8LossyDecoder {
 
     // RFC6386 SECTION 9.1: FRAME HEADER, UNCOMPRESSED DATA CHUNK
     private static FrameInfo parseFrameHeader(final ByteBuffer buf) throws CodecException {
-        if (buf.remaining() < 10) throw new CodecException("VP8 frame too small");
+        if (buf.remaining() < 10) throw new CodecException(DataTool.errCode(WaterMedia.ERR_VP8_DECODER_FRAME_SMALL) + "Failed to read the VP8 frame header due to small frame");
 
         final FrameInfo f = new FrameInfo();
         final int b0 = buf.get() & 0xFF;
@@ -179,7 +180,7 @@ public final class VP8LossyDecoder {
         if (f.keyFrame) {
             // KEY FRAME START CODE: 0x9D 0x01 0x2A
             if ((buf.get() & 0xFF) != 0x9D || (buf.get() & 0xFF) != 0x01 || (buf.get() & 0xFF) != 0x2A)
-                throw new CodecException("Invalid VP8 start code");
+                throw new CodecException(DataTool.errCode(WaterMedia.ERR_VP8_DECODER_START_CODE) + "Failed to read the VP8 frame header due to invalid start code");
             f.w = buf.getShort() & 0x3FFF;
             f.h = buf.getShort() & 0x3FFF;
             f.hdrSz = 10;
@@ -499,7 +500,7 @@ public final class VP8LossyDecoder {
                 // SPENT THE REMAINING GRID WOULD BE SYNTHESISED FROM IMPLICIT ZERO BYTES, WHICH IS
                 // HOW A 2-BYTE TOKEN PARTITION "DECODES" A 64-MEGAPIXEL FRAME
                 if (hdrBr.eof() || tbr.eof())
-                    throw new CodecException("VP8 bitstream truncated: bool decoder ran past partition end at macroblock "
+                    throw new CodecException(DataTool.errCode(WaterMedia.ERR_VP8_DECODER_MACROBLOCK_EOF) + "Failed to decode the VP8 frame due to truncated bitstream, bool decoder ran past partition end at macroblock "
                             + mbX + "," + mbY + " of " + mbW + "x" + mbH);
             }
         }

@@ -4,6 +4,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.annotations.SerializedName;
 import org.apache.logging.log4j.Marker;
 import org.apache.logging.log4j.MarkerManager;
+import org.watermedia.WaterMedia;
 import org.watermedia.WaterMediaConfig;
 import org.watermedia.api.platform.*;
 import org.watermedia.api.util.MediaType;
@@ -73,11 +74,11 @@ public final class ImgurPlatform implements Platform {
                 final JsonObject root = WebRequests.fetchJson(NAME, requestUrl, JsonObject.class);
                 final GalleryResponse res = JSONTool.parse(root, GalleryResponse.class);
                 if (!res.success() || res.data() == null)
-                    throw new PlatformException(NAME, "Post '" + id + "' response was empty or unsuccessful (status " + res.status() + ")");
+                    throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_IMGUR_POST_RESPONSE) + "Failed to resolve post '" + id + "' due to an empty or unsuccessful response (status " + res.status() + ")");
 
                 final Gallery data = res.data();
                 if (Boolean.TRUE.equals(data.nsfw()) && !WaterMediaConfig.platforms.allowMatureContent)
-                    throw new MatureContentException(NAME, "Post '" + id + "' is marked as mature content");
+                    throw new MatureContentException(NAME, DataTool.errCode(WaterMedia.ERR_IMGUR_POST_MATURE) + "Failed to resolve post '" + id + "' due to mature content");
 
                 // SINGLE-IMAGE POST: data IS THE IMAGE ITSELF
                 if (data.images() == null && !data.isAlbum()) {
@@ -87,7 +88,7 @@ public final class ImgurPlatform implements Platform {
                 }
 
                 if (data.images() == null || data.images().length == 0)
-                    throw new PlatformException(NAME, "Post '" + id + "' contains no images");
+                    throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_IMGUR_POST_NO_IMAGES) + "Failed to resolve post '" + id + "' due to no images");
 
                 // ONE BAD ITEM MUST NOT TAKE THE ALBUM DOWN; AN ALBUM WITH NOTHING LEFT REPORTS ITS FIRST FAILURE,
                 // SO A FULLY MATURE ONE STAYS BLOCKED
@@ -99,7 +100,7 @@ public final class ImgurPlatform implements Platform {
                     } catch (final PlatformException | RuntimeException e) {
                         LOGGER.warn(IT, "Imgur skipped item '{}' of post '{}'", img == null ? null : img.id(), id, e);
                         if (skipped == null) skipped = e instanceof final PlatformException platform ? platform
-                                : new PlatformException(NAME, "Unexpected item in post '" + id + "'", e);
+                                : new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_IMGUR_POST_ITEM) + "Failed to resolve post '" + id + "' due to an unexpected item", e);
                     }
                 }
                 if (entries.isEmpty()) throw skipped;
@@ -112,13 +113,13 @@ public final class ImgurPlatform implements Platform {
             final String requestUrl = String.format(IMAGE_URL, id);
             final ImageResponse res = WebRequests.fetchJson(NAME, requestUrl, ImageResponse.class);
             if (!res.success() || res.data() == null)
-                throw new PlatformException(NAME, "Image '" + id + "' response was empty or unsuccessful (status " + res.status() + ")");
+                throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_IMGUR_IMAGE_RESPONSE) + "Failed to resolve image '" + id + "' due to an empty or unsuccessful response (status " + res.status() + ")");
 
             final Image img = res.data();
             LOGGER.debug(IT, "Imgur resolved image '{}' ({})", id, img.type());
             return new Resolution(null, this.entry(img, img.title(), img.accountUrl(), uri));
         } catch (final RuntimeException e) {
-            throw new PlatformException(NAME, "Unexpected API response for " + uri, e);
+            throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_IMGUR_API_RESPONSE) + "Failed to resolve " + uri + " due to an unexpected API response", e);
         }
     }
 
@@ -149,7 +150,7 @@ public final class ImgurPlatform implements Platform {
 
     private Source entry(final Image img, final String fallbackTitle, final String accountUrl, final URI uri) throws PlatformException {
         if (Boolean.TRUE.equals(img.nsfw()) && !WaterMediaConfig.platforms.allowMatureContent)
-            throw new MatureContentException(NAME, "Item '" + img.id() + "' is marked as mature content");
+            throw new MatureContentException(NAME, DataTool.errCode(WaterMedia.ERR_IMGUR_ITEM_MATURE) + "Failed to resolve item '" + img.id() + "' due to mature content");
 
         final MediaType type = MediaType.of(img.type());
         // IMGUR REPORTS "image/gif" FOR ITEMS IT SERVES AS mp4, WHICH PLAY AS VIDEO
@@ -169,7 +170,7 @@ public final class ImgurPlatform implements Platform {
 
         final URI target = DataTool.uri(link);
         if (target == null)
-            throw new PlatformException(NAME, "Item '" + img.id() + "' (" + img.type() + ") has no usable link: " + link);
+            throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_IMGUR_ITEM_NO_LINK) + "Failed to resolve item '" + img.id() + "' (" + img.type() + ") due to no usable link: " + link);
 
         return new Source(type, null, metadata,
                 HttpHeaders.defaults(uri),

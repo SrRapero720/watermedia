@@ -3,6 +3,7 @@ package org.watermedia.bootstrap;
 import org.apache.logging.log4j.Marker;
 import org.apache.logging.log4j.MarkerManager;
 import org.watermedia.WaterMedia;
+import org.watermedia.tools.DataTool;
 
 import java.io.File;
 import java.lang.management.ManagementFactory;
@@ -53,8 +54,6 @@ public final class DefensiveCheck {
     private static final int PARENT_DEPTH = 5;
     private static final int EXCERPT_SIZE = 48;
     private static final int SHOWN_SIZE = 4;
-    private static final String MESSAGE = WaterMedia.NAME + " does not run under TLauncher, a malicious launcher. Uninstall it and use the official "
-            + "Minecraft Launcher, Prism Launcher, ATLauncher, Modrinth App or the CurseForge app. Detected: ";
 
     private DefensiveCheck() {}
 
@@ -155,10 +154,11 @@ public final class DefensiveCheck {
         } catch (final Throwable ignored) {}
 
         if (!evidence.isEmpty()) {
-            LOGGER.error(IT, "TLauncher detected: {}", evidence);
+            LOGGER.error(IT, DataTool.errCode(WaterMedia.ERR_DEFENSIVE_TLAUNCHER_LOG) + "Failed to start due to detected TLauncher: {}", evidence);
             final List<String> shown = evidence.subList(0, Math.min(SHOWN_SIZE, evidence.size()));
-            throw new IllegalStateException(MESSAGE + String.join("; ", shown)
-                    + (evidence.size() > shown.size() ? " (+" + (evidence.size() - shown.size()) + " more in the log)" : ""));
+            throw new IllegalStateException(DataTool.errCode(WaterMedia.ERR_DEFENSIVE_TLAUNCHER) + "Failed to start " + WaterMedia.NAME + ", it does not run under TLauncher, a malicious launcher. "
+                    + "Uninstall it and use the official Minecraft Launcher, Prism Launcher, ATLauncher, Modrinth App or the CurseForge app. Detected: "
+                    + String.join("; ", shown) + (evidence.size() > shown.size() ? " (+" + (evidence.size() - shown.size()) + " more in the log)" : ""));
         }
 
         final List<String> footprints = new ArrayList<>();

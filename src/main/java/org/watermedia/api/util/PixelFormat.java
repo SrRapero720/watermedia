@@ -1,5 +1,8 @@
 package org.watermedia.api.util;
 
+import org.watermedia.WaterMedia;
+import org.watermedia.tools.DataTool;
+
 /**
  * Pixel layouts, including block-compressed (BCn) texture formats.
  * <p>
@@ -108,7 +111,7 @@ public enum PixelFormat {
     /** Returns the bytes of one texel of {@code plane} at {@code bits} per sample; compressed formats ignore the depth. */
     public int texelBytes(final int plane, final int bits) {
         this.check(plane, 0);
-        if (bits < 1 || bits > 32) throw new IllegalArgumentException("Bits per sample must be within [1, 32], got " + bits);
+        if (bits < 1 || bits > 32) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_PIXELFORMAT_BITS_RANGE) + "Failed to read the pixel format due to bits per sample out of range [1, 32]: " + bits);
         if (this.compressed()) return this.blockBytes;
         final int sample = bits <= 8 ? 1 : bits <= 16 ? 2 : 4;
         return switch (this) {
@@ -134,7 +137,7 @@ public enum PixelFormat {
     // HELPERS
     // ==========================================================================
     private void check(final int plane, final int size) {
-        if (plane < 0 || plane >= this.planes) throw new IllegalArgumentException(this + " has no plane " + plane);
-        if (size < 0) throw new IllegalArgumentException("Plane size cannot be negative, got " + size);
+        if (plane < 0 || plane >= this.planes) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_PIXELFORMAT_PLANE_MISSING) + "Failed to read the plane due to no such plane in " + this + ": " + plane);
+        if (size < 0) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_PIXELFORMAT_PLANE_SIZE) + "Failed to read the plane due to negative size: " + size);
     }
 }

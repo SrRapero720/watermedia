@@ -61,7 +61,7 @@ public class BiliBiliPlatformTest {
         void testUnsupportedShapeThrows(final String uri) {
             final PlatformException thrown = assertThrows(PlatformException.class, () -> new BiliBiliPlatform().resolve(URI.create(uri)));
             assertFalse(thrown instanceof MatureContentException, "An unsupported shape is not a mature block");
-            assertTrue(thrown.getMessage().startsWith(BiliBiliPlatform.NAME + ": Unsupported URL"), thrown.getMessage());
+            assertTrue(thrown.getMessage().startsWith(BiliBiliPlatform.NAME + ": (wm_err:2020) Failed to resolve "), thrown.getMessage());
         }
     }
 

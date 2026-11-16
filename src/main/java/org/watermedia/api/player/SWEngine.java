@@ -2,7 +2,9 @@ package org.watermedia.api.player;
 
 import org.apache.logging.log4j.Marker;
 import org.apache.logging.log4j.MarkerManager;
+import org.watermedia.WaterMedia;
 import org.watermedia.api.util.PixelFormat;
+import org.watermedia.tools.DataTool;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -73,7 +75,7 @@ public abstract sealed class SWEngine extends GFXEngine permits JFXEngine, AWTEn
             this.allocSurface(width, height, surface);
         } catch (final RuntimeException | OutOfMemoryError e) {
             this.disposeSurface();
-            LOGGER.error(IT, "Failed to allocate the {}x{} surface", width, height, e);
+            LOGGER.error(IT, DataTool.errCode(WaterMedia.ERR_SW_SURFACE_ALLOC) + "Failed to allocate the {}x{} surface", width, height, e);
             return false;
         }
         this.bgra = surface;
@@ -135,7 +137,7 @@ public abstract sealed class SWEngine extends GFXEngine permits JFXEngine, AWTEn
         // THE HOST CALLBACK RUNS ON THE DECODE THREAD: ITS FAILURES ARE REPORTED HERE, NEVER THROWN AT THE DECODER
         try { this.onFrame.run(); }
         catch (final RuntimeException e) {
-            if (!this.callbackWarned) LOGGER.error(IT, "Frame callback failed", e);
+            if (!this.callbackWarned) LOGGER.error(IT, DataTool.errCode(WaterMedia.ERR_SW_CALLBACK) + "Failed to run the frame callback", e);
             this.callbackWarned = true;
         }
     }

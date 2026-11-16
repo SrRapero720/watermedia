@@ -123,7 +123,7 @@ public class AlphaDecoderTest {
         void unknownCompression() {
             final ByteBuffer buffer = ByteBuffer.allocate(100).put((byte) 0x02).position(0);
             final UnsupportedFormatException e = assertThrows(UnsupportedFormatException.class, () -> AlphaDecoder.decode(buffer, 4, 4));
-            assertEquals("Unsupported WebP alpha compression method: 2", e.getMessage());
+            assertEquals("(wm_err:5112) Failed to decode ALPH due to unsupported compression method: 2", e.getMessage());
         }
     }
 }

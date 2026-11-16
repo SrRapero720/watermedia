@@ -2,6 +2,7 @@ package org.watermedia.api.platform.web;
 
 import org.apache.logging.log4j.Marker;
 import org.apache.logging.log4j.MarkerManager;
+import org.watermedia.WaterMedia;
 import org.watermedia.api.platform.*;
 import org.watermedia.api.util.MediaType;
 import org.watermedia.api.util.Metadata;
@@ -47,9 +48,9 @@ public final class MedalPlatform implements Platform {
 
         // A TAKEN-DOWN OR LOGIN-WALLED CLIP ONLY EXPOSES PLACEHOLDERS
         if (content.dmcaTakedown)
-            throw new PlatformException(NAME, "Clip '" + clipId + "' was removed by a DMCA takedown");
+            throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_MEDAL_DMCA) + "Failed to resolve clip '" + clipId + "' due to a DMCA takedown");
         if (content.requireLogin)
-            throw new PlatformException(NAME, "Clip '" + clipId + "' requires login (private or restricted)");
+            throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_MEDAL_LOGIN_REQUIRED) + "Failed to resolve clip '" + clipId + "' due to required login (private or restricted)");
 
         // PREFERRED: THE HLS MASTER IS MEDAL'S ONLY REAL LADDER (source/540p/360p/240p); A FAILED FETCH OR PARSE
         // FALLS BACK TO THE MASTER URL ITSELF SO FFmpeg CAN STILL PROBE IT
@@ -70,7 +71,7 @@ public final class MedalPlatform implements Platform {
                 variants.add(new Quality(social, 0, 0));
         }
         if (variants.isEmpty())
-            throw new PlatformException(NAME, "Clip '" + clipId + "' exposes no playable source (login-walled, region-locked, or still processing)");
+            throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_MEDAL_NO_SOURCE) + "Failed to resolve clip '" + clipId + "' due to no playable source (login-walled, region-locked, or still processing)");
 
         final String title = content.contentTitle != null && !content.contentTitle.isBlank() ? content.contentTitle : null;
         final String desc = content.contentDescription != null && !content.contentDescription.isBlank() ? content.contentDescription : null;

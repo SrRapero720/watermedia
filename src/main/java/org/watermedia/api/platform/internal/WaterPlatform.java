@@ -5,6 +5,7 @@ import org.watermedia.api.network.NetworkAPI;
 import org.watermedia.api.platform.*;
 import org.watermedia.api.util.MediaType;
 import org.watermedia.api.util.HttpHeaders;
+import org.watermedia.tools.DataTool;
 
 import java.net.URI;
 import java.net.URISyntaxException;
@@ -33,7 +34,7 @@ public final class WaterPlatform implements Platform {
             resolved = new URI(location(uri));
         } catch (final URISyntaxException | IllegalStateException | IllegalArgumentException e) {
             // A BAD remoteUrl OR A REJECTED PATH
-            throw new PlatformException(NAME, "Cannot resolve " + uri + " (" + e.getMessage() + ")", e);
+            throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_WATER_RESOLVE) + "Failed to resolve " + uri + " due to an invalid location (" + e.getMessage() + ")", e);
         }
         // THE REFERER FOLLOWS THE RESOLVED ORIGIN; NO SERVER KNOWS THE water:// ADDRESS
         final Source entry = new Source(MediaType.UNKNOWN, null, null, HttpHeaders.defaults(resolved),
@@ -54,7 +55,7 @@ public final class WaterPlatform implements Platform {
      */
     public static String location(final URI u) throws PlatformException {
         final String host = u.getHost();
-        if (host == null) throw new PlatformException(NAME, "water:// URL requires a host (local, remote, global)");
+        if (host == null) throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_WATER_HOST_MISSING) + "Failed to resolve the water:// URL due to missing host (local, remote, global)");
         final String raw = u.getRawPath() == null ? "" : u.getRawPath();
 
         return switch (host.toLowerCase(Locale.ROOT)) {
@@ -67,7 +68,7 @@ public final class WaterPlatform implements Platform {
             // NetworkAPI.remoteUrl() VALIDATES THE CONFIG UP FRONT AND STRIPS THE TRAILING SLASH
             case HOST_REMOTE -> NetworkAPI.remoteUrl() + raw;
             case HOST_GLOBAL -> GLOBAL_SERVER + (raw.startsWith("/") ? raw.substring(1) : raw);
-            default -> throw new PlatformException(NAME, "Unknown water:// host: " + host + " (expected: local, remote, global)");
+            default -> throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_WATER_HOST_UNKNOWN) + "Failed to resolve the water:// URL due to unknown host: " + host + " (expected: local, remote, global)");
         };
     }
 }

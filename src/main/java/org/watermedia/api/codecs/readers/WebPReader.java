@@ -2,6 +2,7 @@ package org.watermedia.api.codecs.readers;
 
 import org.apache.logging.log4j.Marker;
 import org.apache.logging.log4j.MarkerManager;
+import org.watermedia.WaterMedia;
 import org.watermedia.api.codecs.CodecException;
 import org.watermedia.api.codecs.CodecsAPI;
 import org.watermedia.api.codecs.ImageData;
@@ -87,10 +88,10 @@ public final class WebPReader extends ImageReader {
                 this.bitstreamFourCC = FourCC.VP8;
                 this.bitstream = this.data.slice(header.at(), header.size());
                 // A WEBP STILL IS ONE VP8 KEY FRAME: TAG BIT 0 CLEAR, THE 9D 01 2A START CODE, THEN TWO 14-BIT SIZES
-                if (header.size() < 10) throw new CodecException("VP8 chunk too small: " + header.size());
-                if ((this.bitstream.get(0) & 1) != 0) throw new UnsupportedFormatException("VP8 interframes are not supported, only key frames");
+                if (header.size() < 10) throw new CodecException(DataTool.errCode(WaterMedia.ERR_WEBPREADER_VP8_SMALL) + "Failed to read the VP8 chunk due to small size: " + header.size());
+                if ((this.bitstream.get(0) & 1) != 0) throw new UnsupportedFormatException(DataTool.errCode(WaterMedia.ERR_WEBPREADER_VP8_INTERFRAME) + "Failed to read the VP8 chunk due to unsupported interframes, only key frames are supported");
                 if ((this.bitstream.get(3) & 0xFF) != 0x9D || (this.bitstream.get(4) & 0xFF) != 0x01 || (this.bitstream.get(5) & 0xFF) != 0x2A)
-                    throw new CodecException("Invalid VP8 start code");
+                    throw new CodecException(DataTool.errCode(WaterMedia.ERR_WEBPREADER_VP8_START_CODE) + "Failed to read the VP8 chunk due to invalid start code");
                 width = DataTool.u16(this.bitstream, 6, LE) & 0x3FFF;
                 height = DataTool.u16(this.bitstream, 8, LE) & 0x3FFF;
                 flags = 0;
@@ -104,18 +105,18 @@ public final class WebPReader extends ImageReader {
                 flags = ((bits >>> 28) & 1) != 0 ? ALPHA_FLAG : 0;
             }
             case FourCC.VP8X -> {
-                if (header.size() < VP8X_BYTES) throw new CodecException("VP8X chunk too small: " + header.size());
+                if (header.size() < VP8X_BYTES) throw new CodecException(DataTool.errCode(WaterMedia.ERR_WEBPREADER_VP8X_SMALL) + "Failed to read the VP8X chunk due to small size: " + header.size());
                 flags = this.data.get(header.at()) & 0xFF;
                 width = DataTool.u24(this.data, header.at() + 4, LE) + 1;
                 height = DataTool.u24(this.data, header.at() + 7, LE) + 1;
             }
-            default -> throw new CodecException("Unknown WebP first chunk: " + FourCC.fourCCString(header.fourCC()));
+            default -> throw new CodecException(DataTool.errCode(WaterMedia.ERR_WEBPREADER_FIRST_CHUNK) + "Failed to read the WebP header due to unknown first chunk: " + FourCC.fourCCString(header.fourCC()));
         }
 
         // CENTRAL SIZE GATE BEFORE ANY ALLOCATION: SIMPLE VP8 CAN DECLARE 0, AND THE 24-BIT VP8X AXES
         // MULTIPLY INTO GB-SCALE BUFFERS FROM A FEW-BYTE FILE
         if (!Limits.fits(width, height))
-            throw new CodecException("Invalid WEBP dimensions: " + width + "x" + height
+            throw new CodecException(DataTool.errCode(WaterMedia.ERR_WEBPREADER_DIMENSIONS) + "Failed to read the WEBP header due to invalid dimensions: " + width + "x" + height
                     + " (max " + Limits.MAX_DIM + " per axis, " + Limits.MAX_PIXELS + " pixels)");
         this.canvasWidth = width;
         this.canvasHeight = height;
@@ -134,7 +135,7 @@ public final class WebPReader extends ImageReader {
                     this.alpha = this.data.slice(c.at(), c.size());
                 }
             }
-            if (this.bitstream == null) throw new CodecException("Truncated extended WEBP (no bitstream chunk)");
+            if (this.bitstream == null) throw new CodecException(DataTool.errCode(WaterMedia.ERR_WEBPREADER_NO_BITSTREAM) + "Failed to read the extended WEBP due to truncated data, no bitstream chunk");
         }
         // ONLY VP8X CARRIES EXIF; THE ORIENTATION DECIDES width()/height() BEFORE ANY FRAME IS DELIVERED
         this.orientation = this.metadata.value(CodecsAPI.METAKEY_ORIENTATION) instanceof final Integer tag ? tag : 1;
@@ -162,7 +163,7 @@ public final class WebPReader extends ImageReader {
             if (c.fourCC() != FourCC.ANMF) continue;
             // COUNTED ONCE PER FRAME: pendingFrame ABSORBS REPEATED hasNext() CALLS
             if (++this.frames > MAX_FRAMES)
-                throw new CodecException("WEBP frame count exceeds limit: " + this.frames + " (max " + MAX_FRAMES + ")");
+                throw new CodecException(DataTool.errCode(WaterMedia.ERR_WEBPREADER_FRAME_LIMIT) + "Failed to read the WEBP animation due to frame count over the limit: " + this.frames + " (max " + MAX_FRAMES + ")");
             this.pendingFrame = this.data.slice(c.at(), c.size());
         }
         return this.pendingFrame != null;
@@ -208,7 +209,7 @@ public final class WebPReader extends ImageReader {
     // ==========================================================================
     private void decodeAnimFrame(final ByteBuffer anmf) throws IOException {
         final int length = anmf.limit();
-        if (length < ANMF_HEADER_BYTES) throw new CodecException("Truncated ANMF chunk");
+        if (length < ANMF_HEADER_BYTES) throw new CodecException(DataTool.errCode(WaterMedia.ERR_WEBPREADER_ANMF_TRUNCATED) + "Failed to read ANMF due to truncated data");
 
         // 16-BYTE ANMF HEADER: HALVED X/Y OFFSETS, MINUS-ONE SIZES AND THE DURATION AS 24-BIT FIELDS, THEN THE FLAGS
         final int frameX = DataTool.u24(anmf, 0, LE) * 2;
@@ -218,7 +219,7 @@ public final class WebPReader extends ImageReader {
         // SPEC: THE FRAME RECTANGLE MUST LIE FULLY INSIDE THE CANVAS. THIS ALSO BOUNDS THE
         // PER-FRAME PIXEL ALLOCATION BY THE ALREADY-VALIDATED CANVAS SIZE
         if (frameX + frameW > this.canvasWidth || frameY + frameH > this.canvasHeight)
-            throw new CodecException("ANMF frame outside canvas: " + frameW + "x" + frameH + " at (" + frameX + "," + frameY
+            throw new CodecException(DataTool.errCode(WaterMedia.ERR_WEBPREADER_ANMF_OUTSIDE) + "Failed to read ANMF due to frame outside canvas: " + frameW + "x" + frameH + " at (" + frameX + "," + frameY
                     + ") on " + this.canvasWidth + "x" + this.canvasHeight);
         final int duration = DataTool.u24(anmf, 12, LE);
         final int flags = anmf.get(15) & 0xFF;
@@ -243,7 +244,7 @@ public final class WebPReader extends ImageReader {
             }
             off = body + (int) size + (int) (size & 1);
         }
-        if (frameBits == null || !frameBits.hasRemaining()) throw new CodecException("ANMF without VP8/VP8L sub-chunk");
+        if (frameBits == null || !frameBits.hasRemaining()) throw new CodecException(DataTool.errCode(WaterMedia.ERR_WEBPREADER_ANMF_NO_SUBCHUNK) + "Failed to read ANMF due to missing VP8/VP8L sub-chunk");
 
         if (this.canvas == null) {
             this.canvas = new int[this.canvasWidth * this.canvasHeight];
@@ -346,11 +347,11 @@ public final class WebPReader extends ImageReader {
     // OMIT; A BODY RUNNING PAST THE BUFFER (THE RIFF SIZE BOUNDS IT) IS TRUNCATION
     private static Chunk chunk(final ByteBuffer in) throws CodecException {
         if (in.remaining() < CHUNK_HEADER_BYTES)
-            throw new CodecException("Truncated WEBP chunk header: " + in.remaining() + " of " + CHUNK_HEADER_BYTES + " bytes");
+            throw new CodecException(DataTool.errCode(WaterMedia.ERR_WEBPREADER_CHUNK_HEADER) + "Failed to read the WEBP chunk header due to truncated data: " + in.remaining() + " of " + CHUNK_HEADER_BYTES + " bytes");
         final int fourCC = in.getInt();
         final int size = in.getInt();
         if (size < 0 || size > in.remaining())
-            throw new CodecException("Truncated WEBP chunk " + FourCC.fourCCString(fourCC) + ": declared "
+            throw new CodecException(DataTool.errCode(WaterMedia.ERR_WEBPREADER_CHUNK_BODY) + "Failed to read the WEBP chunk due to truncated data: " + FourCC.fourCCString(fourCC) + " declared "
                     + Integer.toUnsignedString(size) + " bytes, " + in.remaining() + " available");
         final int at = in.position();
         in.position(Math.min(at + size + (size & 1), in.limit()));
@@ -359,10 +360,10 @@ public final class WebPReader extends ImageReader {
 
     // VALIDATES THE 5-BYTE VP8L HEADER (SIGNATURE, VERSION 0) AND RETURNS ITS PACKED 14-BIT SIZES AND ALPHA HINT
     private static int vp8lHeader(final ByteBuffer bitstream) throws CodecException {
-        if (bitstream.limit() < VP8L_HEADER_BYTES) throw new CodecException("VP8L bitstream too small: " + bitstream.limit());
-        if ((bitstream.get(0) & 0xFF) != VP8L_SIGNATURE) throw new CodecException("Invalid VP8L signature");
+        if (bitstream.limit() < VP8L_HEADER_BYTES) throw new CodecException(DataTool.errCode(WaterMedia.ERR_WEBPREADER_VP8L_SMALL) + "Failed to read the VP8L header due to small bitstream: " + bitstream.limit());
+        if ((bitstream.get(0) & 0xFF) != VP8L_SIGNATURE) throw new CodecException(DataTool.errCode(WaterMedia.ERR_WEBPREADER_VP8L_SIGNATURE) + "Failed to read the VP8L header due to invalid signature");
         final int bits = (int) DataTool.u32(bitstream, 1, LE);
-        if (bits >>> 29 != 0) throw new UnsupportedFormatException("Unsupported VP8L version: " + (bits >>> 29));
+        if (bits >>> 29 != 0) throw new UnsupportedFormatException(DataTool.errCode(WaterMedia.ERR_WEBPREADER_VP8L_VERSION) + "Failed to read the VP8L header due to unsupported version: " + (bits >>> 29));
         return bits;
     }
 
@@ -372,7 +373,7 @@ public final class WebPReader extends ImageReader {
         final int bits = vp8lHeader(bitstream);
         final int bw = (bits & 0x3FFF) + 1;
         final int bh = ((bits >> 14) & 0x3FFF) + 1;
-        if (bw != w || bh != h) throw new CodecException("VP8L bitstream is " + bw + "x" + bh + ", container declares " + w + "x" + h);
+        if (bw != w || bh != h) throw new CodecException(DataTool.errCode(WaterMedia.ERR_WEBPREADER_VP8L_MISMATCH) + "Failed to read the VP8L bitstream due to size mismatch with the container: bitstream is " + bw + "x" + bh + ", container declares " + w + "x" + h);
         return bitstream.slice(VP8L_HEADER_BYTES, bitstream.limit() - VP8L_HEADER_BYTES);
     }
 

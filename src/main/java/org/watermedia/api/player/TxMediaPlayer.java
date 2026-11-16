@@ -2,6 +2,7 @@ package org.watermedia.api.player;
 
 import org.apache.logging.log4j.Marker;
 import org.apache.logging.log4j.MarkerManager;
+import org.watermedia.WaterMedia;
 import org.watermedia.WaterMediaConfig;
 import org.watermedia.api.codecs.CodecsAPI;
 import org.watermedia.api.codecs.DownscaleFilter;
@@ -288,7 +289,7 @@ public final class TxMediaPlayer extends MediaPlayer {
         // WOULD OTHERWISE WAIT FOR ITSELF
         final Thread t = this.lifecycleThread;
         if (Thread.currentThread() == this.prepareThread || (t != null && t == Thread.currentThread()))
-            throw new IllegalStateException("Release the image player from its host thread, not from a playback callback");
+            throw new IllegalStateException(DataTool.errCode(WaterMedia.ERR_TXPLAYER_RELEASE_CALLBACK) + "Failed to release the image player due to a playback callback call, release it from its host thread");
         // ONE RELEASE AT A TIME: A CONCURRENT SECOND CALL WAITS AND THEN FINDS THE WORK DONE. STOPPED IS QUEUED UNDER THE LOCK
         // AND HEARD AFTER IT, SO A LISTENER CAN WAIT FOR A THREAD THAT CALLS INTO THIS PLAYER
         try {
@@ -317,7 +318,7 @@ public final class TxMediaPlayer extends MediaPlayer {
                         while (this.prepareActive > 0) {
                             final long remaining = deadline - System.nanoTime();
                             if (remaining <= 0L)
-                                throw new IllegalStateException("Image preparation has not stopped; release must be retried after I/O finishes");
+                                throw new IllegalStateException(DataTool.errCode(WaterMedia.ERR_TXPLAYER_RELEASE_BUSY) + "Failed to release the image player due to image preparation still running, retry after I/O finishes");
                             try {
                                 TimeUnit.NANOSECONDS.timedWait(this.signals, remaining);
                             } catch (final InterruptedException e) {
@@ -567,14 +568,14 @@ public final class TxMediaPlayer extends MediaPlayer {
             this.sourceWidth = reader.width();
             this.sourceHeight = reader.height();
             if (this.sourceWidth <= 0 || this.sourceHeight <= 0)
-                throw new IOException("Invalid image dimensions: " + this.sourceWidth + "x" + this.sourceHeight);
+                throw new IOException(DataTool.errCode(WaterMedia.ERR_TXPLAYER_DIMENSIONS) + "Failed to load the image due to invalid dimensions: " + this.sourceWidth + "x" + this.sourceHeight);
             this.resolveQuality(this.sourceWidth, this.sourceHeight);
             this.animated = reader.frameCount() > 1;
             this.knownDuration = Math.max(0L, reader.duration());
             this.pixelFormat = reader.pixelFormat();
             this.applyTarget();
             if (!this.gfx.format(this.pixelFormat, this.outWidth, this.outHeight))
-                throw new IOException("Graphics engine refused " + this.pixelFormat + " " + this.outWidth + "x" + this.outHeight);
+                throw new IOException(DataTool.errCode(WaterMedia.ERR_TXPLAYER_TEXTURE_REFUSED) + "Failed to create the frame texture due to graphics engine refusal: " + this.pixelFormat + " " + this.outWidth + "x" + this.outHeight);
             this.uploadWidth = this.outWidth;
             this.uploadHeight = this.outHeight;
 
@@ -607,7 +608,7 @@ public final class TxMediaPlayer extends MediaPlayer {
             if (this.triggerStop || Thread.currentThread().isInterrupted()) {
                 this.publish(Status.STOPPED, serial);
             } else {
-                LOGGER.error(IT, "Lifecycle error: {}", this.source, e);
+                LOGGER.error(IT, DataTool.errCode(WaterMedia.ERR_TXPLAYER_LIFECYCLE_LOG) + "Failed to run the image lifecycle: {}", this.source, e);
                 this.fail(e, serial);
             }
         } finally {
@@ -695,7 +696,7 @@ public final class TxMediaPlayer extends MediaPlayer {
         final ImageData data = reader.readAll();
         // A TRUNCATED/CORRUPT ANIMATION CAN DECODE TO ZERO FRAMES EVEN THOUGH frameCount() REPORTED >1;
         // FAIL CLEANLY INSTEAD OF INDEXING frames()[0] (AIOOBE SWALLOWED AS A VAGUE "Lifecycle error").
-        if (data.frames().length == 0) throw new IOException("No frames decoded from: " + this.source);
+        if (data.frames().length == 0) throw new IOException(DataTool.errCode(WaterMedia.ERR_TXPLAYER_NO_FRAMES) + "Failed to decode the image due to no frames: " + this.source);
         if (data.frames().length == 1) {
             // ALREADY AT THE UPLOAD SIZE: POOL IT WITHOUT THE RESCALE copyFrame WOULD APPLY
             final ByteBuffer single = this.borrowBuffer();
@@ -714,7 +715,7 @@ public final class TxMediaPlayer extends MediaPlayer {
         }
 
         if (!this.gfx.preload(data.frames()))
-            throw new IOException("GFXEngine rejected preloaded frame textures for: " + this.source);
+            throw new IOException(DataTool.errCode(WaterMedia.ERR_TXPLAYER_PRELOAD_REFUSED) + "Failed to create the preloaded frame textures due to GFXEngine refusal: " + this.source);
         this.gfx.frame(0);
 
         // BUILD THE CUMULATIVE TIMELINE THAT DRIVES THE PASSIVE CLOCK
@@ -811,7 +812,7 @@ public final class TxMediaPlayer extends MediaPlayer {
             if (this.triggerStop || Thread.currentThread().isInterrupted()) {
                 this.publish(Status.STOPPED, serial);
             } else {
-                LOGGER.error(IT, "Lifecycle error: {}", this.source, e);
+                LOGGER.error(IT, DataTool.errCode(WaterMedia.ERR_TXPLAYER_STREAM_LIFECYCLE_LOG) + "Failed to run the image lifecycle: {}", this.source, e);
                 this.fail(e, serial);
             }
         } finally {
@@ -1018,7 +1019,7 @@ public final class TxMediaPlayer extends MediaPlayer {
             final NetworkCache.CachedBytes sourceBytes = NetworkCache.read(uri, this.source.headers(), IMAGE_ACCEPT, maxBytes,
                     WaterMediaConfig.player.tx.cache);
             if (this.released || this.triggerStop || Thread.currentThread().isInterrupted())
-                throw new IOException("Image loading was cancelled");
+                throw new IOException(DataTool.errCode(WaterMedia.ERR_TXPLAYER_CANCELLED) + "Failed to load the image due to cancellation");
             // MRL ALREADY TYPED THE SOURCE (CONTENT-TYPE OR, FOR AMBIGUOUS MIMES, A BYTE SNIFF) AND THE DECODER VALIDATES THE
             // BYTES, SO THE SERVER'S CONTENT-TYPE IS IGNORED: IT WOULD REJECT IMAGES SERVED AS application/octet-stream OR text/xml
             final ByteBuffer bytes = ByteBuffer.wrap(sourceBytes.bytes());
@@ -1032,7 +1033,7 @@ public final class TxMediaPlayer extends MediaPlayer {
         } catch (final Throwable t) {
             if (t instanceof final IOException io) throw io;
             if (t instanceof final RuntimeException re) throw re;
-            throw new IOException("Failed to open image source: " + uri, t);
+            throw new IOException(DataTool.errCode(WaterMedia.ERR_TXPLAYER_OPEN_SOURCE) + "Failed to open the image source: " + uri, t);
         }
     }
 
@@ -1050,7 +1051,7 @@ public final class TxMediaPlayer extends MediaPlayer {
         this.publish(Status.BUFFERING, serial);
         this.clearBuffers();
 
-        if (!reader.hasNext()) throw new IOException("No frames decoded from: " + this.source);
+        if (!reader.hasNext()) throw new IOException(DataTool.errCode(WaterMedia.ERR_TXPLAYER_STREAM_NO_FRAMES) + "Failed to decode the image due to no frames: " + this.source);
         final ByteBuffer first = this.copyFrame(reader.next());
         this.uploadBuffer(first, this.outWidth, this.outHeight);
         this.currentFrameIndex = 0;
@@ -1177,7 +1178,7 @@ public final class TxMediaPlayer extends MediaPlayer {
         // SIZE FLIP (HOT scale/LOD CHANGE): RECONFIGURE THE ENGINE FOR THIS FRAME; A REFUSED SIZE DROPS THE FRAME
         if (this.uploadWidth != w || this.uploadHeight != h) {
             if (!this.gfx.format(this.pixelFormat, w, h)) {
-                if (!this.refusedWarned) LOGGER.error(IT, "Graphics engine refused {} {}x{}; frame dropped", this.pixelFormat, w, h);
+                if (!this.refusedWarned) LOGGER.error(IT, DataTool.errCode(WaterMedia.ERR_TXPLAYER_FRAME_REFUSED_LOG) + "Failed to upload the frame due to graphics engine refusal, frame dropped: {} {}x{}", this.pixelFormat, w, h);
                 this.refusedWarned = true;
                 this.returnBuffer(buffer);
                 return;
@@ -1223,7 +1224,7 @@ public final class TxMediaPlayer extends MediaPlayer {
         }
         if (w == this.outWidth && h == this.outHeight) return;
         final long byteSize = this.pixelFormat.frameBytes(w, h, 8);
-        if (byteSize > Integer.MAX_VALUE) throw new IOException("Image dimensions exceed upload buffer limit: " + w + "x" + h);
+        if (byteSize > Integer.MAX_VALUE) throw new IOException(DataTool.errCode(WaterMedia.ERR_TXPLAYER_BUFFER_LIMIT) + "Failed to upload the image due to dimensions exceeding the buffer limit: " + w + "x" + h);
         this.outWidth = w;
         this.outHeight = h;
         this.bufferByteSize = (int) byteSize;

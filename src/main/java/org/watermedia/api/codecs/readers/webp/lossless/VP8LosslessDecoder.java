@@ -2,8 +2,10 @@ package org.watermedia.api.codecs.readers.webp.lossless;
 
 import org.apache.logging.log4j.Marker;
 import org.apache.logging.log4j.MarkerManager;
+import org.watermedia.WaterMedia;
 import org.watermedia.api.codecs.CodecException;
 import org.watermedia.api.codecs.common.Limits;
+import org.watermedia.tools.DataTool;
 
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
@@ -44,7 +46,7 @@ public final class VP8LosslessDecoder {
             // RFC 9649: EACH TRANSFORM TYPE MAY APPEAR AT MOST ONCE; UNCHECKED REPEATS WOULD LET
             // A TINY FILE QUEUE THOUSANDS OF FULL-IMAGE INVERSE PASSES (CPU DOS)
             final int typeBit = 1 << type.ordinal();
-            if ((seenTransforms & typeBit) != 0) throw new CodecException("Duplicate VP8L transform: " + type);
+            if ((seenTransforms & typeBit) != 0) throw new CodecException(DataTool.errCode(WaterMedia.ERR_VP8L_DECODER_TRANSFORM_DUP) + "Failed to decode the VP8L image due to duplicate transform: " + type);
             seenTransforms |= typeBit;
             LOGGER.trace(IT, "Reading transform type: {}", type);
             final Transform transform = readTransform(reader, type, currentWidth, height);
@@ -100,7 +102,7 @@ public final class VP8LosslessDecoder {
             final long maxGroups = Math.min(Math.min(MAX_GROUPS, metaPrefixImage.length),
                     (reader.remaining() * 8L + reader.bitsAvail()) / MIN_GROUP_BITS);
             if (numGroups > maxGroups)
-                throw new CodecException("VP8L declares " + numGroups + " huffman groups, max " + maxGroups);
+                throw new CodecException(DataTool.errCode(WaterMedia.ERR_VP8L_DECODER_GROUPS) + "Failed to decode the VP8L image due to too many huffman groups: declared " + numGroups + ", max " + maxGroups);
             LOGGER.trace(IT, "VP8L huffman groups: declared={}, meta={}x{} (bits={}), colorCacheSize={}, tables={}",
                     numGroups, metaWidth, metaHeight, metaBits, colorCacheSize, numGroups * 5);
             huffmanGroups = new HuffmanGroup[numGroups];
@@ -171,7 +173,7 @@ public final class VP8LosslessDecoder {
         // THE SHARED PIXEL CAP COVERS EVERY SUB-IMAGE TOO: THEIR SIZES DERIVE FROM THE MAIN IMAGE'S
         final long declared = (long) width * height;
         if (width <= 0 || height <= 0 || declared > Limits.MAX_PIXELS)
-            throw new CodecException("Invalid VP8L image size: " + width + "x" + height + " (max " + Limits.MAX_PIXELS + " pixels)");
+            throw new CodecException(DataTool.errCode(WaterMedia.ERR_VP8L_DECODER_SIZE) + "Failed to decode the VP8L image due to invalid size: " + width + "x" + height + " (max " + Limits.MAX_PIXELS + " pixels)");
 
         // PIXEL FEASIBILITY GATE BEFORE THE ALLOCATION: A ONE-SYMBOL CODE COSTS ZERO BITS, SO A GROUP WHOSE WHOLE
         // TOKEN PATH IS ONE-SYMBOL IS A CONSTANT FILL BOUNDED ONLY BY MAX_FILL_PIXELS. ANY OTHER GROUP SPENDS A BIT
@@ -189,7 +191,7 @@ public final class VP8LosslessDecoder {
         }
         final long feasible = fill ? MAX_FILL_PIXELS : (reader.remaining() * 8L + reader.bitsAvail() + 1L) * MAX_COPY_LENGTH;
         if (declared > feasible)
-            throw new CodecException("VP8L declares " + declared + " pixels, bitstream can encode at most " + feasible);
+            throw new CodecException(DataTool.errCode(WaterMedia.ERR_VP8L_DECODER_PIXELS) + "Failed to decode the VP8L image due to too many pixels: declared " + declared + ", bitstream can encode at most " + feasible);
 
         final int total = (int) declared;
         final int[] pixels = new int[total];
@@ -230,8 +232,8 @@ public final class VP8LosslessDecoder {
 
                 // RFC 9649: BACKWARD REFERENCES MUST STAY INSIDE THE ALREADY-DECODED PIXELS;
                 // OUT-OF-RANGE DISTANCE OR OVERLONG LENGTH IS A BITSTREAM ERROR, NOT BEST-EFFORT
-                if (dist > pos) throw new CodecException("VP8L backward reference before image start");
-                if (pos + length > total) throw new CodecException("VP8L backward reference overruns image");
+                if (dist > pos) throw new CodecException(DataTool.errCode(WaterMedia.ERR_VP8L_DECODER_BACKREF_START) + "Failed to decode the VP8L image due to backward reference before image start");
+                if (pos + length > total) throw new CodecException(DataTool.errCode(WaterMedia.ERR_VP8L_DECODER_BACKREF_END) + "Failed to decode the VP8L image due to backward reference overrunning the image");
 
                 for (int i = 0; i < length; i++) {
                     final int argb = pixels[pos - dist];
@@ -244,7 +246,7 @@ public final class VP8LosslessDecoder {
             } else {
                 // COLOR CACHE
                 final int cacheIndex = code - 256 - 24;
-                if (colorCache == null) throw new CodecException("Color cache code without color cache");
+                if (colorCache == null) throw new CodecException(DataTool.errCode(WaterMedia.ERR_VP8L_DECODER_NO_CACHE) + "Failed to decode the VP8L image due to color cache code without color cache");
                 final int argb = colorCache.lookup(cacheIndex);
                 pixels[pos++] = argb;
                 colorCache.insert(argb);

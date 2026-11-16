@@ -2,10 +2,12 @@ package org.watermedia.api.codecs.readers.webp;
 
 import org.apache.logging.log4j.Marker;
 import org.apache.logging.log4j.MarkerManager;
+import org.watermedia.WaterMedia;
 import org.watermedia.api.codecs.CodecException;
 import org.watermedia.api.codecs.UnsupportedFormatException;
 import org.watermedia.api.codecs.readers.webp.lossless.VP8LosslessDecoder;
 import org.watermedia.api.util.MathUtil;
+import org.watermedia.tools.DataTool;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -30,7 +32,7 @@ public final class AlphaDecoder {
     /** Decodes a WebP ALPH payload, inverse filter included, into one alpha byte per pixel; an unknown compression throws {@link UnsupportedFormatException}. */
     public static byte[] decode(final ByteBuffer data, final int w, final int h) throws CodecException {
         final ByteBuffer buffer = data.slice().order(ByteOrder.LITTLE_ENDIAN);
-        if (buffer.remaining() < 1) throw new CodecException("Alpha chunk too small");
+        if (buffer.remaining() < 1) throw new CodecException(DataTool.errCode(WaterMedia.ERR_WEBP_ALPHA_SMALL) + "Failed to decode ALPH due to small chunk");
 
         // HEADER BYTE: [RESERVED:2][PREPROC:2][FILTER:2][COMPRESSION:2]; PREPROCESSING IS A HINT WITHOUT EFFECT
         final int hdr = buffer.get() & 0xFF;
@@ -44,7 +46,7 @@ public final class AlphaDecoder {
             // BUY A FULL-CANVAS PLANE BEFORE FAILING
             final int size = w * h;
             if (buffer.remaining() < size)
-                throw new CodecException("Alpha data truncated: declared " + size + " bytes, " + buffer.remaining() + " available");
+                throw new CodecException(DataTool.errCode(WaterMedia.ERR_WEBP_ALPHA_TRUNCATED) + "Failed to decode ALPH due to truncated data: declared " + size + " bytes, " + buffer.remaining() + " available");
             alpha = new byte[size];
             buffer.get(alpha);
         } else if (compMeth == COMPRESS_LOSSLESS) {
@@ -53,7 +55,7 @@ public final class AlphaDecoder {
             alpha = new byte[w * h];
             for (int i = 0; i < argb.length; i++) alpha[i] = (byte) ((argb[i] >> 8) & 0xFF);
         } else {
-            throw new UnsupportedFormatException("Unsupported WebP alpha compression method: " + compMeth);
+            throw new UnsupportedFormatException(DataTool.errCode(WaterMedia.ERR_WEBP_ALPHA_COMPRESSION) + "Failed to decode ALPH due to unsupported compression method: " + compMeth);
         }
 
         if (filterMeth != FILTER_NONE) unfilter(alpha, w, h, filterMeth);

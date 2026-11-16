@@ -1,6 +1,8 @@
 package org.watermedia.api.codecs.common.gif;
 
+import org.watermedia.WaterMedia;
 import org.watermedia.api.codecs.CodecException;
+import org.watermedia.tools.DataTool;
 
 import java.nio.ByteBuffer;
 
@@ -11,10 +13,10 @@ public record ColorTable(int size, int[] colors) implements IChunk {
     /** Reads {@code size} RGB triples (up to {@link #MAX_COLORS}) at the buffer position as opaque ARGB colors, advancing past them. */
     public static ColorTable read(final int size, final ByteBuffer buffer) throws CodecException {
         // VALIDATION LIVES HERE: A RECORD CANONICAL CONSTRUCTOR CANNOT THROW CodecException
-        if (size < 0 || size > MAX_COLORS) throw new CodecException("Color table size must be between 0 and " + MAX_COLORS);
+        if (size < 0 || size > MAX_COLORS) throw new CodecException(DataTool.errCode(WaterMedia.ERR_GIF_COLORTABLE_SIZE) + "Failed to read the GIF color table due to invalid size, it must be between 0 and " + MAX_COLORS);
         final int at = buffer.position();
         if (buffer.remaining() < size * 3)
-            throw new CodecException("Truncated GIF color table: " + size * 3 + " bytes declared, " + buffer.remaining() + " available");
+            throw new CodecException(DataTool.errCode(WaterMedia.ERR_GIF_COLORTABLE_TRUNCATED) + "Failed to read the GIF color table due to truncated data: " + size * 3 + " bytes declared, " + buffer.remaining() + " available");
 
         // ARGB INTS, WHICH READ AS BGRA BYTES THROUGH AN IntBuffer OVER A LITTLE-ENDIAN DIRECT BUFFER
         final int[] colors = new int[size];

@@ -1,6 +1,8 @@
 package org.watermedia.api.codecs.common.png;
 
+import org.watermedia.WaterMedia;
 import org.watermedia.api.codecs.CodecException;
+import org.watermedia.tools.DataTool;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -33,7 +35,7 @@ public record TEXT(String keyword, String text) implements IChunk {
 
     /** Converts a generic chunk to tEXt. */
     public static TEXT convert(final PngChunk chunk) throws CodecException {
-        if (chunk.type() != SIGNATURE) throw new IllegalArgumentException("Invalid chunk type for tEXt: 0x" + Integer.toHexString(chunk.type()));
+        if (chunk.type() != SIGNATURE) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_PNG_TEXT_TYPE) + "Failed to read tEXt due to invalid chunk type: 0x" + Integer.toHexString(chunk.type()));
 
         final byte[] data = chunk.data();
         // A NUL SEPARATES THE KEYWORD FROM THE TEXT
@@ -44,7 +46,7 @@ public record TEXT(String keyword, String text) implements IChunk {
                 break;
             }
         }
-        if (nullIndex < 1 || nullIndex > 79) throw new CodecException("Invalid tEXt: keyword must be 1-79 characters");
+        if (nullIndex < 1 || nullIndex > 79) throw new CodecException(DataTool.errCode(WaterMedia.ERR_PNG_TEXT_KEYWORD) + "Failed to read tEXt due to invalid keyword, it must be 1-79 characters");
 
         final String keyword = new String(data, 0, nullIndex, StandardCharsets.ISO_8859_1);
         final String text = (nullIndex + 1 < data.length)

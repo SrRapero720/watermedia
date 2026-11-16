@@ -232,7 +232,7 @@ public class OdyseePlatformTest {
         void testChannelUrlUnsupported() {
             final PlatformException e = assertThrows(PlatformException.class,
                     () -> OdyseePlatformTest.this.platform.resolve(URI.create("https://odysee.com/@IsaacElite10:8")));
-            assertTrue(e.getMessage().startsWith("Odysee: Unsupported URL"), e.getMessage());
+            assertTrue(e.getMessage().startsWith("Odysee: (wm_err:2020) Failed to resolve "), e.getMessage());
             assertTrue(OdyseePlatformTest.this.calls.isEmpty(), "No request may leave for an unsupported shape");
         }
     }

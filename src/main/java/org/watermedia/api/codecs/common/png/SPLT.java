@@ -1,6 +1,8 @@
 package org.watermedia.api.codecs.common.png;
 
+import org.watermedia.WaterMedia;
 import org.watermedia.api.codecs.CodecException;
+import org.watermedia.tools.DataTool;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -22,7 +24,7 @@ public record SPLT(String paletteName, int sampleDepth, SPLTEntry[] entries) imp
 
     /** Converts a generic chunk to sPLT. */
     public static SPLT convert(final PngChunk chunk) throws CodecException {
-        if (chunk.type() != SIGNATURE) throw new IllegalArgumentException("Invalid chunk type for sPLT: 0x" + Integer.toHexString(chunk.type()));
+        if (chunk.type() != SIGNATURE) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_PNG_SPLT_TYPE) + "Failed to read sPLT due to invalid chunk type: 0x" + Integer.toHexString(chunk.type()));
 
         final byte[] data = chunk.data();
         // THE PALETTE NAME TAKES 1-79 BYTES AND ENDS AT A NUL
@@ -33,18 +35,18 @@ public record SPLT(String paletteName, int sampleDepth, SPLTEntry[] entries) imp
                 break;
             }
         }
-        if (nullIndex < 1) throw new CodecException("Invalid sPLT: missing or empty palette name");
+        if (nullIndex < 1) throw new CodecException(DataTool.errCode(WaterMedia.ERR_PNG_SPLT_NAME) + "Failed to read sPLT due to missing or empty palette name");
         // NEED THE SAMPLE-DEPTH BYTE AFTER THE NAME NUL; A TRUNCATED PAYLOAD OTHERWISE READS PAST THE ARRAY
-        if (data.length < nullIndex + 2) throw new CodecException("Truncated sPLT: missing sample depth");
+        if (data.length < nullIndex + 2) throw new CodecException(DataTool.errCode(WaterMedia.ERR_PNG_SPLT_TRUNCATED) + "Failed to read sPLT due to truncated data: missing sample depth");
 
         final String paletteName = new String(data, 0, nullIndex, StandardCharsets.ISO_8859_1);
         final int sampleDepth = data[nullIndex + 1] & 0xFF;
-        if (sampleDepth != 8 && sampleDepth != 16) throw new CodecException("Invalid sPLT sample depth: " + sampleDepth);
+        if (sampleDepth != 8 && sampleDepth != 16) throw new CodecException(DataTool.errCode(WaterMedia.ERR_PNG_SPLT_DEPTH) + "Failed to read sPLT due to invalid sample depth: " + sampleDepth);
 
         final int entrySize = (sampleDepth == 8) ? 6 : 10; // RGBA + FREQUENCY
         final int entryDataStart = nullIndex + 2;
         final int entryDataLength = data.length - entryDataStart;
-        if (entryDataLength % entrySize != 0) throw new CodecException("Invalid sPLT entry data length");
+        if (entryDataLength % entrySize != 0) throw new CodecException(DataTool.errCode(WaterMedia.ERR_PNG_SPLT_ENTRY_LENGTH) + "Failed to read sPLT due to invalid entry data length");
 
         final int entryCount = entryDataLength / entrySize;
         final SPLTEntry[] entries = new SPLTEntry[entryCount];

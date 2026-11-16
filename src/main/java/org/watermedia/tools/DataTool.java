@@ -1,5 +1,6 @@
 package org.watermedia.tools;
 
+import org.watermedia.WaterMedia;
 import org.watermedia.api.util.MathUtil;
 import org.watermedia.api.util.PixelFormat;
 
@@ -47,7 +48,7 @@ public final class DataTool {
     }
 
     public static boolean startsWith(final String str, final String... prefixes) {
-        if (str == null || prefixes == null) throw new IllegalArgumentException("String and prefixes are required");
+        if (str == null || prefixes == null) throw new IllegalArgumentException(errCode(WaterMedia.ERR_DATA_PREFIXES_NULL) + "Failed to match prefixes due to null string or prefixes");
         for (final var prefix: prefixes) {
             if (str.startsWith(prefix)) return true;
         }
@@ -76,6 +77,12 @@ public final class DataTool {
         return order == ByteOrder.LITTLE_ENDIAN ? a | (b << 8) | (c << 16) | (d << 24) : (a << 24) | (b << 16) | (c << 8) | d;
     }
 
+    /** Returns the {@code (wm_err:0000) } prefix of an exception or error message, its code padded to four digits; each code names one site. */
+    public static String errCode(final int code) {
+        final String digits = Integer.toString(code);
+        return "(wm_err:" + "0000".substring(Math.min(4, digits.length())) + digits + ") ";
+    }
+
     /** Converts a configuration value in megabytes (MiB) to bytes. */
     public static long megabytes(final long megabytes) {
         return megabytes << 20;
@@ -96,7 +103,7 @@ public final class DataTool {
 
     /** Jaro-Winkler similarity of two texts from 0 (nothing in common) to 1 (equal ignoring case); one keystroke apart scores above 0.8. */
     public static float similarity(final String a, final String b) {
-        if (a == null || b == null) throw new IllegalArgumentException("Both texts are required");
+        if (a == null || b == null) throw new IllegalArgumentException(errCode(WaterMedia.ERR_DATA_COMPARE_NULL) + "Failed to compare the texts due to null text");
         final int la = a.length(), lb = b.length();
         if (la == 0 || lb == 0) return la == lb ? 1f : 0f;
         // LETTERS MATCH WHEN THEY SIT WITHIN HALF THE LONGER LENGTH OF EACH OTHER, EACH LETTER AT MOST ONCE
@@ -195,7 +202,7 @@ public final class DataTool {
         try {
             return MessageDigest.getInstance("SHA-256").digest(data);
         } catch (final NoSuchAlgorithmException e) {
-            throw new IllegalStateException("SHA-256 is unavailable", e);
+            throw new IllegalStateException(errCode(WaterMedia.ERR_DATA_SHA256_MISSING) + "Failed to create the SHA-256 digest due to unavailable algorithm", e);
         }
     }
 
@@ -279,7 +286,7 @@ public final class DataTool {
             case 6 -> { a = (h - 1) * w; b = 1; step = -w; }
             case 7 -> { a = (h - 1) * w + w - 1; b = -1; step = -w; }
             case 8 -> { a = w - 1; b = -1; step = w; }
-            default -> throw new IllegalArgumentException("Invalid EXIF orientation: " + orientation);
+            default -> throw new IllegalArgumentException(errCode(WaterMedia.ERR_DATA_EXIF_ORIENTATION) + "Failed to apply the EXIF orientation due to invalid value: " + orientation);
         }
         final ByteBuffer in = src.duplicate().clear();
         final ByteBuffer out = dst.duplicate().clear();
@@ -293,7 +300,7 @@ public final class DataTool {
             for (int y = 0, di = 0; y < oh; y++) {
                 for (int x = 0, si = a + y * b; x < ow; x++, si += step) out.put(di++, in.get(si));
             }
-        } else throw new IllegalArgumentException("Unsupported bytes per pixel: " + bytesPerPixel);
+        } else throw new IllegalArgumentException(errCode(WaterMedia.ERR_DATA_ORIENT_BPP) + "Failed to orient the image due to unsupported bytes per pixel: " + bytesPerPixel);
         dst.position(0).limit(ow * oh * bytesPerPixel);
     }
 
@@ -310,7 +317,7 @@ public final class DataTool {
     // dw x dh; EACH OUTPUT TEXEL AVERAGES ITS WHOLE SOURCE BLOCK, A CHROMA PAIR OR PIXEL KEEPING ITS COMPONENTS APART
     public static void scaleArea(final ByteBuffer src, final int sw, final int sh,
                                  final ByteBuffer dst, final int dw, final int dh, final PixelFormat format) {
-        if (!scalable(format)) throw new IllegalArgumentException(format + " cannot be area-scaled");
+        if (!scalable(format)) throw new IllegalArgumentException(errCode(WaterMedia.ERR_DATA_SCALE_FORMAT) + "Failed to area-scale the image due to unsupported format: " + format);
         int offset = src.position();
         for (int p = 0; p < format.planes(); p++) {
             final int pw = format.planeWidth(p, sw);

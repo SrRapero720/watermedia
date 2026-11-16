@@ -1,6 +1,8 @@
 package org.watermedia.api.codecs.common.png;
 
+import org.watermedia.WaterMedia;
 import org.watermedia.api.codecs.CodecException;
+import org.watermedia.tools.DataTool;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -45,27 +47,27 @@ public record SBIT(int gray, int red, int green, int blue, int alpha) implements
 
     /** Converts a generic chunk to sBIT for the color type. */
     public static SBIT convert(final PngChunk chunk, final int colorType) throws CodecException {
-        if (chunk.type() != SIGNATURE) throw new IllegalArgumentException("Invalid chunk type for sBIT: 0x" + Integer.toHexString(chunk.type()));
+        if (chunk.type() != SIGNATURE) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_PNG_SBIT_TYPE) + "Failed to read sBIT due to invalid chunk type: 0x" + Integer.toHexString(chunk.type()));
 
         final byte[] data = chunk.data();
         return switch (ColorType.of(colorType)) {
             case GREYSCALE -> {
-                if (data.length != 1) throw new CodecException("sBIT for greyscale must be 1 byte, got " + data.length);
+                if (data.length != 1) throw new CodecException(DataTool.errCode(WaterMedia.ERR_PNG_SBIT_LENGTH_GREYSCALE) + "Failed to read sBIT due to invalid length: " + data.length + " bytes (expected 1 for greyscale)");
                 yield new SBIT(data[0] & 0xFF);
             }
             case TRUECOLOR, INDEXED -> {
-                if (data.length != 3) throw new CodecException("sBIT for truecolor/indexed must be 3 bytes, got " + data.length);
+                if (data.length != 3) throw new CodecException(DataTool.errCode(WaterMedia.ERR_PNG_SBIT_LENGTH_TRUECOLOR) + "Failed to read sBIT due to invalid length: " + data.length + " bytes (expected 3 for truecolor or indexed)");
                 yield SBIT.truecolor(data[0] & 0xFF, data[1] & 0xFF, data[2] & 0xFF);
             }
             case GREYSCALE_ALPHA -> {
-                if (data.length != 2) throw new CodecException("sBIT for greyscale+alpha must be 2 bytes, got " + data.length);
+                if (data.length != 2) throw new CodecException(DataTool.errCode(WaterMedia.ERR_PNG_SBIT_LENGTH_GREYSCALE_ALPHA) + "Failed to read sBIT due to invalid length: " + data.length + " bytes (expected 2 for greyscale with alpha)");
                 yield SBIT.greyscaleAlpha(data[0] & 0xFF, data[1] & 0xFF);
             }
             case TRUECOLOR_ALPHA -> {
-                if (data.length != 4) throw new CodecException("sBIT for truecolor+alpha must be 4 bytes, got " + data.length);
+                if (data.length != 4) throw new CodecException(DataTool.errCode(WaterMedia.ERR_PNG_SBIT_LENGTH_TRUECOLOR_ALPHA) + "Failed to read sBIT due to invalid length: " + data.length + " bytes (expected 4 for truecolor with alpha)");
                 yield SBIT.truecolorAlpha(data[0] & 0xFF, data[1] & 0xFF, data[2] & 0xFF, data[3] & 0xFF);
             }
-            case FORBIDDEN_1, FORBIDDEN_5 -> throw new CodecException("Forbidden color type: " + colorType);
+            case FORBIDDEN_1, FORBIDDEN_5 -> throw new CodecException(DataTool.errCode(WaterMedia.ERR_PNG_SBIT_COLOR_TYPE) + "Failed to read sBIT due to forbidden color type: " + colorType);
         };
     }
 

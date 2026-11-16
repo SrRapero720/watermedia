@@ -1,6 +1,8 @@
 package org.watermedia.api.codecs.readers.svg;
 
+import org.watermedia.WaterMedia;
 import org.watermedia.api.codecs.CodecException;
+import org.watermedia.tools.DataTool;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -128,7 +130,7 @@ final class Path {
     private void pushCmd(final byte c) throws CodecException {
         // ONE BUDGET COVERS BOTH ARRAYS: EVERY COORDINATE PAIR BELONGS TO A COMMAND, AND NO COMMAND
         // CARRIES MORE THAN THREE OF THEM, SO coordN CAN NEVER EXCEED 6 * MAX_SEGMENTS
-        if (this.cmdN == MAX_SEGMENTS) throw new CodecException("SVG path exceeds " + MAX_SEGMENTS + " segments");
+        if (this.cmdN == MAX_SEGMENTS) throw new CodecException(DataTool.errCode(WaterMedia.ERR_SVG_PATH_SEGMENTS) + "Failed to build the SVG path due to too many segments (max " + MAX_SEGMENTS + ")");
         if (this.cmdN == this.cmd.length) {
             final byte[] grown = new byte[this.cmd.length * 2];
             System.arraycopy(this.cmd, 0, grown, 0, this.cmdN);
@@ -140,7 +142,7 @@ final class Path {
     private void pushCoord(final double x, final double y) throws CodecException {
         // SINGLE CHOKE POINT FOR THE "NO NON-FINITE GEOMETRY" INVARIANT: THE PATH PARSER, THE SHAPE
         // BUILDERS AND THE GENERATED STROKE OUTLINE ALL FUNNEL THROUGH HERE
-        if (!Double.isFinite(x) || !Double.isFinite(y)) throw new CodecException("Non-finite path coordinate");
+        if (!Double.isFinite(x) || !Double.isFinite(y)) throw new CodecException(DataTool.errCode(WaterMedia.ERR_SVG_PATH_NON_FINITE) + "Failed to build the SVG path due to non-finite coordinate");
         if (this.coordN + 2 > this.coord.length) {
             final double[] grown = new double[this.coord.length * 2];
             System.arraycopy(this.coord, 0, grown, 0, this.coordN);
@@ -278,7 +280,7 @@ final class Path {
         private void add(final double x, final double y) throws CodecException {
             // BUDGET THE WHOLE FLATTEN, NOT THE CURRENT SUBPATH: FLUSHED SUBPATHS STAY RETAINED IN out,
             // AND A STROKE OUTLINE IS ONE SUBPATH PER SEGMENT QUAD PLUS ONE PER JOIN DISC
-            if (this.total == MAX_POINTS) throw new CodecException("SVG path exceeds " + MAX_POINTS + " flattened points");
+            if (this.total == MAX_POINTS) throw new CodecException(DataTool.errCode(WaterMedia.ERR_SVG_PATH_POINTS) + "Failed to flatten the SVG path due to too many points (max " + MAX_POINTS + ")");
             this.total++;
             if (this.n + 2 > this.buf.length) {
                 final double[] grown = new double[this.buf.length * 2];

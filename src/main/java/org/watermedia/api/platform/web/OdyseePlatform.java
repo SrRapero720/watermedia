@@ -5,6 +5,7 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import org.apache.logging.log4j.Marker;
 import org.apache.logging.log4j.MarkerManager;
+import org.watermedia.WaterMedia;
 import org.watermedia.WaterMediaConfig;
 import org.watermedia.api.platform.*;
 import org.watermedia.api.util.MediaType;
@@ -65,25 +66,25 @@ public final class OdyseePlatform implements Platform {
 
         LOGGER.debug(IT, "Odysee resolving {} from {}", claimUri, uri);
         JsonObject claim = obj(this.rpc("resolve", Map.of("urls", List.of(claimUri))), claimUri);
-        if (claim == null) throw new PlatformException(NAME, "API returned no claim for " + claimUri);
+        if (claim == null) throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_ODYSEE_NO_CLAIM) + "Failed to resolve claim " + claimUri + " due to no claim in the API answer");
         final JsonObject error = obj(claim, "error");
-        if (error != null) throw new PlatformException(NAME, "Claim " + claimUri + " is unavailable: " + str(error, "text"));
+        if (error != null) throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_ODYSEE_CLAIM_UNAVAILABLE) + "Failed to resolve claim " + claimUri + " due to unavailable claim: " + str(error, "text"));
 
         // A REPOST IS A POINTER; THE SHARED CLAIM CARRIES THE STREAM AND get TAKES ITS OWN URL
         final JsonObject reposted = obj(claim, "reposted_claim");
         if (reposted != null) claim = reposted;
         final String streamUri = reposted == null ? claimUri : str(claim, "permanent_url");
-        if (streamUri == null) throw new PlatformException(NAME, "Repost " + claimUri + " names no stream URL");
+        if (streamUri == null) throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_ODYSEE_REPOST_NO_URI) + "Failed to resolve repost " + claimUri + " due to no stream URL");
         final String valueType = str(claim, "value_type");
         if (!"stream".equals(valueType))
-            throw new PlatformException(NAME, "Claim " + claimUri + " is a " + valueType + ", not a stream");
+            throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_ODYSEE_CLAIM_TYPE) + "Failed to resolve claim " + claimUri + " due to unsupported type, it is a " + valueType + ", not a stream");
 
         final JsonObject value = obj(claim, "value");
         if (!WaterMediaConfig.platforms.allowMatureContent) {
             final JsonArray tags = arr(value, "tags");
             if (tags != null) for (final JsonElement tag: tags)
                 if (tag.isJsonPrimitive() && MATURE_TAGS.contains(tag.getAsString().toLowerCase(Locale.ROOT)))
-                    throw new MatureContentException(NAME, "Stream " + claimUri + " is tagged '" + tag.getAsString() + "'");
+                    throw new MatureContentException(NAME, DataTool.errCode(WaterMedia.ERR_ODYSEE_MATURE) + "Failed to resolve stream " + claimUri + " due to mature content tag '" + tag.getAsString() + "'");
         }
 
         final JsonObject channel = obj(claim, "signing_channel");
@@ -99,15 +100,15 @@ public final class OdyseePlatform implements Platform {
         // A STREAM WITHOUT A FILE IS A LIVESTREAM CLAIM; ITS CHANNEL TELLS WHETHER IT IS ON AIR
         if (obj(value, "source") == null) {
             final String channelId = str(channel, "claim_id");
-            if (channelId == null) throw new PlatformException(NAME, "Stream " + claimUri + " has no file and no channel to be live on");
+            if (channelId == null) throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_ODYSEE_LIVE_NO_CHANNEL) + "Failed to resolve stream " + claimUri + " due to no file and no channel to be live on");
             final JsonObject live = obj(WebRequests.fetchJson(NAME, this.liveApi + channelId, JsonObject.class), "data");
             final URI playlist = DataTool.uri(str(live, "VideoURL"));
             if (!bool(live, "Live") || playlist == null)
-                throw new PlatformException(NAME, "Stream " + claimUri + " is not live and has no replay");
+                throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_ODYSEE_NOT_LIVE) + "Failed to resolve stream " + claimUri + ", it is not live and has no replay");
             // THE CHANNEL MAY BE LIVE ON A NEWER CLAIM; A PAST ONE WITHOUT A FILE HAS NOTHING TO PLAY
             final String active = str(obj(live, "ActiveClaim"), "ClaimID");
             if (active != null && !active.equals(str(claim, "claim_id")))
-                throw new PlatformException(NAME, "Stream " + claimUri + " has ended and has no replay");
+                throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_ODYSEE_LIVE_ENDED) + "Failed to resolve stream " + claimUri + ", it has ended and has no replay");
 
             final String start = str(live, "Start");
             if (start != null) {
@@ -125,15 +126,15 @@ public final class OdyseePlatform implements Platform {
             case "video" -> MediaType.VIDEO;
             case "audio" -> MediaType.AUDIO;
             case "image" -> MediaType.IMAGE;
-            default -> throw new PlatformException(NAME, "Stream " + claimUri + " is a '" + streamType + "' file, not playable media");
+            default -> throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_ODYSEE_FILE_TYPE) + "Failed to resolve stream " + claimUri + " due to unplayable '" + streamType + "' file");
         };
         final JsonObject fee = obj(value, "fee");
         if (fee != null && num(fee, "amount") > 0)
-            throw new PlatformException(NAME, "Stream " + claimUri + " is paid content (" + str(fee, "amount") + " " + str(fee, "currency") + ")");
+            throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_ODYSEE_PAID) + "Failed to resolve stream " + claimUri + " due to paid content (" + str(fee, "amount") + " " + str(fee, "currency") + ")");
 
         // THE PLAYER URL THE SITE ITSELF STREAMS: EDGE-CACHED AND UNSIGNED, SO IT NEVER EXPIRES
         final URI stream = DataTool.uri(str(this.rpc("get", Map.of("uri", streamUri, "save_file", false)), "streaming_url"));
-        if (stream == null) throw new PlatformException(NAME, "API returned no streaming URL for " + claimUri);
+        if (stream == null) throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_ODYSEE_NO_STREAM_URL) + "Failed to resolve stream " + claimUri + " due to no streaming URL in the API answer");
 
         final JsonObject media = obj(value, streamType);
         final Quality quality = new Quality(stream, intOr(media, "width", 0), intOr(media, "height", 0));
@@ -153,9 +154,9 @@ public final class OdyseePlatform implements Platform {
                 .contentType("application/json").body(JSONTool.write(Map.of("jsonrpc", "2.0", "method", method, "params", params, "id", 1)));
         final JsonObject envelope = WebRequests.fetchJson(NAME, request, JsonObject.class);
         final JsonObject error = obj(envelope, "error");
-        if (error != null) throw new PlatformException(NAME, "API '" + method + "' failed: " + str(error, "message"));
+        if (error != null) throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_ODYSEE_RPC_ERROR) + "Failed to call API '" + method + "': " + str(error, "message"));
         final JsonObject result = obj(envelope, "result");
-        if (result == null) throw new PlatformException(NAME, "API '" + method + "' returned no result");
+        if (result == null) throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_ODYSEE_RPC_NO_RESULT) + "Failed to call API '" + method + "' due to no result");
         return result;
     }
 

@@ -4,8 +4,10 @@ import org.apache.logging.log4j.Marker;
 import org.apache.logging.log4j.MarkerManager;
 import org.lwjgl.opengl.*;
 import org.lwjgl.system.MemoryUtil;
+import org.watermedia.WaterMedia;
 import org.watermedia.api.util.MathUtil;
 import org.watermedia.api.util.PixelFormat;
+import org.watermedia.tools.DataTool;
 import org.watermedia.tools.IOTool;
 
 import java.io.IOException;
@@ -178,7 +180,7 @@ public final class GLEngine extends GFXEngine {
     // renderThreadEx MUST RUN ITS TASKS ON renderThread (THE GL CONTEXT OWNER) AND BE PUMPED EVERY RENDER FRAME; BOTH NULL
     // BUILDS A NO-THREAD-CONTRACT ENGINE WHOSE GL CALLS RUN ON THE CALLING THREAD, WHICH THEN MUST OWN THE CONTEXT
     GLEngine(final Thread renderThread, final Executor renderThreadEx) {
-        if (renderThread != null && renderThreadEx == null) throw new IllegalArgumentException("renderThreadEx is required when renderThread is set");
+        if (renderThread != null && renderThreadEx == null) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_GL_RENDER_EX_NULL) + "Failed to create the GLEngine due to null renderThreadEx, it is required when renderThread is set");
         this.renderThread = renderThread;
         this.renderThreadEx = renderThreadEx;
 
@@ -193,7 +195,7 @@ public final class GLEngine extends GFXEngine {
             // THE EXECUTOR AND WOULD CRASH THE HOST RENDER LOOP INSTEAD OF THE MISCONFIGURED CALLER.
             renderThreadEx.execute(() -> {
                 if (Thread.currentThread() != renderThread)
-                    LOGGER.error(IT, "renderThreadEx does not dispatch to renderThread; uploads will corrupt the GL context");
+                    LOGGER.error(IT, DataTool.errCode(WaterMedia.ERR_GL_RENDER_EX_DISPATCH) + "Failed to validate renderThreadEx, it does not dispatch to renderThread and uploads will corrupt the GL context");
             });
         } else {
             this.hub = null;
@@ -367,7 +369,7 @@ public final class GLEngine extends GFXEngine {
             this.hub.schedule(this);
         } catch (final RuntimeException e) {
             // A GL FAILURE OR A REJECTING EXECUTOR DROPS THE FRAME; UPLOADS NEVER THROW AT THE DECODER
-            if (!this.failWarned) LOGGER.error(IT, "Upload failed; frame dropped", e);
+            if (!this.failWarned) LOGGER.error(IT, DataTool.errCode(WaterMedia.ERR_GL_UPLOAD) + "Failed to upload the frame, it was dropped", e);
             this.failWarned = true;
         }
     }
@@ -1004,14 +1006,14 @@ public final class GLEngine extends GFXEngine {
             vertSrc = IOTool.shader(VERTEX_SHADER);
             fragSrc = IOTool.shader(fragment);
         } catch (final IOException e) {
-            LOGGER.error(IT, "Cannot read the conversion shader {}", fragment, e);
+            LOGGER.error(IT, DataTool.errCode(WaterMedia.ERR_GL_SHADER_READ) + "Failed to read the conversion shader {}", fragment, e);
             return 0;
         }
         final int vert = GL20.glCreateShader(GL20.GL_VERTEX_SHADER);
         GL20.glShaderSource(vert, vertSrc);
         GL20.glCompileShader(vert);
         if (GL20.glGetShaderi(vert, GL20.GL_COMPILE_STATUS) == GL11.GL_FALSE) {
-            LOGGER.error(IT, "Failed to compile vertex shader: {}", GL20.glGetShaderInfoLog(vert, 1_024));
+            LOGGER.error(IT, DataTool.errCode(WaterMedia.ERR_GL_VERTEX_COMPILE) + "Failed to compile the vertex shader: {}", GL20.glGetShaderInfoLog(vert, 1_024));
             GL20.glDeleteShader(vert);
             return 0;
         }
@@ -1020,7 +1022,7 @@ public final class GLEngine extends GFXEngine {
         GL20.glShaderSource(frag, fragSrc);
         GL20.glCompileShader(frag);
         if (GL20.glGetShaderi(frag, GL20.GL_COMPILE_STATUS) == GL11.GL_FALSE) {
-            LOGGER.error(IT, "Failed to compile fragment shader: {}", GL20.glGetShaderInfoLog(frag, 1_024));
+            LOGGER.error(IT, DataTool.errCode(WaterMedia.ERR_GL_FRAGMENT_COMPILE) + "Failed to compile the fragment shader: {}", GL20.glGetShaderInfoLog(frag, 1_024));
             GL20.glDeleteShader(vert);
             GL20.glDeleteShader(frag);
             return 0;
@@ -1033,7 +1035,7 @@ public final class GLEngine extends GFXEngine {
         GL20.glBindAttribLocation(prog, 1, "uv");
         GL20.glLinkProgram(prog);
         if (GL20.glGetProgrami(prog, GL20.GL_LINK_STATUS) == GL11.GL_FALSE) {
-            LOGGER.error(IT, "Failed to link shader program: {}", GL20.glGetProgramInfoLog(prog, 1_024));
+            LOGGER.error(IT, DataTool.errCode(WaterMedia.ERR_GL_PROGRAM_LINK) + "Failed to link the shader program: {}", GL20.glGetProgramInfoLog(prog, 1_024));
             GL20.glDeleteProgram(prog);
             GL20.glDeleteShader(vert);
             GL20.glDeleteShader(frag);
@@ -1155,7 +1157,7 @@ public final class GLEngine extends GFXEngine {
                         e.drainOne();
                     } catch (final RuntimeException ex) {
                         // ISOLATE FAILURES: ONE BROKEN ENGINE MUST NOT STARVE THE REST OF THE WAVE
-                        if (!e.failWarned) LOGGER.error(IT, "Engine drain failed", ex);
+                        if (!e.failWarned) LOGGER.error(IT, DataTool.errCode(WaterMedia.ERR_GL_DRAIN) + "Failed to drain the engine", ex);
                         e.failWarned = true;
                     }
                 }

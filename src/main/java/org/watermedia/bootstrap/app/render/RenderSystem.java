@@ -6,6 +6,7 @@ import org.watermedia.WaterMedia;
 import org.watermedia.api.player.GFXEngine;
 import org.watermedia.bootstrap.app.render.opengl.OpenGLRenderBackend;
 import org.watermedia.bootstrap.app.render.vulkan.VulkanRenderBackend;
+import org.watermedia.tools.DataTool;
 
 import java.awt.Color;
 import java.nio.ByteBuffer;
@@ -71,7 +72,7 @@ public final class RenderSystem {
                 // THE DEVICE AND INSTANCE LEAK
                 if (vk != null)
                     try { vk.cleanup(); }
-                    catch (final Throwable ct) { WaterMedia.LOGGER.error(IT, "Vulkan backend cleanup after failed init also failed", ct); }
+                    catch (final Throwable ct) { WaterMedia.LOGGER.error(IT, DataTool.errCode(WaterMedia.ERR_APP_RENDERSYSTEM_VK_CLEANUP) + "Failed to clean up the Vulkan backend after a failed init", ct); }
                 engine = null;
                 kind = Engine.OPENGL;
                 return false;

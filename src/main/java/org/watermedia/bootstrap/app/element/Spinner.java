@@ -1,7 +1,9 @@
 package org.watermedia.bootstrap.app.element;
 
+import org.watermedia.WaterMedia;
 import org.watermedia.api.util.MathUtil;
 import org.watermedia.bootstrap.app.ui.AppTheme;
+import org.watermedia.tools.DataTool;
 
 import java.awt.Color;
 import java.util.function.Consumer;
@@ -49,7 +51,7 @@ public final class Spinner extends Element<Spinner> {
     }
 
     public Spinner range(final double min, final double max) {
-        if (!(min <= max)) throw new IllegalArgumentException("Spinner range needs min <= max");
+        if (!(min <= max)) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_APP_SPINNER_RANGE) + "Failed to create the Spinner due to invalid range, min must be <= max");
         this.min = min;
         this.max = max;
         this.value = MathUtil.clamp(this.value, min, max);

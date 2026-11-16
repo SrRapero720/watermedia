@@ -2,6 +2,7 @@ package org.watermedia.api.platform.web;
 
 import org.apache.logging.log4j.Marker;
 import org.apache.logging.log4j.MarkerManager;
+import org.watermedia.WaterMedia;
 import org.watermedia.api.platform.*;
 import org.watermedia.api.util.MediaType;
 import org.watermedia.api.util.Metadata;
@@ -50,13 +51,13 @@ public final class DTubePlatform implements Platform {
                 .set("Referer", ORIGIN + "/")
                 .set("Origin", ORIGIN);
         try (final NetRequest req = new NetRequest(uri).accept("text/html").send()) {
-            if (req.statusCode() != 200) throw new PlatformException(NAME, "Page request for " + uri + " returned HTTP " + req.statusCode());
+            if (req.statusCode() != 200) throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_DTUBE_PAGE_STATUS) + "Failed to request the page " + uri + " due to HTTP " + req.statusCode());
             final String html = req.text();
 
             final String videoUrl = extract(html, VIDEO_URL);
-            if (videoUrl == null) throw new PlatformException(NAME, "No video_url found in page: " + uri);
+            if (videoUrl == null) throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_DTUBE_NO_VIDEO_URL) + "Failed to resolve the page due to no video_url: " + uri);
             final URI hlsUri = DataTool.uri(videoUrl);
-            if (hlsUri == null) throw new PlatformException(NAME, "The video_url '" + videoUrl + "' of " + uri + " is not a web URL");
+            if (hlsUri == null) throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_DTUBE_VIDEO_URL_NOT_WEB) + "Failed to resolve " + uri + " due to video_url '" + videoUrl + "' that is not a web URL");
             LOGGER.debug(IT, "D.tube extracted video_url {} from {}", hlsUri, uri);
 
             final String title = extract(html, TITLE);
@@ -82,7 +83,7 @@ public final class DTubePlatform implements Platform {
         } catch (final PlatformException e) {
             throw e;
         } catch (final IOException | RuntimeException e) {
-            throw new PlatformException(NAME, "Failed to resolve " + uri, e);
+            throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_DTUBE_RESOLVE) + "Failed to resolve " + uri, e);
         }
     }
 

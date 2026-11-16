@@ -6,6 +6,7 @@ import org.apache.logging.log4j.MarkerManager;
 import org.watermedia.WaterMedia;
 import org.watermedia.WaterMediaConfig;
 import org.watermedia.api.network.NetworkAPI;
+import org.watermedia.tools.DataTool;
 import org.watermedia.tools.IOTool;
 import org.watermedia.tools.JSONTool;
 
@@ -75,7 +76,7 @@ public final class NetRequest implements AutoCloseable {
 
     /** Creates a GET request with the WaterMedia User-Agent, {@link #ACCEPT_ANY} and the configured network limits. */
     public NetRequest(final URI uri) {
-        if (uri == null) throw new IllegalArgumentException("URI cannot be null");
+        if (uri == null) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_REQUEST_NULL_URI) + "Failed to create the request due to null URI");
         this.uri = uri;
         // THE DEFAULTS LIVE IN THE BAG, SO header(), headers() AND THE PRESETS REPLACE THEM IN CALL ORDER
         this.headers.set("Accept", ACCEPT_ANY).set("User-Agent", UserAgent.WATERMEDIA.value);
@@ -123,13 +124,13 @@ public final class NetRequest implements AutoCloseable {
     public NetRequest httpsOnly() { this.httpsOnly = true; return this; }
     /** Caps the body {@link #text()}, {@link #json(Class)} and {@link #download(Path, String)} accept. */
     public NetRequest maxBytes(final long bytes) {
-        if (bytes < 1) throw new IllegalArgumentException("The byte limit must be positive");
+        if (bytes < 1) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_REQUEST_BYTE_LIMIT) + "Failed to set the byte limit due to non-positive value: " + bytes);
         this.maxBytes = bytes;
         return this;
     }
     /** Sets a total deadline in milliseconds covering the redirect chain and the body transfer. */
     public NetRequest deadline(final long ms) {
-        if (ms < 1) throw new IllegalArgumentException("The deadline must be positive");
+        if (ms < 1) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_REQUEST_DEADLINE_VALUE) + "Failed to set the deadline due to non-positive value: " + ms);
         this.deadlineMs = ms;
         return this;
     }
@@ -139,7 +140,7 @@ public final class NetRequest implements AutoCloseable {
     // ==========================================================================
     /** Opens the connection, writes the body and follows redirects by hand, failing on a hop outside http(s) or past {@link #maxRedirects}; the response accessors then answer for the final hop. */
     public NetRequest send() throws IOException {
-        if (this.connection != null) throw new IllegalStateException("The request was already sent");
+        if (this.connection != null) throw new IllegalStateException(DataTool.errCode(WaterMedia.ERR_REQUEST_ALREADY_SENT) + "Failed to send the request, it was already sent");
         URI current = this.uri;
         String method = this.method;
         byte[] body = this.body;
@@ -149,8 +150,8 @@ public final class NetRequest implements AutoCloseable {
         while (true) {
             // EVERY HOP IS CHECKED, SO A REDIRECT CAN NEITHER DOWNGRADE A VERIFIED TRANSFER NOR OUTLIVE ITS DEADLINE
             if (this.httpsOnly && (!"https".equalsIgnoreCase(current.getScheme()) || current.getHost() == null || current.getUserInfo() != null))
-                throw new IOException("HTTPS without credentials is required: " + current);
-            if (deadline > 0 && System.nanoTime() > deadline) throw new IOException("Transfer deadline exceeded: " + this.uri);
+                throw new IOException(DataTool.errCode(WaterMedia.ERR_REQUEST_HTTPS_ONLY) + "Failed to send the request due to HTTPS without credentials being required: " + current);
+            if (deadline > 0 && System.nanoTime() > deadline) throw new IOException(DataTool.errCode(WaterMedia.ERR_REQUEST_TRANSFER_DEADLINE) + "Failed to send the request due to exceeded transfer deadline: " + this.uri);
 
             final URLConnection conn = this.open(current, method, body);
             if (!(conn instanceof final HttpURLConnection http)) {
@@ -165,7 +166,7 @@ public final class NetRequest implements AutoCloseable {
             if (!redirect) return this.receive(current, http, code, deadline);
             if (hops >= this.maxRedirects) {
                 http.disconnect();
-                throw new IOException("Too many redirects (" + this.maxRedirects + " hops) for " + this.uri);
+                throw new IOException(DataTool.errCode(WaterMedia.ERR_REQUEST_MAX_REDIRECTS) + "Failed to send the request due to too many redirects: " + this.maxRedirects + " hops for " + this.uri);
             }
 
             // A 3xx WITHOUT A USABLE Location IS THE RESPONSE ITSELF
@@ -180,14 +181,14 @@ public final class NetRequest implements AutoCloseable {
             http.disconnect();
 
             // ONLY THE INITIAL REQUEST MAY BE LOCAL: A SERVER-CHOSEN HOP OUTSIDE HTTP(S) WOULD READ LOCAL FILES OR ARCHIVES
-            if (!IOTool.web(next)) throw new IOException("Redirect to unsupported scheme: " + next.getScheme() + " (from " + this.uri + ")");
+            if (!IOTool.web(next)) throw new IOException(DataTool.errCode(WaterMedia.ERR_REQUEST_REDIRECT_SCHEME) + "Failed to follow the redirect due to unsupported scheme: " + next.getScheme() + " (from " + this.uri + ")");
 
             // RFC 9110: A 303 SEE OTHER IS RE-REQUESTED AS GET WITHOUT THE ORIGINAL BODY
             if (code == HttpURLConnection.HTTP_SEE_OTHER) {
                 method = "GET";
                 body = null;
             } else if (body != null && body.length > 0 && !this.crossOrigin && !sameOrigin(this.uri, next)) {
-                throw new IOException("Redirect to another origin would resend the request body: " + next);
+                throw new IOException(DataTool.errCode(WaterMedia.ERR_REQUEST_REDIRECT_ORIGIN) + "Failed to follow the redirect due to another origin that would receive the request body: " + next);
             }
 
             // THE HOPS ARE OFTEN SIGNED CDN LINKS, SO THEY ONLY REACH THE REDACTING LOGGER, NEVER AN EXCEPTION
@@ -221,7 +222,7 @@ public final class NetRequest implements AutoCloseable {
     /** Returns the raw body stream for the caller to close, the error body (or an empty stream) on a 400+ status; the body reads once through this, {@link #text()} or {@link #json(Class)}. */
     public InputStream inputStream() throws IOException {
         final URLConnection connection = this.connection();
-        if (this.consumed) throw new IllegalStateException("The response body was already read");
+        if (this.consumed) throw new IllegalStateException(DataTool.errCode(WaterMedia.ERR_REQUEST_BODY_READ_STREAM) + "Failed to read the response body, it was already read");
         this.consumed = true;
         if (this.statusCode >= 400 && connection instanceof final HttpURLConnection http) {
             final InputStream error = http.getErrorStream();
@@ -243,10 +244,10 @@ public final class NetRequest implements AutoCloseable {
     /** Streams a 200 body into a new file within the request's size and time budgets and verifies its hex SHA-256; any failure deletes the file again. */
     public void download(final Path destination, final String expectedSha256) throws IOException {
         final String digest = IOTool.requireSha256(expectedSha256);
-        if (this.statusCode() != HttpURLConnection.HTTP_OK) throw new IOException("Download returned HTTP " + this.statusCode + ": " + this.uri);
+        if (this.statusCode() != HttpURLConnection.HTTP_OK) throw new IOException(DataTool.errCode(WaterMedia.ERR_REQUEST_DOWNLOAD_STATUS) + "Failed to download the file due to HTTP status: " + this.statusCode + " from " + this.uri);
         final long limit = this.maxBytes > 0 ? this.maxBytes : Long.MAX_VALUE;
         final long expected = this.contentLength();
-        if (expected > limit) throw new IOException("Download exceeds its size limit: " + this.uri);
+        if (expected > limit) throw new IOException(DataTool.errCode(WaterMedia.ERR_REQUEST_DOWNLOAD_SIZE) + "Failed to download the file due to exceeded size limit: " + this.uri);
         boolean created = false;
         try (final InputStream in = this.inputStream()) {
             try (final OutputStream out = Files.newOutputStream(destination, StandardOpenOption.CREATE_NEW)) {
@@ -257,10 +258,10 @@ public final class NetRequest implements AutoCloseable {
                 while ((count = in.read(buffer)) != -1) {
                     total += count;
                     if (total > limit || (this.deadlineNs > 0 && System.nanoTime() > this.deadlineNs))
-                        throw new IOException("Download budget exceeded: " + this.uri);
+                        throw new IOException(DataTool.errCode(WaterMedia.ERR_REQUEST_DOWNLOAD_BUDGET) + "Failed to download the file due to exceeded budget: " + this.uri);
                     out.write(buffer, 0, count);
                 }
-                if (expected >= 0 && total != expected) throw new IOException("Truncated download: " + this.uri);
+                if (expected >= 0 && total != expected) throw new IOException(DataTool.errCode(WaterMedia.ERR_REQUEST_DOWNLOAD_TRUNCATED) + "Failed to download the file due to truncated data: " + this.uri);
             }
             IOTool.verifySha256(destination, digest);
         } catch (final IOException failure) {
@@ -275,14 +276,14 @@ public final class NetRequest implements AutoCloseable {
     /** Binds a JSON body ({@code application/json}, {@code text/json}, any {@code +json}) to {@code type} within the {@link #text()} budgets; null for an empty body or another type, left unread. */
     public <T> T json(final Class<T> type) throws IOException {
         final String contentType = this.contentType();
-        if (this.consumed) throw new IllegalStateException("The response body was already read");
+        if (this.consumed) throw new IllegalStateException(DataTool.errCode(WaterMedia.ERR_REQUEST_BODY_READ_JSON) + "Failed to read the response body, it was already read");
         final String mime = contentType == null ? "" : contentType.split(";", 2)[0].strip().toLowerCase(Locale.ROOT);
         if (!mime.equals(MIMETYPE_JSON) && !mime.equals("text/json") && !mime.endsWith("+json")) return null;
         final String body = this.text();
         try {
             return JSONTool.parse(body, type);
         } catch (final JsonSyntaxException e) {
-            throw new IOException("Malformed JSON in response from " + this.uri, e);
+            throw new IOException(DataTool.errCode(WaterMedia.ERR_REQUEST_JSON_MALFORMED) + "Failed to parse the JSON response due to malformed syntax: " + this.uri, e);
         }
     }
 
@@ -383,7 +384,7 @@ public final class NetRequest implements AutoCloseable {
 
     private URLConnection connection() {
         final URLConnection connection = this.connection;
-        if (connection == null) throw new IllegalStateException("The request was not sent");
+        if (connection == null) throw new IllegalStateException(DataTool.errCode(WaterMedia.ERR_REQUEST_NOT_SENT) + "Failed to read the response, the request was not sent");
         return connection;
     }
 

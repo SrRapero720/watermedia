@@ -1,5 +1,7 @@
 package org.watermedia.tools;
 
+import org.watermedia.WaterMedia;
+
 import java.io.BufferedInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.FileNotFoundException;
@@ -76,14 +78,14 @@ public final class IOTool {
         long total = 0L;
         while (true) {
             // SOCKET READS ARE NOT INTERRUPTIBLE, SO A CANCELLED CALLER (A STOPPED PLAYER) IS HONOURED BETWEEN CHUNKS
-            if (Thread.currentThread().isInterrupted()) throw new InterruptedIOException("Read cancelled after " + total + " bytes");
+            if (Thread.currentThread().isInterrupted()) throw new InterruptedIOException(DataTool.errCode(WaterMedia.ERR_IO_READ_CANCELLED) + "Failed to read input due to cancellation after " + total + " bytes");
             // EACH READ IS CAPPED BY THE SOCKET TIMEOUT, BUT A TRICKLING SOURCE NEEDS A TOTAL ONE
             if (timeoutNs > 0L && System.nanoTime() - start > timeoutNs)
-                throw new IOException("Failed to read input: exceeded the " + timeoutMs + " ms deadline after " + total + " bytes");
+                throw new IOException(DataTool.errCode(WaterMedia.ERR_IO_READ_DEADLINE) + "Failed to read input due to exceeded deadline: " + timeoutMs + " ms after " + total + " bytes");
             final int read = in.read(buffer);
             if (read < 0) break;
             total += read;
-            if (total > maxBytes) throw new IOException("Failed to read input: exceeds limit (" + total + " > " + maxBytes + " bytes)");
+            if (total > maxBytes) throw new IOException(DataTool.errCode(WaterMedia.ERR_IO_READ_LIMIT) + "Failed to read input due to exceeded limit: " + total + " > " + maxBytes + " bytes");
             out.write(buffer, 0, read);
         }
         return out.toByteArray();
@@ -102,11 +104,11 @@ public final class IOTool {
         final Path base = directory.toAbsolutePath().normalize();
         final Path child = installation.toAbsolutePath().normalize();
         if (!Files.isDirectory(base, LinkOption.NOFOLLOW_LINKS) || child.getFileName() == null)
-            throw new IOException("Installation storage is missing or is a symbolic link: " + base);
+            throw new IOException(DataTool.errCode(WaterMedia.ERR_IO_PUBLISH_STORAGE) + "Failed to publish the installation due to missing storage or symbolic link: " + base);
         final String name = child.getFileName().toString();
         if (!base.equals(child.getParent()) || !name.matches("[A-Za-z0-9][A-Za-z0-9._-]*")
                 || !Files.isDirectory(child, LinkOption.NOFOLLOW_LINKS))
-            throw new IOException("Installation is not a direct, regular child of " + base);
+            throw new IOException(DataTool.errCode(WaterMedia.ERR_IO_PUBLISH_CHILD) + "Failed to publish the installation due to not being a direct, regular child of " + base);
         final Path pointer = Files.createTempFile(base, ".current-", ".tmp");
         try {
             Files.writeString(pointer, name, StandardCharsets.UTF_8);
@@ -139,9 +141,9 @@ public final class IOTool {
     /** Requires a regular executable file and sets its owner execute bit outside Windows. */
     public static void makeExecutable(final Path file) throws IOException {
         if (!Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS))
-            throw new IOException("Executable is missing or is a symbolic link: " + file);
+            throw new IOException(DataTool.errCode(WaterMedia.ERR_IO_EXEC_MISSING) + "Failed to make the file executable due to missing file or symbolic link: " + file);
         if (!"windows".equals(os()) && !file.toFile().setExecutable(true, true))
-            throw new IOException("Cannot grant executable permission: " + file);
+            throw new IOException(DataTool.errCode(WaterMedia.ERR_IO_EXEC_PERMISSION) + "Failed to grant executable permission: " + file);
     }
 
     // LOWERCASE HEX SHA-256 OF file; SHA-256 IS MANDATED BY THE JVM SPEC, SO ABSENCE MEANS A BROKEN RUNTIME
@@ -150,7 +152,7 @@ public final class IOTool {
         try {
             digest = MessageDigest.getInstance("SHA-256");
         } catch (final NoSuchAlgorithmException e) {
-            throw new IllegalStateException("SHA-256 is unavailable", e);
+            throw new IllegalStateException(DataTool.errCode(WaterMedia.ERR_IO_SHA256_MISSING) + "Failed to create the SHA-256 digest due to unavailable algorithm", e);
         }
         try (final InputStream in = new BufferedInputStream(Files.newInputStream(file))) {
             final byte[] buffer = new byte[BUFFER_SIZE];
@@ -162,7 +164,7 @@ public final class IOTool {
 
     /** Validates and normalizes a SHA-256 digest from a manifest or release index. */
     public static String requireSha256(final String value) throws IOException {
-        if (value == null || !value.matches("[a-fA-F0-9]{64}")) throw new IOException("Missing or invalid SHA-256 digest");
+        if (value == null || !value.matches("[a-fA-F0-9]{64}")) throw new IOException(DataTool.errCode(WaterMedia.ERR_IO_DIGEST_INVALID) + "Failed to read the SHA-256 digest due to missing or invalid value");
         return value.toLowerCase(Locale.ROOT);
     }
 
@@ -170,7 +172,7 @@ public final class IOTool {
     public static void verifySha256(final Path file, final String expected) throws IOException {
         final String digest = requireSha256(expected);
         if (!Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS) || !sha256(file).equals(digest))
-            throw new IOException("File SHA-256 mismatch: " + file.getFileName());
+            throw new IOException(DataTool.errCode(WaterMedia.ERR_IO_DIGEST_MISMATCH) + "Failed to verify the file due to SHA-256 mismatch: " + file.getFileName());
     }
 
     /** Returns the Implementation-Version of the jar that ships WaterMedia, or "unknown" outside a jar. */
@@ -195,7 +197,7 @@ public final class IOTool {
     /** Reads a bundled UTF-8 resource; a missing one throws {@link FileNotFoundException}. */
     public static String jarRead(final String path) throws IOException {
         try (final InputStream in = jarOpenFile(path)) {
-            if (in == null) throw new FileNotFoundException("Bundled resource not found: " + path);
+            if (in == null) throw new FileNotFoundException(DataTool.errCode(WaterMedia.ERR_IO_RESOURCE_MISSING) + "Failed to read the bundled resource due to not found: " + path);
             return new String(in.readAllBytes(), StandardCharsets.UTF_8);
         }
     }
@@ -217,7 +219,7 @@ public final class IOTool {
             }
             final int open = directive.indexOf('"');
             final int close = directive.lastIndexOf('"');
-            if (open < 0 || close <= open) throw new IOException("Malformed include in shader " + name + ": " + directive);
+            if (open < 0 || close <= open) throw new IOException(DataTool.errCode(WaterMedia.ERR_IO_SHADER_INCLUDE) + "Failed to read shader " + name + " due to malformed include: " + directive);
             source.append(shader(directive.substring(open + 1, close)));
         }
         return source.toString();

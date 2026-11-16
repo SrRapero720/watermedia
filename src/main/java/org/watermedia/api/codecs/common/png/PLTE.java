@@ -1,6 +1,8 @@
 package org.watermedia.api.codecs.common.png;
 
+import org.watermedia.WaterMedia;
 import org.watermedia.api.codecs.CodecException;
+import org.watermedia.tools.DataTool;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -22,12 +24,12 @@ public record PLTE(int[] colors) implements IChunk {
 
     /** Converts a generic chunk to PLTE. */
     public static PLTE convert(final PngChunk chunk) throws CodecException {
-        if (chunk.type() != SIGNATURE) throw new IllegalArgumentException("Invalid chunk type for PLTE: 0x" + Integer.toHexString(chunk.type()));
+        if (chunk.type() != SIGNATURE) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_PNG_PLTE_TYPE) + "Failed to read PLTE due to invalid chunk type: 0x" + Integer.toHexString(chunk.type()));
 
         final byte[] data = chunk.data();
         if (data.length == 0 || data.length % 3 != 0)
-            throw new CodecException("PLTE data length must be a positive multiple of 3, got " + data.length);
-        if (data.length > MAX_LENGTH) throw new CodecException("PLTE holds more than 256 entries: " + (data.length / 3));
+            throw new CodecException(DataTool.errCode(WaterMedia.ERR_PNG_PLTE_LENGTH) + "Failed to read PLTE due to invalid length: " + data.length + " bytes (expected a positive multiple of 3)");
+        if (data.length > MAX_LENGTH) throw new CodecException(DataTool.errCode(WaterMedia.ERR_PNG_PLTE_ENTRIES) + "Failed to read PLTE due to more than 256 entries: " + (data.length / 3));
 
         final int count = data.length / 3;
         final int[] colors = new int[count];

@@ -59,7 +59,7 @@ public class M3UToolTest {
         void testEmptyContent() {
             for (final String content: new String[] { null, "", "   \n\t  " }) {
                 final IOException error = assertThrows(IOException.class, () -> M3UTool.parse(content, URI.create(BASE + "test.m3u8")));
-                assertTrue(error.getMessage().contains("Empty playlist"), content);
+                assertTrue(error.getMessage().contains("due to null or blank body"), content);
             }
         }
 
@@ -89,7 +89,7 @@ public class M3UToolTest {
 
             final IOException error = assertThrows(IOException.class,
                     () -> M3UTool.parse(content, URI.create(BASE + "test.m3u8")));
-            assertTrue(error.getMessage().contains("Unrecognized"));
+            assertTrue(error.getMessage().contains("due to unknown shape"));
         }
     }
 

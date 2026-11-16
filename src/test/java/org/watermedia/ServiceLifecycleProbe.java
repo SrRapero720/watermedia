@@ -133,7 +133,7 @@ public final class ServiceLifecycleProbe {
                             throw new AssertionError("Worker initiated a load");
                         } catch (final IllegalStateException expected) {
                             // THE WORKER GUARD ANSWERS BEFORE THE ALREADY-STARTED CHECK
-                            callbackGuard.set(expected.getMessage().startsWith("Start WaterMedia from a host thread"));
+                            callbackGuard.set(expected.getMessage().startsWith("(wm_err:0001) Failed to start WaterMedia from a managed worker"));
                         }
                     }
                     return List.of(new PlatformResult(this, query, null, URI.create("https://fixture.invalid/" + query)));

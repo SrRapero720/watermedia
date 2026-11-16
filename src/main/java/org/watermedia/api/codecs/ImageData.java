@@ -1,6 +1,8 @@
 package org.watermedia.api.codecs;
 
+import org.watermedia.WaterMedia;
 import org.watermedia.api.util.PixelFormat;
+import org.watermedia.tools.DataTool;
 
 import java.nio.ByteBuffer;
 import java.util.Arrays;
@@ -22,13 +24,13 @@ public record ImageData(ByteBuffer[] frames, PixelFormat format, int width, int 
     public static final int REPEAT_FOREVER = 0;
 
     public ImageData {
-        if (frames == null || frames.length == 0) throw new IllegalArgumentException("At least one image is required");
-        if (format == null) throw new IllegalArgumentException("Pixel format cannot be null");
-        if (width <= 0 || height <= 0) throw new IllegalArgumentException("Width and height must be positive");
-        if (delays == null || delays.length != frames.length) throw new IllegalArgumentException("Delay array must match the number of frames");
-        for (final long delay: delays) if (delay < 0) throw new IllegalArgumentException("Delays must not be negative");
-        if (duration < 0) throw new IllegalArgumentException("Total duration must not be negative");
-        if (repeat < REPEAT_FOREVER) throw new IllegalArgumentException("Repeat must be REPEAT_FOREVER (0) or the number of plays");
+        if (frames == null || frames.length == 0) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_IMAGEDATA_NO_FRAMES) + "Failed to create the image data due to no frames, at least one image is required");
+        if (format == null) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_IMAGEDATA_NULL_FORMAT) + "Failed to create the image data due to null pixel format");
+        if (width <= 0 || height <= 0) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_IMAGEDATA_SIZE) + "Failed to create the image data due to non-positive width or height");
+        if (delays == null || delays.length != frames.length) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_IMAGEDATA_DELAYS_LENGTH) + "Failed to create the image data due to a delay array not matching the number of frames");
+        for (final long delay: delays) if (delay < 0) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_IMAGEDATA_DELAYS_NEGATIVE) + "Failed to create the image data due to negative delays");
+        if (duration < 0) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_IMAGEDATA_DURATION) + "Failed to create the image data due to negative total duration");
+        if (repeat < REPEAT_FOREVER) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_IMAGEDATA_REPEAT) + "Failed to create the image data due to invalid repeat, it must be REPEAT_FOREVER (0) or the number of plays");
     }
 
     /** Creates image data whose single-cycle duration is the sum of {@code delays}. */
@@ -91,15 +93,15 @@ public record ImageData(ByteBuffer[] frames, PixelFormat format, int width, int 
         public static final Scan EMPTY = new Scan(1, new long[] { 0L }, 0L, 1);
 
         public Scan {
-            if (delays == null || delays.length != frameCount) throw new IllegalArgumentException("Delay array must match the frame count");
-            for (final long delay: delays) if (delay < 0) throw new IllegalArgumentException("Delays must not be negative");
-            if (duration < 0) throw new IllegalArgumentException("Total duration must not be negative");
-            if (repeat < REPEAT_FOREVER) throw new IllegalArgumentException("Repeat must be REPEAT_FOREVER (0) or the number of plays");
+            if (delays == null || delays.length != frameCount) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_IMAGEDATA_SCAN_DELAYS_LENGTH) + "Failed to create the image scan due to a delay array not matching the frame count");
+            for (final long delay: delays) if (delay < 0) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_IMAGEDATA_SCAN_DELAYS_NEGATIVE) + "Failed to create the image scan due to negative delays");
+            if (duration < 0) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_IMAGEDATA_SCAN_DURATION) + "Failed to create the image scan due to negative total duration");
+            if (repeat < REPEAT_FOREVER) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_IMAGEDATA_SCAN_REPEAT) + "Failed to create the image scan due to invalid repeat, it must be REPEAT_FOREVER (0) or the number of plays");
         }
 
         /** Creates a scan of one frame per delay, summing the duration. */
         public static Scan of(final long[] delays, final int repeat) {
-            if (delays == null) throw new IllegalArgumentException("Delays are required");
+            if (delays == null) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_IMAGEDATA_SCAN_NULL_DELAYS) + "Failed to create the image scan due to null delays");
             return new Scan(delays.length, delays, sum(delays), repeat);
         }
 

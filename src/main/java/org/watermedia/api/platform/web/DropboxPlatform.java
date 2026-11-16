@@ -2,6 +2,7 @@ package org.watermedia.api.platform.web;
 
 import org.apache.logging.log4j.Marker;
 import org.apache.logging.log4j.MarkerManager;
+import org.watermedia.WaterMedia;
 import org.watermedia.api.platform.*;
 import org.watermedia.api.util.MediaType;
 import org.watermedia.api.util.HttpHeaders;
@@ -46,7 +47,7 @@ public final class DropboxPlatform implements Platform {
 
         try (final NetRequest req = new NetRequest(directUri).send()) {
             if (req.statusCode() != 200)
-                throw new PlatformException(NAME, "Direct download for " + directUri + " returned HTTP " + req.statusCode());
+                throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_DROPBOX_DIRECT_STATUS) + "Failed to download " + directUri + " directly due to HTTP " + req.statusCode());
 
             final MediaType type = MediaType.of(req.contentType());
             LOGGER.debug(IT, "Dropbox resolved {} (content-type {}) for {}", directUri, req.contentType(), uri);
@@ -59,7 +60,7 @@ public final class DropboxPlatform implements Platform {
         } catch (final PlatformException e) {
             throw e;
         } catch (final IOException | RuntimeException e) {
-            throw new PlatformException(NAME, "Failed to resolve " + uri, e);
+            throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_DROPBOX_RESOLVE) + "Failed to resolve " + uri, e);
         }
     }
 }

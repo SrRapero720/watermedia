@@ -1,6 +1,8 @@
 package org.watermedia.api.codecs.readers.webp.lossless;
 
+import org.watermedia.WaterMedia;
 import org.watermedia.api.codecs.CodecException;
+import org.watermedia.tools.DataTool;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -23,7 +25,7 @@ final class BitReader {
     // PEEKS UP TO 24 BITS WITHOUT CONSUMING THEM; NEAR EOF THE MISSING HIGH BITS READ AS ZERO
     int peek(final int bits) throws CodecException {
         if (bits == 0) return 0;
-        if (bits > MAX_BURST_BITS) throw new CodecException("Cannot peek more than " + MAX_BURST_BITS + " bits at once");
+        if (bits > MAX_BURST_BITS) throw new CodecException(DataTool.errCode(WaterMedia.ERR_VP8L_BITS_PEEK_BURST) + "Failed to peek the VP8L bitstream due to more than " + MAX_BURST_BITS + " bits at once");
         final int available = this.ensureBits(bits);
         if (available == 0) return 0;
         final int actualBits = Math.min(bits, available);
@@ -33,9 +35,9 @@ final class BitReader {
     // READS AND CONSUMES UP TO 24 BITS; RUNNING OUT OF DATA IS TRUNCATION
     int read(final int bits) throws CodecException {
         if (bits == 0) return 0;
-        if (bits > MAX_BURST_BITS) throw new CodecException("Cannot read more than " + MAX_BURST_BITS + " bits at once");
+        if (bits > MAX_BURST_BITS) throw new CodecException(DataTool.errCode(WaterMedia.ERR_VP8L_BITS_READ_BURST) + "Failed to read the VP8L bitstream due to more than " + MAX_BURST_BITS + " bits at once");
         final int available = this.ensureBits(bits);
-        if (available < bits) throw new CodecException("Unexpected end of data: needed " + bits + " bits, only " + available + " available");
+        if (available < bits) throw new CodecException(DataTool.errCode(WaterMedia.ERR_VP8L_BITS_READ_EOF) + "Failed to read the VP8L bitstream due to unexpected end of data: needed " + bits + " bits, only " + available + " available");
         final int result = (int) (this.bitBuf & ((1L << bits) - 1L));
         this.bitBuf >>>= bits;
         this.bitsAvail -= bits;
@@ -44,7 +46,7 @@ final class BitReader {
 
     boolean readBool() throws CodecException {
         if (this.bitsAvail == 0) this.ensureBits(1);
-        if (this.bitsAvail == 0) throw new CodecException("Unexpected end of data: needed 1 bit, only 0 available");
+        if (this.bitsAvail == 0) throw new CodecException(DataTool.errCode(WaterMedia.ERR_VP8L_BITS_BOOL_EOF) + "Failed to read the VP8L bitstream due to unexpected end of data: needed 1 bit, only 0 available");
         final boolean result = (this.bitBuf & 1L) != 0L;
         this.bitBuf >>>= 1;
         this.bitsAvail -= 1;

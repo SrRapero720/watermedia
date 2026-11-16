@@ -7,6 +7,7 @@ import org.bytedeco.javacpp.BytePointer;
 import org.bytedeco.javacpp.IntPointer;
 import org.bytedeco.javacpp.Pointer;
 import org.bytedeco.javacpp.PointerPointer;
+import org.watermedia.WaterMedia;
 import org.watermedia.api.util.PixelFormat;
 import org.watermedia.api.util.SampleType;
 
@@ -114,7 +115,7 @@ public final class FFTool {
             case YUVA420P -> AV_PIX_FMT_YUVA420P;
             case YUVA422P -> AV_PIX_FMT_YUVA422P;
             case YUVA444P -> AV_PIX_FMT_YUVA444P;
-            default -> throw new IllegalArgumentException("No FFmpeg pixel format for " + format);
+            default -> throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_FFTOOL_PIXEL_FORMAT) + "Failed to map the pixel format due to no FFmpeg equivalent: " + format);
         };
     }
 
@@ -149,7 +150,7 @@ public final class FFTool {
 
     /** Creates an exception naming the failed FFmpeg operation, its native message and its code. */
     public static IOException failure(final String operation, final int code) {
-        return new IOException(operation + " failed: " + error(code) + " (" + code + ")");
+        return new IOException(DataTool.errCode(WaterMedia.ERR_FFTOOL_OPERATION) + "Failed to run FFmpeg operation " + operation + ": " + error(code) + " (" + code + ")");
     }
 
     /** Returns whether a native pointer is missing or null. */
@@ -198,12 +199,12 @@ public final class FFTool {
                 final var format = avformat.av_find_input_format(protocol);
                 type = isNull(format) ? null : format.priv_class();
             }
-            if (isNull(type)) throw new IllegalStateException("Required native transport is unavailable: " + protocol);
+            if (isNull(type)) throw new IllegalStateException(DataTool.errCode(WaterMedia.ERR_FFTOOL_TLS_TRANSPORT) + "Failed to start native TLS due to unavailable transport: " + protocol);
             try (final var object = new PointerPointer<AVClass>(1).put(type)) {
                 for (final String option: http ? new String[] { "tls_verify", "ca_file", "header_origin" } : new String[] { "protocol_opts" }) {
                     final var definition = av_opt_find(object, option, null, 0, AV_OPT_SEARCH_FAKE_OBJ);
                     if (isNull(definition))
-                        throw new IllegalStateException("FFmpeg lacks the required transport security patches; install the WaterMedia native build");
+                        throw new IllegalStateException(DataTool.errCode(WaterMedia.ERR_FFTOOL_TLS_PATCHES) + "Failed to start native TLS due to missing FFmpeg transport security patches, install the WaterMedia native build");
                 }
             }
         }
@@ -217,7 +218,7 @@ public final class FFTool {
                 for (final var certificate: trust.getAcceptedIssuers())
                     anchors.add(encoder.encodeToString(certificate.getEncoded()));
         }
-        if (anchors.isEmpty()) throw new CertificateException("The JVM truststore exposes no certificate authorities");
+        if (anchors.isEmpty()) throw new CertificateException(DataTool.errCode(WaterMedia.ERR_FFTOOL_TLS_NO_ANCHORS) + "Failed to export the trust anchors due to no certificate authorities in the JVM truststore");
         final var pem = new StringBuilder();
         for (final String certificate: anchors)
             pem.append("-----BEGIN CERTIFICATE-----\n").append(certificate).append("\n-----END CERTIFICATE-----\n");
@@ -233,7 +234,7 @@ public final class FFTool {
             // NATIVE ESCAPING PRESERVES WINDOWS DRIVE LETTERS AND SPECIAL CHARACTERS IN THE CA PATH.
             if (av_dict_set(nested, "tls_verify", "1", 0) < 0 || av_dict_set(nested, "ca_file", file, 0) < 0
                     || av_dict_get_string(nested, serialized, (byte) '=', (byte) ':') < 0)
-                throw new IllegalStateException("Cannot configure nested HTTPS verification");
+                throw new IllegalStateException(DataTool.errCode(WaterMedia.ERR_FFTOOL_TLS_NESTED) + "Failed to configure nested HTTPS verification");
             certificates = new Certificates(file, serialized.getString(StandardCharsets.UTF_8));
         } finally {
             av_free(serialized);
@@ -243,14 +244,14 @@ public final class FFTool {
 
     /** Requires certificate and peer-name verification for an input and its nested connections. */
     public static void configureTLS(final AVDictionary options) {
-        if (options == null) throw new IllegalArgumentException("Options are required");
+        if (options == null) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_FFTOOL_TLS_NULL_OPTIONS) + "Failed to configure TLS due to null options");
         final Certificates current = certificates;
-        if (current == null) throw new IllegalStateException("Native HTTPS verification has not initialized");
+        if (current == null) throw new IllegalStateException(DataTool.errCode(WaterMedia.ERR_FFTOOL_TLS_NOT_READY) + "Failed to configure TLS, native HTTPS verification has not initialized");
         if (av_dict_set(options, "verify", null, 0) < 0 || av_dict_set(options, "cafile", null, 0) < 0
                 || av_dict_set(options, "verifyhost", null, 0) < 0
                 || av_dict_set(options, "tls_verify", "1", 0) < 0 || av_dict_set(options, "ca_file", current.file(), 0) < 0
                 || av_dict_set(options, "protocol_opts", current.protocols(), 0) < 0)
-            throw new IllegalStateException("Cannot configure native HTTPS verification");
+            throw new IllegalStateException(DataTool.errCode(WaterMedia.ERR_FFTOOL_TLS_NATIVE) + "Failed to configure native HTTPS verification");
     }
 
     // ==========================================================================

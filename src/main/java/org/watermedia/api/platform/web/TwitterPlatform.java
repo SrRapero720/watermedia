@@ -3,6 +3,7 @@ package org.watermedia.api.platform.web;
 import com.google.gson.annotations.SerializedName;
 import org.apache.logging.log4j.Marker;
 import org.apache.logging.log4j.MarkerManager;
+import org.watermedia.WaterMedia;
 import org.watermedia.WaterMediaConfig;
 import org.watermedia.api.platform.*;
 import org.watermedia.api.util.MediaType;
@@ -51,15 +52,15 @@ public final class TwitterPlatform implements Platform {
             // THE TOMBSTONE TEXT SAYS WHY: AN AGE GATE IS A MATURE BLOCK, THE REST IS GONE FOR GOOD
             final String reason = tweet.tombstone != null && tweet.tombstone.text != null ? tweet.tombstone.text.text : null;
             if (reason != null && reason.toLowerCase(Locale.ROOT).contains("age-restricted") && !WaterMediaConfig.platforms.allowMatureContent)
-                throw new MatureContentException(NAME, "Tweet '" + tweetId + "' is age-restricted");
-            throw new PlatformException(NAME, "Tweet '" + tweetId + "' is unavailable" + (reason == null ? " (deleted or protected)" : ": " + reason));
+                throw new MatureContentException(NAME, DataTool.errCode(WaterMedia.ERR_TWITTER_MATURE) + "Failed to resolve tweet '" + tweetId + "' due to age restriction");
+            throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_TWITTER_UNAVAILABLE) + "Failed to resolve tweet '" + tweetId + "' due to unavailable tweet" + (reason == null ? " (deleted or protected)" : ": " + reason));
         }
 
         if (tweet.possiblySensitive && !WaterMediaConfig.platforms.allowMatureContent)
-            throw new MatureContentException(NAME, "Tweet '" + tweetId + "' is marked as sensitive");
+            throw new MatureContentException(NAME, DataTool.errCode(WaterMedia.ERR_TWITTER_MATURE_SENSITIVE) + "Failed to resolve tweet '" + tweetId + "' due to sensitive content mark");
 
         if (tweet.mediaDetails == null || tweet.mediaDetails.length == 0)
-            throw new PlatformException(NAME, "Tweet '" + tweetId + "' carries no media (text-only or protected)");
+            throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_TWITTER_NO_MEDIA) + "Failed to resolve tweet '" + tweetId + "' due to no media (text-only or protected)");
 
         // THE VISIBLE TWEET TEXT IS THE DESCRIPTION AND, CUT TO ONE LINE, THE TITLE; THE ACCOUNT THAT POSTED IT IS THE AUTHOR
         final String description = text(tweet.text, tweet.displayTextRange);
@@ -86,7 +87,7 @@ public final class TwitterPlatform implements Platform {
         }
 
         if (entries.isEmpty())
-            throw new PlatformException(NAME, "All " + tweet.mediaDetails.length + " media source(s) failed to resolve for tweet '" + tweetId + "'");
+            throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_TWITTER_ALL_FAILED) + "Failed to resolve tweet '" + tweetId + "' due to all " + tweet.mediaDetails.length + " media source(s) failing");
 
         LOGGER.debug(IT, "Twitter resolved {} of {} media entry(es) for tweet '{}'", entries.size(), tweet.mediaDetails.length, tweetId);
         return new Resolution(null, entries);

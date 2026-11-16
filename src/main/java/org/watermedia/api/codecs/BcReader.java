@@ -1,7 +1,9 @@
 package org.watermedia.api.codecs;
 
+import org.watermedia.WaterMedia;
 import org.watermedia.api.codecs.common.dds.DdsHeader;
 import org.watermedia.api.util.PixelFormat;
+import org.watermedia.tools.DataTool;
 
 import java.io.Closeable;
 import java.nio.ByteBuffer;
@@ -44,9 +46,9 @@ public final class BcReader implements Closeable {
         // RANGE BEFORE TRUNCATION: THE RANGE CHECK IS WHAT KEEPS THE TRUNCATION MATH AND THE int CASTS BELOW SOUND
         final long frameBytes = info.frameBytes();
         final long texLen = (long) info.arraySize() * frameBytes;
-        if (texLen > ImageReader.MAX_DECODED_BYTES) throw new CodecException("BC texture too large: " + texLen + " bytes");
+        if (texLen > ImageReader.MAX_DECODED_BYTES) throw new CodecException(DataTool.errCode(WaterMedia.ERR_BC_TEXTURE_SIZE) + "Failed to read the BC texture due to excessive size: " + texLen + " bytes");
         final long need = (long) DdsHeader.BYTES + texLen;
-        if (file.remaining() < need) throw new CodecException("Truncated BC texture: need " + need + " bytes");
+        if (file.remaining() < need) throw new CodecException(DataTool.errCode(WaterMedia.ERR_BC_TEXTURE_TRUNCATED) + "Failed to read the BC texture due to truncated data: need " + need + " bytes");
 
         final int frameLen = (int) frameBytes;
         final int base = file.position();
@@ -55,7 +57,7 @@ public final class BcReader implements Closeable {
         this.delays = DdsHeader.readFooter(file.duplicate().position(texStart + (int) texLen), info.arraySize());
         long total = 0L;
         for (final long delay: this.delays) {
-            if (delay < 0 || delay > Long.MAX_VALUE - total) throw new CodecException("Invalid BC frame delays");
+            if (delay < 0 || delay > Long.MAX_VALUE - total) throw new CodecException(DataTool.errCode(WaterMedia.ERR_BC_DELAYS) + "Failed to read the BC frame delays due to invalid values");
             total += delay;
         }
         this.duration = total;
@@ -113,7 +115,7 @@ public final class BcReader implements Closeable {
 
     /** Rewinds to the first frame; a closed reader throws {@link IllegalStateException}. */
     public void reset() {
-        if (this.closed) throw new IllegalStateException("BC reader is closed");
+        if (this.closed) throw new IllegalStateException(DataTool.errCode(WaterMedia.ERR_BC_RESET_CLOSED) + "Failed to reset the BC reader, it is closed");
         this.cursor = 0;
     }
 

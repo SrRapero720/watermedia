@@ -2,6 +2,7 @@ package org.watermedia.api.codecs.readers;
 
 import org.apache.logging.log4j.Marker;
 import org.apache.logging.log4j.MarkerManager;
+import org.watermedia.WaterMedia;
 import org.watermedia.api.codecs.CodecException;
 import org.watermedia.api.codecs.CodecsAPI;
 import org.watermedia.api.codecs.ImageData;
@@ -213,7 +214,7 @@ public final class JpegReader extends ImageReader {
         while (this.data.hasRemaining()) {
             if (marker < 0) marker = readMarker(this.data);
             switch (marker) {
-                case SOI -> throw new CodecException("Nested JPEG SOI marker");
+                case SOI -> throw new CodecException(DataTool.errCode(WaterMedia.ERR_JPEG_NESTED_SOI) + "Failed to parse the JPEG stream due to nested SOI marker");
                 case EOI -> {
                     return;
                 }
@@ -227,23 +228,23 @@ public final class JpegReader extends ImageReader {
                         case SOF9, SOF10, SOF11 -> "arithmetic coding";
                         default -> "hierarchical arithmetic coding";
                     };
-                    throw new UnsupportedFormatException("Unsupported JPEG frame type FF" + hex(marker) + " (" + process + ")");
+                    throw new UnsupportedFormatException(DataTool.errCode(WaterMedia.ERR_JPEG_FRAME_TYPE) + "Failed to decode the JPEG frame due to unsupported frame type FF" + hex(marker) + " (" + process + ")");
                 }
                 case DQT -> this.readQuantTables();
                 case DHT -> this.readHuffmanTables();
                 case DRI -> {
                     final ByteBuffer segment = this.segment();
-                    if (segment.remaining() != 2) throw new CodecException("Invalid JPEG DRI segment length " + (segment.limit() + 2));
+                    if (segment.remaining() != 2) throw new CodecException(DataTool.errCode(WaterMedia.ERR_JPEG_DRI_LENGTH) + "Failed to read the JPEG DRI segment due to invalid length: " + (segment.limit() + 2));
                     this.restartInterval = readU16(segment);
                 }
                 case SOS -> {
-                    if (++this.scans > MAX_SCANS) throw new CodecException("Too many JPEG scans (max " + MAX_SCANS + ")");
+                    if (++this.scans > MAX_SCANS) throw new CodecException(DataTool.errCode(WaterMedia.ERR_JPEG_SCAN_LIMIT) + "Failed to decode the JPEG scan due to too many scans (max " + MAX_SCANS + ")");
                     final Scan scan = this.readScanHeader();
                     final EntropyReader entropy = new EntropyReader(this.data);
                     this.decodeScan(scan, entropy);
                     // A SCAN THAT READ NO ENTROPY BYTE CANNOT HAVE MADE PROGRESS; IT ONLY REPLAYS WORK OVER
                     // THE COEFFICIENT GRID FOR FREE, SO IT IS MALFORMED RATHER THAN MERELY EMPTY
-                    if (entropy.consumed == 0) throw new CodecException("JPEG scan consumed no entropy data");
+                    if (entropy.consumed == 0) throw new CodecException(DataTool.errCode(WaterMedia.ERR_JPEG_SCAN_NO_ENTROPY) + "Failed to decode the JPEG scan due to no entropy data consumed");
                     marker = entropy.finishScan();
                     continue;
                 }
@@ -261,7 +262,7 @@ public final class JpegReader extends ImageReader {
                     // A SEGMENT WITHOUT A CONSUMER IS ONLY SKIPPED, SO ITS BODY IS DROPPED ON PURPOSE
                     if (isApp(marker)) this.readApp(marker);
                     else if (hasSegmentLength(marker)) this.segment();
-                    else if (!isRestart(marker)) throw new CodecException("Unknown JPEG marker FF" + hex(marker));
+                    else if (!isRestart(marker)) throw new CodecException(DataTool.errCode(WaterMedia.ERR_JPEG_UNKNOWN_MARKER) + "Failed to parse the JPEG stream due to unknown marker FF" + hex(marker));
                 }
             }
             marker = -1;
@@ -309,33 +310,33 @@ public final class JpegReader extends ImageReader {
         // T.81 ALLOWS EXACTLY ONE FRAME HEADER. A REPEATED SOF DROPS THE PREVIOUS COEFFICIENT ARRAYS AND
         // ALLOCATES A FRESH ZEROED SET, SO PEAK MEMORY STAYS FLAT WHILE THE JVM IS FORCED TO ALLOCATE AND
         // ZERO TENS OF GIGABYTES FROM A FEW KILOBYTES OF 19-BYTE HEADERS
-        if (this.components != null) throw new CodecException("Duplicate JPEG frame header");
+        if (this.components != null) throw new CodecException(DataTool.errCode(WaterMedia.ERR_JPEG_SOF_DUPLICATE) + "Failed to read the JPEG frame header due to duplicate frame header");
 
         final ByteBuffer segment = this.segment();
-        if (segment.remaining() < 6) throw new CodecException("Truncated JPEG frame header");
+        if (segment.remaining() < 6) throw new CodecException(DataTool.errCode(WaterMedia.ERR_JPEG_SOF_TRUNCATED) + "Failed to read the JPEG frame header due to truncated data");
         // T.81 BASELINE (SOF0) IS 8-BIT ONLY; EXTENDED AND PROGRESSIVE ALSO ALLOW 12 BITS, VALID BUT NOT IMPLEMENTED
         final int precision = readU8(segment);
-        if (precision == 12 && marker != SOF0) throw new UnsupportedFormatException("Unsupported JPEG sample precision: 12 bits");
-        if (precision != 8) throw new CodecException("Invalid JPEG sample precision for frame type FF" + hex(marker) + ": " + precision + " bits");
+        if (precision == 12 && marker != SOF0) throw new UnsupportedFormatException(DataTool.errCode(WaterMedia.ERR_JPEG_SOF_PRECISION_12) + "Failed to read the JPEG frame header due to unsupported sample precision: 12 bits");
+        if (precision != 8) throw new CodecException(DataTool.errCode(WaterMedia.ERR_JPEG_SOF_PRECISION) + "Failed to read the JPEG frame header due to invalid sample precision for frame type FF" + hex(marker) + ": " + precision + " bits");
 
         this.height = readU16(segment);
         this.width = readU16(segment);
-        if (this.height == 0 && this.width > 0) throw new UnsupportedFormatException("Unsupported JPEG height defined by a DNL marker");
+        if (this.height == 0 && this.width > 0) throw new UnsupportedFormatException(DataTool.errCode(WaterMedia.ERR_JPEG_SOF_DNL) + "Failed to read the JPEG frame header due to unsupported height defined by a DNL marker");
         // 16-BIT SOF AXES OTHERWISE OVERFLOW THE COEFFICIENT, SAMPLE AND BGRA INT MATH: A 23-BYTE HEADER
         // DECLARING 16384x16384x3 ASKS FOR 1 GiB OF COEFFICIENTS PER COMPONENT
         if (!Limits.fits(this.width, this.height))
-            throw new CodecException("Invalid JPEG dimensions: " + this.width + "x" + this.height
+            throw new CodecException(DataTool.errCode(WaterMedia.ERR_JPEG_SOF_DIMENSIONS) + "Failed to read the JPEG frame header due to invalid dimensions: " + this.width + "x" + this.height
                     + " (max " + Limits.MAX_DIM + " per axis, " + Limits.MAX_PIXELS + " pixels)");
 
         // ONE COMPONENT IS GRAYSCALE AND THREE ARE YCbCr OR RGB; TWO, FOUR (CMYK, YCCK) OR MORE ARE VALID BUT NOT IMPLEMENTED
         final int count = readU8(segment);
-        if (count == 0) throw new CodecException("JPEG frame header declares no components");
+        if (count == 0) throw new CodecException(DataTool.errCode(WaterMedia.ERR_JPEG_SOF_NO_COMPONENTS) + "Failed to read the JPEG frame header due to no declared components");
         if (count != 1 && count != 3)
-            throw new UnsupportedFormatException("Unsupported JPEG component count: " + count + (count == 4 ? " (CMYK or YCCK)" : ""));
+            throw new UnsupportedFormatException(DataTool.errCode(WaterMedia.ERR_JPEG_SOF_COMPONENT_COUNT) + "Failed to read the JPEG frame header due to unsupported component count: " + count + (count == 4 ? " (CMYK or YCCK)" : ""));
         // Lf MUST BE EXACTLY 8 + 3*Nf. WITHOUT THIS THE COMPONENT TRIPLETS BELOW ARE HAPPILY READ FROM
         // WHATEVER FOLLOWS THE SEGMENT (CVE-2013-6629 SHAPE); THE SLICE LIMIT TURNS THAT INTO A HARD ERROR
         if (segment.remaining() != count * 3)
-            throw new CodecException("Malformed JPEG frame header length " + (segment.limit() + 2)
+            throw new CodecException(DataTool.errCode(WaterMedia.ERR_JPEG_SOF_LENGTH) + "Failed to read the JPEG frame header due to malformed length: " + (segment.limit() + 2)
                     + " (expected " + (8 + count * 3) + " for " + count + " components)");
 
         this.progressive = marker == SOF2;
@@ -349,8 +350,8 @@ public final class JpegReader extends ImageReader {
             final int v = sampling & 0x0F;
             final int table = readU8(segment);
             // T.81 SAMPLING FACTORS ARE 1..4 PER AXIS AND THE RESAMPLER HANDLES EVERY SUCH LAYOUT, SO ANY OTHER IS MALFORMED
-            if (h <= 0 || v <= 0 || h > 4 || v > 4) throw new CodecException("Invalid JPEG sampling factor " + h + "x" + v);
-            if (table >= this.quantTables.length) throw new CodecException("Invalid JPEG quantization table " + table);
+            if (h <= 0 || v <= 0 || h > 4 || v > 4) throw new CodecException(DataTool.errCode(WaterMedia.ERR_JPEG_SOF_SAMPLING) + "Failed to read the JPEG frame header due to invalid sampling factor: " + h + "x" + v);
+            if (table >= this.quantTables.length) throw new CodecException(DataTool.errCode(WaterMedia.ERR_JPEG_SOF_QUANT_TABLE) + "Failed to read the JPEG frame header due to invalid quantization table: " + table);
             this.components[i] = new Component(id, h, v, table);
             this.maxH = Math.max(this.maxH, h);
             this.maxV = Math.max(this.maxV, v);
@@ -374,7 +375,7 @@ public final class JpegReader extends ImageReader {
         // SUM THE WHOLE FRAME IN long BEFORE THE FIRST ALLOCATION: PER-AXIS AND PER-PIXEL CAPS BOUND ONE
         // COMPONENT, NOT THE SUM OVER COMPONENTS, AND EVERY int PRODUCT BELOW IS ONLY SAFE ONCE THIS PASSES
         if (frameBytes > MAX_FRAME_BYTES)
-            throw new CodecException("JPEG frame needs " + frameBytes + " bytes to decode (max " + MAX_FRAME_BYTES + ")");
+            throw new CodecException(DataTool.errCode(WaterMedia.ERR_JPEG_FRAME_TOO_BIG) + "Failed to decode the JPEG frame due to excessive size: " + frameBytes + " bytes needed (max " + MAX_FRAME_BYTES + ")");
         for (final Component component: this.components) {
             component.coefficients = new int[component.blocksX * component.blocksY * 64];
         }
@@ -386,11 +387,11 @@ public final class JpegReader extends ImageReader {
             final int info = readU8(segment);
             final int precision = info >>> 4;
             final int table = info & 0x0F;
-            if (table >= this.quantTables.length) throw new CodecException("Invalid JPEG quantization table " + table);
+            if (table >= this.quantTables.length) throw new CodecException(DataTool.errCode(WaterMedia.ERR_JPEG_DQT_TABLE) + "Failed to read the JPEG DQT segment due to invalid quantization table: " + table);
             final int bytes = precision == 0 ? 64 : precision == 1 ? 128 : -1;
-            if (bytes < 0) throw new CodecException("Invalid JPEG quantization table precision " + precision);
+            if (bytes < 0) throw new CodecException(DataTool.errCode(WaterMedia.ERR_JPEG_DQT_PRECISION) + "Failed to read the JPEG DQT segment due to invalid quantization table precision: " + precision);
             if (segment.remaining() < bytes)
-                throw new CodecException("Truncated JPEG quantization table " + table + ": " + bytes
+                throw new CodecException(DataTool.errCode(WaterMedia.ERR_JPEG_DQT_TRUNCATED) + "Failed to read the JPEG DQT segment due to truncated quantization table " + table + ": " + bytes
                         + " bytes declared, " + segment.remaining() + " left in segment");
 
             final int[] values = new int[64];
@@ -407,11 +408,11 @@ public final class JpegReader extends ImageReader {
             final int info = readU8(segment);
             final int type = info >>> 4;
             final int table = info & 0x0F;
-            if (type > 1 || table >= 4) throw new CodecException("Invalid JPEG Huffman table");
+            if (type > 1 || table >= 4) throw new CodecException(DataTool.errCode(WaterMedia.ERR_JPEG_DHT_TABLE) + "Failed to read the JPEG DHT segment due to invalid Huffman table");
             // THE 16 CODE-LENGTH COUNTS MUST FIT IN THIS SEGMENT. READ FROM THE PARENT BUFFER A THREE-BYTE
             // DHT WOULD ADOPT THE FOLLOWING MARKER AS TABLE DATA INSTEAD OF FAILING (CVE-2013-6629 SHAPE)
             if (segment.remaining() < 16)
-                throw new CodecException("Truncated JPEG Huffman table: 16 code counts needed, "
+                throw new CodecException(DataTool.errCode(WaterMedia.ERR_JPEG_DHT_COUNTS_TRUNCATED) + "Failed to read the JPEG DHT segment due to truncated Huffman table: 16 code counts needed, "
                         + segment.remaining() + " left in segment");
 
             final int[] counts = new int[17];
@@ -421,7 +422,7 @@ public final class JpegReader extends ImageReader {
                 symbols += counts[i];
             }
             if (segment.remaining() < symbols)
-                throw new CodecException("Truncated JPEG Huffman table: " + symbols + " symbols declared, "
+                throw new CodecException(DataTool.errCode(WaterMedia.ERR_JPEG_DHT_SYMBOLS_TRUNCATED) + "Failed to read the JPEG DHT segment due to truncated Huffman table: " + symbols + " symbols declared, "
                         + segment.remaining() + " left in segment");
             final int[] values = new int[symbols];
             for (int i = 0; i < symbols; i++) values[i] = readU8(segment);
@@ -430,14 +431,14 @@ public final class JpegReader extends ImageReader {
     }
 
     private Scan readScanHeader() throws CodecException {
-        if (this.components == null) throw new CodecException("JPEG scan before frame header");
+        if (this.components == null) throw new CodecException(DataTool.errCode(WaterMedia.ERR_JPEG_SOS_BEFORE_SOF) + "Failed to read the JPEG scan header due to scan before frame header");
         final ByteBuffer segment = this.segment();
-        if (!segment.hasRemaining()) throw new CodecException("Truncated JPEG scan header");
+        if (!segment.hasRemaining()) throw new CodecException(DataTool.errCode(WaterMedia.ERR_JPEG_SOS_TRUNCATED) + "Failed to read the JPEG scan header due to truncated data");
         final int count = readU8(segment);
-        if (count <= 0 || count > this.components.length) throw new CodecException("Invalid JPEG scan component count");
+        if (count <= 0 || count > this.components.length) throw new CodecException(DataTool.errCode(WaterMedia.ERR_JPEG_SOS_COMPONENT_COUNT) + "Failed to read the JPEG scan header due to invalid component count");
         // Ls MUST BE EXACTLY 6 + 2*Ns: Ns COMPONENT PAIRS PLUS Ss, Se AND THE APPROXIMATION BYTE
         if (segment.remaining() != count * 2 + 3)
-            throw new CodecException("Malformed JPEG scan header length " + (segment.limit() + 2)
+            throw new CodecException(DataTool.errCode(WaterMedia.ERR_JPEG_SOS_LENGTH) + "Failed to read the JPEG scan header due to malformed length: " + (segment.limit() + 2)
                     + " (expected " + (6 + count * 2) + " for " + count + " components)");
 
         final Component[] scanComponents = new Component[count];
@@ -449,7 +450,7 @@ public final class JpegReader extends ImageReader {
             // TABLE DESTINATION SELECTORS ARE 4-BIT FIELDS BUT ONLY 0..3 ARE VALID; huffmanTables IS [2][4],
             // SO AN UNCHECKED 4..15 SELECTOR INDEXES OUT OF BOUNDS (AIOOBE ESCAPING THE IOException CONTRACT)
             if (component.dcTable > 3 || component.acTable > 3)
-                throw new CodecException("Invalid JPEG scan table selector " + component.dcTable + "/" + component.acTable);
+                throw new CodecException(DataTool.errCode(WaterMedia.ERR_JPEG_SOS_SELECTOR) + "Failed to read the JPEG scan header due to invalid table selector: " + component.dcTable + "/" + component.acTable);
             scanComponents[i] = component;
         }
         final int ss = readU8(segment);
@@ -462,7 +463,7 @@ public final class JpegReader extends ImageReader {
         for (final Component component: this.components) {
             if (component.id == id) return component;
         }
-        throw new CodecException("JPEG scan references unknown component " + id);
+        throw new CodecException(DataTool.errCode(WaterMedia.ERR_JPEG_SOS_UNKNOWN_COMPONENT) + "Failed to read the JPEG scan header due to unknown component: " + id);
     }
 
     // READS THE SEGMENT LENGTH AND RETURNS A VIEW BOUNDED TO ITS BODY, LEAVING THE PARENT BUFFER POSITIONED
@@ -470,10 +471,10 @@ public final class JpegReader extends ImageReader {
     // INSIDE THE SLICE INSTEAD OF QUIETLY CONSUMING THE BYTES OF WHATEVER FOLLOWS.
     private ByteBuffer segment() throws CodecException {
         final int length = readU16(this.data);
-        if (length < 2) throw new CodecException("Invalid JPEG segment length " + length);
+        if (length < 2) throw new CodecException(DataTool.errCode(WaterMedia.ERR_JPEG_SEGMENT_LENGTH) + "Failed to read the JPEG segment due to invalid length: " + length);
         final int body = length - 2;
         if (this.data.remaining() < body)
-            throw new CodecException("Truncated JPEG segment: " + body + " bytes declared, "
+            throw new CodecException(DataTool.errCode(WaterMedia.ERR_JPEG_SEGMENT_TRUNCATED) + "Failed to read the JPEG segment due to truncated data: " + body + " bytes declared, "
                     + this.data.remaining() + " available");
         final ByteBuffer segment = this.data.slice(this.data.position(), body);
         this.data.position(this.data.position() + body);
@@ -492,12 +493,12 @@ public final class JpegReader extends ImageReader {
 
         final boolean dcBand = scan.ss == 0 && scan.se == 0;
         if (!dcBand) {
-            if (scan.components.length != 1) throw new CodecException("Progressive AC scan must contain one component");
-            if (scan.ss < 1 || scan.se > 63 || scan.ss > scan.se) throw new CodecException("Invalid progressive AC range");
+            if (scan.components.length != 1) throw new CodecException(DataTool.errCode(WaterMedia.ERR_JPEG_PROGRESSIVE_AC_COMPONENTS) + "Failed to decode the progressive JPEG scan, an AC scan must contain one component");
+            if (scan.ss < 1 || scan.se > 63 || scan.ss > scan.se) throw new CodecException(DataTool.errCode(WaterMedia.ERR_JPEG_PROGRESSIVE_AC_RANGE) + "Failed to decode the progressive JPEG scan due to invalid AC range");
         }
         // SUCCESSIVE APPROXIMATION (T.81 G.1.1.1.2): A REFINEMENT SCAN LOWERS THE POINT TRANSFORM BY EXACTLY ONE BIT
         if (scan.al > MAX_APPROXIMATION || (scan.ah != 0 && scan.ah != scan.al + 1))
-            throw new CodecException("Invalid JPEG successive approximation Ah=" + scan.ah + " Al=" + scan.al);
+            throw new CodecException(DataTool.errCode(WaterMedia.ERR_JPEG_PROGRESSIVE_APPROXIMATION) + "Failed to decode the progressive JPEG scan due to invalid successive approximation: Ah=" + scan.ah + " Al=" + scan.al);
 
         // SCAN-ORDERING GATE: approx[k] IS THE POINT TRANSFORM COEFFICIENT k WAS LAST CODED AT (-1 NEVER). A LONE REFINEMENT
         // SCAN WOULD REFINE AN ALL-ZERO ARRAY, refineNonZero() WALKING 63 POSITIONS PER BLOCK FOR NO BITS (ONE 15-BIT EOB
@@ -506,9 +507,9 @@ public final class JpegReader extends ImageReader {
             for (int k = scan.ss; k <= scan.se; k++) {
                 if (scan.ah == 0) {
                     if (component.approx[k] >= 0)
-                        throw new CodecException("Duplicate JPEG first pass on component " + component.id + " coefficient " + k);
+                        throw new CodecException(DataTool.errCode(WaterMedia.ERR_JPEG_PROGRESSIVE_FIRST_PASS) + "Failed to decode the progressive JPEG scan due to duplicate first pass on component " + component.id + " coefficient " + k);
                 } else if (component.approx[k] != scan.ah) {
-                    throw new CodecException("JPEG refinement scan on component " + component.id + " coefficient " + k
+                    throw new CodecException(DataTool.errCode(WaterMedia.ERR_JPEG_PROGRESSIVE_REFINEMENT) + "Failed to decode the progressive JPEG scan due to refinement scan on component " + component.id + " coefficient " + k
                             + " has no preceding pass at Al=" + scan.ah);
                 }
                 component.approx[k] = scan.al;
@@ -575,7 +576,7 @@ public final class JpegReader extends ImageReader {
         final int bits = table.decode(entropy);
         // DC MAGNITUDE CATEGORY (SSSS) IS 0..15; A CORRUPT TABLE CAN YIELD ANY BYTE, SO REJECT OUT-OF-RANGE
         // INSTEAD OF FEEDING A BOGUS BIT COUNT INTO receiveExtend
-        if (bits > 15) throw new CodecException("Invalid JPEG DC magnitude category " + bits);
+        if (bits > 15) throw new CodecException(DataTool.errCode(WaterMedia.ERR_JPEG_DC_CATEGORY) + "Failed to decode the JPEG DC coefficient due to invalid magnitude category: " + bits);
         component.dc += entropy.receiveExtend(bits);
         component.coefficients[block] = component.dc << shift;
     }
@@ -594,7 +595,7 @@ public final class JpegReader extends ImageReader {
             try {
                 symbol = table.decode(entropy);
             } catch (final CodecException e) {
-                throw new CodecException("Invalid JPEG AC Huffman code for component " +
+                throw new CodecException(DataTool.errCode(WaterMedia.ERR_JPEG_AC_HUFFMAN) + "Failed to decode the JPEG AC coefficients due to invalid Huffman code for component " +
                         component.id + " block " + (block / 64) + " range " + start + "-" + end +
                         " shift " + shift, e);
             }
@@ -609,7 +610,7 @@ public final class JpegReader extends ImageReader {
                 return;
             }
             k += run;
-            if (k > end) throw new CodecException("JPEG AC run exceeds spectral selection");
+            if (k > end) throw new CodecException(DataTool.errCode(WaterMedia.ERR_JPEG_AC_RUN) + "Failed to decode the JPEG AC coefficients due to a run exceeding the spectral selection");
             component.coefficients[block + ZIGZAG[k]] = entropy.receiveExtend(bits) << shift;
             k++;
         }
@@ -631,7 +632,7 @@ public final class JpegReader extends ImageReader {
             try {
                 symbol = table.decode(entropy);
             } catch (final CodecException e) {
-                throw new CodecException("Invalid JPEG AC refinement Huffman code for component " +
+                throw new CodecException(DataTool.errCode(WaterMedia.ERR_JPEG_AC_REFINE_HUFFMAN) + "Failed to refine the JPEG AC coefficients due to invalid Huffman code for component " +
                         component.id + " block " + (block / 64) + " range " + start + "-" + end +
                         " shift " + shift, e);
             }
@@ -650,7 +651,7 @@ public final class JpegReader extends ImageReader {
             } else if (bits == 1) {
                 value = entropy.readBit() == 1 ? bit : -bit;
             } else {
-                throw new CodecException("Invalid JPEG progressive refinement symbol");
+                throw new CodecException(DataTool.errCode(WaterMedia.ERR_JPEG_AC_REFINE_SYMBOL) + "Failed to refine the JPEG AC coefficients due to invalid progressive refinement symbol");
             }
 
             while (k <= end) {
@@ -665,7 +666,7 @@ public final class JpegReader extends ImageReader {
                 k++;
             }
             if (value != 0) {
-                if (k > end) throw new CodecException("JPEG refinement run exceeds spectral selection");
+                if (k > end) throw new CodecException(DataTool.errCode(WaterMedia.ERR_JPEG_AC_REFINE_RUN) + "Failed to refine the JPEG AC coefficients due to a run exceeding the spectral selection");
                 component.coefficients[block + ZIGZAG[k]] = value;
             }
             k++;
@@ -736,11 +737,11 @@ public final class JpegReader extends ImageReader {
     private void validateTables(final Scan scan) throws CodecException {
         for (final Component component: scan.components) {
             if (this.quantTables[component.quantTable] == null)
-                throw new CodecException("Missing JPEG quantization table " + component.quantTable);
+                throw new CodecException(DataTool.errCode(WaterMedia.ERR_JPEG_MISSING_QUANT) + "Failed to decode the JPEG scan due to missing quantization table: " + component.quantTable);
             if (this.huffmanTables[0][component.dcTable] == null)
-                throw new CodecException("Missing JPEG DC Huffman table " + component.dcTable);
+                throw new CodecException(DataTool.errCode(WaterMedia.ERR_JPEG_MISSING_DC_HUFFMAN) + "Failed to decode the JPEG scan due to missing DC Huffman table: " + component.dcTable);
             if ((scan.se > 0 || !this.progressive) && this.huffmanTables[1][component.acTable] == null)
-                throw new CodecException("Missing JPEG AC Huffman table " + component.acTable);
+                throw new CodecException(DataTool.errCode(WaterMedia.ERR_JPEG_MISSING_AC_HUFFMAN) + "Failed to decode the JPEG scan due to missing AC Huffman table: " + component.acTable);
         }
     }
 
@@ -748,7 +749,7 @@ public final class JpegReader extends ImageReader {
     // FRAME OUTPUT
     // ==========================================================================
     private void buildFrame() throws IOException {
-        if (this.components == null) throw new CodecException("JPEG frame header not found");
+        if (this.components == null) throw new CodecException(DataTool.errCode(WaterMedia.ERR_JPEG_FRAME_NOT_FOUND) + "Failed to build the JPEG frame due to frame header not found");
         for (final Component component: this.components) this.buildComponent(component);
 
         // GRAYSCALE STAYS ONE FULL-RANGE LUMA BYTE PER PIXEL UNLESS BGRA WAS ASKED FOR; COLOR (FULL-RANGE BT.601) IS
@@ -813,7 +814,7 @@ public final class JpegReader extends ImageReader {
 
     private void buildComponent(final Component component) throws CodecException {
         final int[] quant = this.quantTables[component.quantTable];
-        if (quant == null) throw new CodecException("Missing JPEG quantization table " + component.quantTable);
+        if (quant == null) throw new CodecException(DataTool.errCode(WaterMedia.ERR_JPEG_COMPONENT_QUANT) + "Failed to build the JPEG component due to missing quantization table: " + component.quantTable);
 
         final int sampleWidth = component.blocksX * 8;
         final int sampleHeight = component.blocksY * 8;
@@ -1035,13 +1036,13 @@ public final class JpegReader extends ImageReader {
             if (readU8(input) != 0xFF) continue;
             int marker;
             do {
-                if (!input.hasRemaining()) throw new CodecException("Truncated JPEG marker");
+                if (!input.hasRemaining()) throw new CodecException(DataTool.errCode(WaterMedia.ERR_JPEG_MARKER_TRUNCATED) + "Failed to read the JPEG marker due to truncated data");
                 marker = readU8(input);
             } while (marker == 0xFF);
             if (marker == 0x00) continue;
             return marker;
         }
-        throw new CodecException("JPEG marker not found");
+        throw new CodecException(DataTool.errCode(WaterMedia.ERR_JPEG_MARKER_NOT_FOUND) + "Failed to read the JPEG marker due to marker not found");
     }
 
     private static boolean hasSegmentLength(final int marker) {
@@ -1057,7 +1058,7 @@ public final class JpegReader extends ImageReader {
     }
 
     private static int readU8(final ByteBuffer input) throws CodecException {
-        if (!input.hasRemaining()) throw new CodecException("Unexpected JPEG EOF");
+        if (!input.hasRemaining()) throw new CodecException(DataTool.errCode(WaterMedia.ERR_JPEG_UNEXPECTED_EOF) + "Failed to read the JPEG stream due to unexpected end of data");
         return input.get() & 0xFF;
     }
 
@@ -1148,7 +1149,7 @@ public final class JpegReader extends ImageReader {
                     // REJECT AN OVERSUBSCRIBED (NON-CANONICAL) CODE: MORE CODES AT THIS LENGTH THAN THE
                     // CODE SPACE ALLOWS OVERFLOWS THE LUT PREFIX ((code+n) << (LUT_BITS-length)) PAST 255
                     // AND THE values[] INDEXING: AN AIOOBE THAT WOULD ESCAPE THE IOException CONTRACT
-                    if (code + count > (1 << length)) throw new CodecException("Oversubscribed JPEG Huffman table");
+                    if (code + count > (1 << length)) throw new CodecException(DataTool.errCode(WaterMedia.ERR_JPEG_HUFFMAN_OVERSUBSCRIBED) + "Failed to build the JPEG Huffman table due to oversubscribed codes");
                     this.maxCode[length] = code + count - 1;
                     this.valueOffset[length] = index - code;
                     // FILL LOOKUP TABLE FOR CODES THAT FIT IN LUT_BITS
@@ -1185,7 +1186,7 @@ public final class JpegReader extends ImageReader {
                 code = (code << 1) | r.readBit();
                 if (code <= this.maxCode[length]) return this.values[this.valueOffset[length] + code];
             }
-            throw new CodecException("Invalid JPEG Huffman code");
+            throw new CodecException(DataTool.errCode(WaterMedia.ERR_JPEG_HUFFMAN_CODE) + "Failed to decode the JPEG Huffman code due to invalid code");
         }
     }
 
@@ -1209,7 +1210,7 @@ public final class JpegReader extends ImageReader {
                 if (v == 0xFF) {
                     int marker;
                     do {
-                        if (!this.input.hasRemaining()) throw new CodecException("Truncated JPEG entropy stream");
+                        if (!this.input.hasRemaining()) throw new CodecException(DataTool.errCode(WaterMedia.ERR_JPEG_ENTROPY_TRUNCATED) + "Failed to read the JPEG entropy stream due to truncated data");
                         marker = this.input.get() & 0xFF;
                     } while (marker == 0xFF);
                     if (marker != 0x00) {
@@ -1229,7 +1230,7 @@ public final class JpegReader extends ImageReader {
         int readBit() throws CodecException {
             if (this.bitCount == 0) {
                 this.refill();
-                if (this.bitCount == 0) throw new CodecException("Unexpected JPEG marker FF" + hex(this.pendingMarker) + " in entropy stream");
+                if (this.bitCount == 0) throw new CodecException(DataTool.errCode(WaterMedia.ERR_JPEG_ENTROPY_MARKER_BIT) + "Failed to read the JPEG entropy stream due to unexpected marker FF" + hex(this.pendingMarker));
             }
             this.bitCount--;
             return (int) (this.bitBuf >>> this.bitCount) & 1;
@@ -1239,7 +1240,7 @@ public final class JpegReader extends ImageReader {
             if (count == 0) return 0;
             if (this.bitCount < count) {
                 this.refill();
-                if (this.bitCount < count) throw new CodecException("Unexpected JPEG marker FF" + hex(this.pendingMarker) + " in entropy stream");
+                if (this.bitCount < count) throw new CodecException(DataTool.errCode(WaterMedia.ERR_JPEG_ENTROPY_MARKER_BITS) + "Failed to read the JPEG entropy stream due to unexpected marker FF" + hex(this.pendingMarker));
             }
             this.bitCount -= count;
             return (int) (this.bitBuf >>> this.bitCount) & ((1 << count) - 1);
@@ -1286,13 +1287,13 @@ public final class JpegReader extends ImageReader {
                     final int value = readU8(this.input);
                     if (value != 0xFF) continue;
                     do {
-                        if (!this.input.hasRemaining()) throw new CodecException("Truncated JPEG restart marker");
+                        if (!this.input.hasRemaining()) throw new CodecException(DataTool.errCode(WaterMedia.ERR_JPEG_RESTART_TRUNCATED) + "Failed to read the JPEG restart marker due to truncated data");
                         marker = readU8(this.input);
                     } while (marker == 0xFF);
                     break;
                 }
             }
-            if (!isRestart(marker)) throw new CodecException("Expected JPEG restart marker");
+            if (!isRestart(marker)) throw new CodecException(DataTool.errCode(WaterMedia.ERR_JPEG_RESTART_EXPECTED) + "Failed to read the JPEG restart marker due to a different marker found");
         }
     }
 }

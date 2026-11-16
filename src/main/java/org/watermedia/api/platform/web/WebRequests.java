@@ -1,9 +1,11 @@
 package org.watermedia.api.platform.web;
 
+import org.watermedia.WaterMedia;
 import org.watermedia.api.platform.Platform.Quality;
 import org.watermedia.api.platform.PlatformException;
 import org.watermedia.api.util.HttpHeaders;
 import org.watermedia.api.util.NetRequest;
+import org.watermedia.tools.DataTool;
 import org.watermedia.tools.M3UTool;
 
 import java.io.IOException;
@@ -30,7 +32,7 @@ final class WebRequests {
     static <T> T fetchJson(final String platform, final String uri, final Class<T> type) throws PlatformException {
         final URI target;
         try { target = URI.create(uri); }
-        catch (final IllegalArgumentException malformed) { throw new PlatformException(platform, "Malformed API URL " + uri, malformed); }
+        catch (final IllegalArgumentException malformed) { throw new PlatformException(platform, DataTool.errCode(WaterMedia.ERR_WEBREQUESTS_URL_MALFORMED) + "Failed to create the request due to malformed API URL: " + uri, malformed); }
         return fetchJson(platform, new NetRequest(target).accept(NetRequest.ACCEPT_JSON), type);
     }
 
@@ -40,15 +42,15 @@ final class WebRequests {
         final URI uri = request.uri();
         try (final NetRequest req = request.send()) {
             if (req.statusCode() != 200)
-                throw new PlatformException(platform, "API " + uri + " returned HTTP " + req.statusCode());
+                throw new PlatformException(platform, DataTool.errCode(WaterMedia.ERR_WEBREQUESTS_API_STATUS) + "Failed to fetch API " + uri + " due to HTTP " + req.statusCode());
             final T data = req.json(type);
             if (data == null)
-                throw new PlatformException(platform, "API " + uri + " returned an empty or non-JSON body");
+                throw new PlatformException(platform, DataTool.errCode(WaterMedia.ERR_WEBREQUESTS_API_BODY) + "Failed to fetch API " + uri + " due to an empty or non-JSON body");
             return data;
         } catch (final PlatformException e) {
             throw e;
         } catch (final IOException | RuntimeException e) {
-            throw new PlatformException(platform, "Failed to fetch " + uri, e);
+            throw new PlatformException(platform, DataTool.errCode(WaterMedia.ERR_WEBREQUESTS_FETCH) + "Failed to fetch " + uri, e);
         }
     }
 

@@ -1,9 +1,11 @@
 package org.watermedia.api.codecs.common.dds;
 
+import org.watermedia.WaterMedia;
 import org.watermedia.api.codecs.CodecException;
 import org.watermedia.api.codecs.UnsupportedFormatException;
 import org.watermedia.api.codecs.common.Limits;
 import org.watermedia.api.util.PixelFormat;
+import org.watermedia.tools.DataTool;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -67,27 +69,27 @@ public final class DdsHeader {
      */
     public static Info read(final ByteBuffer src) throws CodecException {
         final int base = src.position();
-        if (src.remaining() < BYTES) throw new CodecException("Truncated DDS: " + src.remaining() + " bytes");
+        if (src.remaining() < BYTES) throw new CodecException(DataTool.errCode(WaterMedia.ERR_DDS_HEADER_TRUNCATED) + "Failed to read the DDS header due to truncated data: " + src.remaining() + " bytes");
         final ByteBuffer b = src.duplicate().order(ByteOrder.LITTLE_ENDIAN);
-        if (b.getInt(base) != MAGIC) throw new CodecException("Not a DDS container");
+        if (b.getInt(base) != MAGIC) throw new CodecException(DataTool.errCode(WaterMedia.ERR_DDS_MAGIC) + "Failed to read the DDS header due to invalid magic, it is not a DDS container");
         if (b.getInt(base + 4) != HEADER_SIZE || b.getInt(base + 76) != PIXEL_FORMAT_SIZE || (b.getInt(base + 108) & DDSCAPS_TEXTURE) == 0)
-            throw new CodecException("Malformed DDS header: size " + b.getInt(base + 4) + ", pixel format size " + b.getInt(base + 76)
+            throw new CodecException(DataTool.errCode(WaterMedia.ERR_DDS_HEADER_MALFORMED) + "Failed to read the DDS header due to malformed structure: size " + b.getInt(base + 4) + ", pixel format size " + b.getInt(base + 76)
                     + ", caps 0x" + Integer.toHexString(b.getInt(base + 108)));
         // A LEGACY HEADER NAMES ITS LAYOUT WITH A D3D9 FOURCC OR CHANNEL MASKS INSTEAD OF THE DX10 DXGI FORMAT
         if ((b.getInt(base + 80) & DDPF_FOURCC) == 0 || b.getInt(base + 84) != FOURCC_DX10)
-            throw new UnsupportedFormatException("Unsupported legacy DDS header: only DX10-extended files are read");
+            throw new UnsupportedFormatException(DataTool.errCode(WaterMedia.ERR_DDS_LEGACY) + "Failed to read the DDS header due to unsupported legacy header, only DX10-extended files are read");
 
         // THE BLOCK SLICES BELOW REPRESENT ONLY TOP-LEVEL 2D TEXTURES; MIPS, VOLUMES, 1D AND CUBES ARE VALID BUT UNREAD
         final int depth = b.getInt(base + 24);
         final int mips = b.getInt(base + 28);
         final int dimension = b.getInt(base + 132);
-        if (depth < 0 || mips < 0) throw new CodecException("Invalid DDS depth " + Integer.toUnsignedString(depth)
+        if (depth < 0 || mips < 0) throw new CodecException(DataTool.errCode(WaterMedia.ERR_DDS_DEPTH) + "Failed to read the DDS header due to invalid depth " + Integer.toUnsignedString(depth)
                 + " or mip count " + Integer.toUnsignedString(mips));
-        if (mips > 1) throw new UnsupportedFormatException("Unsupported DDS mip chain: " + mips + " levels");
-        if (depth > 1 || dimension == DX10_RESOURCE_DIMENSION_TEXTURE3D) throw new UnsupportedFormatException("Unsupported DDS volume texture");
-        if (dimension == DX10_RESOURCE_DIMENSION_TEXTURE1D) throw new UnsupportedFormatException("Unsupported DDS 1D texture");
-        if (dimension != DX10_RESOURCE_DIMENSION_TEXTURE2D) throw new CodecException("Invalid DDS resource dimension: " + dimension);
-        if ((b.getInt(base + 136) & DX10_RESOURCE_MISC_TEXTURECUBE) != 0) throw new UnsupportedFormatException("Unsupported DDS cube map");
+        if (mips > 1) throw new UnsupportedFormatException(DataTool.errCode(WaterMedia.ERR_DDS_MIPS) + "Failed to read the DDS header due to unsupported mip chain: " + mips + " levels");
+        if (depth > 1 || dimension == DX10_RESOURCE_DIMENSION_TEXTURE3D) throw new UnsupportedFormatException(DataTool.errCode(WaterMedia.ERR_DDS_VOLUME) + "Failed to read the DDS header due to unsupported volume texture");
+        if (dimension == DX10_RESOURCE_DIMENSION_TEXTURE1D) throw new UnsupportedFormatException(DataTool.errCode(WaterMedia.ERR_DDS_TEXTURE_1D) + "Failed to read the DDS header due to unsupported 1D texture");
+        if (dimension != DX10_RESOURCE_DIMENSION_TEXTURE2D) throw new CodecException(DataTool.errCode(WaterMedia.ERR_DDS_DIMENSION) + "Failed to read the DDS header due to invalid resource dimension: " + dimension);
+        if ((b.getInt(base + 136) & DX10_RESOURCE_MISC_TEXTURECUBE) != 0) throw new UnsupportedFormatException(DataTool.errCode(WaterMedia.ERR_DDS_CUBE_MAP) + "Failed to read the DDS header due to unsupported cube map");
 
         final int height = b.getInt(base + 12);
         final int width = b.getInt(base + 16);
@@ -98,15 +100,15 @@ public final class DdsHeader {
             case DXGI_BC3_UNORM -> PixelFormat.BC3;
             case DXGI_BC7_UNORM -> PixelFormat.BC7;
             // DXGI_FORMAT_UNKNOWN (0) NAMES NO LAYOUT AT ALL; EVERY OTHER VALUE IS A FORMAT THIS READER DOES NOT CARRY
-            default -> throw dxgi <= 0 ? new CodecException("Invalid DDS DXGI format: " + dxgi)
-                    : new UnsupportedFormatException("Unsupported DDS DXGI format: " + dxgi + " (only BC1, BC3 and BC7 UNORM are read)");
+            default -> throw dxgi <= 0 ? new CodecException(DataTool.errCode(WaterMedia.ERR_DDS_DXGI_INVALID) + "Failed to read the DDS header due to invalid DXGI format: " + dxgi)
+                    : new UnsupportedFormatException(DataTool.errCode(WaterMedia.ERR_DDS_DXGI_UNSUPPORTED) + "Failed to read the DDS header due to unsupported DXGI format: " + dxgi + " (only BC1, BC3 and BC7 UNORM are read)");
         };
         // A PER-AXIS CAP IS NOT A BUDGET: THE BLOCK COUNT, AND EVERY ALLOCATION DERIVED FROM IT, IS THE PRODUCT
         if (!Limits.fits(width, height))
-            throw new CodecException("Invalid DDS dimensions: " + width + "x" + height
+            throw new CodecException(DataTool.errCode(WaterMedia.ERR_DDS_SIZE) + "Failed to read the DDS header due to invalid dimensions: " + width + "x" + height
                     + " (max " + Limits.MAX_DIM + " per axis, " + Limits.MAX_PIXELS + " pixels)");
         if (arraySize <= 0 || arraySize > MAX_ARRAY_SIZE)
-            throw new CodecException("Invalid DDS arraySize: " + arraySize + " (max " + MAX_ARRAY_SIZE + ")");
+            throw new CodecException(DataTool.errCode(WaterMedia.ERR_DDS_ARRAY_SIZE) + "Failed to read the DDS header due to invalid arraySize: " + arraySize + " (max " + MAX_ARRAY_SIZE + ")");
         return new Info(width, height, format, arraySize);
     }
 
@@ -120,15 +122,15 @@ public final class DdsHeader {
     public static long[] readFooter(final ByteBuffer src, final int expectedCount) throws CodecException {
         // THE ARRAY-SIZE CAP BOUNDS THE ZERO-DELAY ARRAY OF AN ABSENT FOOTER AND KEEPS THE SIZE MATH BELOW IN int RANGE
         if (expectedCount < 0 || expectedCount > MAX_ARRAY_SIZE)
-            throw new IllegalArgumentException("Frame count must be within [0, " + MAX_ARRAY_SIZE + "], got " + expectedCount);
+            throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_DDS_FOOTER_COUNT_RANGE) + "Failed to read the DDS footer due to frame count out of range [0, " + MAX_ARRAY_SIZE + "]: " + expectedCount);
         final ByteBuffer b = src.duplicate().order(ByteOrder.LITTLE_ENDIAN);
         // ONLY THE MAGIC CLAIMS THE TRAILING BYTES AS A FOOTER; ANYTHING ELSE AFTER THE TEXTURE IS IGNORED
         if (b.remaining() < Integer.BYTES || b.getInt(b.position()) != FOOTER_MAGIC) return new long[expectedCount];
-        if (FOOTER_HEAD_BYTES + expectedCount * Long.BYTES > b.remaining()) throw new CodecException("Truncated DDS footer");
+        if (FOOTER_HEAD_BYTES + expectedCount * Long.BYTES > b.remaining()) throw new CodecException(DataTool.errCode(WaterMedia.ERR_DDS_FOOTER_TRUNCATED) + "Failed to read the DDS footer due to truncated data");
         b.position(b.position() + Integer.BYTES);
-        if (b.getInt() != FOOTER_VERSION) throw new CodecException("Unsupported DDS footer version");
+        if (b.getInt() != FOOTER_VERSION) throw new CodecException(DataTool.errCode(WaterMedia.ERR_DDS_FOOTER_VERSION) + "Failed to read the DDS footer due to unsupported version");
         final int count = b.getInt();
-        if (count != expectedCount) throw new CodecException("DDS footer frame count mismatch: " + count + " != " + expectedCount);
+        if (count != expectedCount) throw new CodecException(DataTool.errCode(WaterMedia.ERR_DDS_FOOTER_COUNT) + "Failed to read the DDS footer due to frame count mismatch: " + count + " != " + expectedCount);
         final long[] delays = new long[count];
         for (int i = 0; i < count; i++) delays[i] = b.getLong();
         return delays;

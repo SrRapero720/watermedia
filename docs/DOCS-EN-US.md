@@ -290,6 +290,9 @@ The project loggers are `watermedia` and `watermedia_binaries`; set those names 
 - A problem that repeats (a short buffer, a refused layout, a failing callback, a rejected upload) is logged only the
   first time in each engine, player, server or cache. Slow iterations are counted and reported once at the end.
 - _FFmpeg_ still writes its own logs to the error output, outside the project loggers and their secret filter.
+- Every exception message and error line carries a code such as `(wm_err:0720)`. Each code is a `WaterMedia.ERR_*`
+  constant that names one place in WATERMeDIA, so quote it in bug reports; the app's **Upload Logs** lists the ones
+  it finds.
 - `-Dwatermedia.glchecks=true` turns on OpenGL error checks when uploading frames.
 
 `src/test/java/org/watermedia/ApiGuideExample.java` has compiling examples for every engine and for synchronized

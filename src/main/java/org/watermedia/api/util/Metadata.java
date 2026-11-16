@@ -1,6 +1,8 @@
 package org.watermedia.api.util;
 
+import org.watermedia.WaterMedia;
 import org.watermedia.api.player.MRL;
+import org.watermedia.tools.DataTool;
 
 import java.time.Instant;
 
@@ -19,6 +21,6 @@ import java.time.Instant;
  */
 public record Metadata(String title, String description, Instant postedAt, long durationMs, String author) {
     public Metadata {
-        if (durationMs < 0) throw new IllegalArgumentException("Duration cannot be negative");
+        if (durationMs < 0) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_METADATA_NEGATIVE_DURATION) + "Failed to create the metadata due to negative duration");
     }
 }

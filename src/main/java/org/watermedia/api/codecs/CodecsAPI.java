@@ -185,7 +185,7 @@ public final class CodecsAPI extends WaterMedia.Module {
 
     /** Creates the codecs module; {@link WaterMedia#start} calls it once per process and a second call throws. */
     public CodecsAPI() {
-        if (!LOADED.compareAndSet(false, true)) throw new IllegalStateException("CodecsAPI is already loaded");
+        if (!LOADED.compareAndSet(false, true)) throw new IllegalStateException(DataTool.errCode(WaterMedia.ERR_CODECS_LOADED) + "Failed to load CodecsAPI, it is already loaded");
     }
 
     // ==========================================================================
@@ -218,7 +218,7 @@ public final class CodecsAPI extends WaterMedia.Module {
      * @throws IllegalArgumentException   when {@code source} is null or the matched reader is asked for another layout
      */
     public static ImageReader reader(final ByteBuffer source, final PixelFormat requestedFormat) throws IOException {
-        if (source == null) throw new IllegalArgumentException("Source cannot be null");
+        if (source == null) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_CODECS_READER_NULL_SOURCE) + "Failed to open the image reader due to null source");
         final int start = source.position();
         try {
             if (DataTool.startsWith(source, start, PNG_HEADER)) {
@@ -259,7 +259,7 @@ public final class CodecsAPI extends WaterMedia.Module {
         }
 
         source.position(start);
-        throw new UnsupportedFormatException("Unsupported image format at buffer position " + start);
+        throw new UnsupportedFormatException(DataTool.errCode(WaterMedia.ERR_CODECS_READER_FORMAT) + "Failed to open the image reader due to unsupported image format at buffer position " + start);
     }
 
     /**
@@ -288,7 +288,7 @@ public final class CodecsAPI extends WaterMedia.Module {
      * @see #reader(ByteBuffer, PixelFormat)
      */
     public static ImageData decode(final byte[] data, final PixelFormat requestedFormat) throws IOException {
-        if (data == null) throw new IllegalArgumentException("Data cannot be null");
+        if (data == null) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_CODECS_DECODE_NULL_DATA) + "Failed to decode the image due to null data");
         return decode(ByteBuffer.wrap(data), requestedFormat);
     }
 
@@ -315,7 +315,7 @@ public final class CodecsAPI extends WaterMedia.Module {
      * stays open; see {@link #decode(byte[], PixelFormat)}.
      */
     public static ImageData decode(final InputStream in, final PixelFormat requestedFormat) throws IOException {
-        if (in == null) throw new IllegalArgumentException("Stream cannot be null");
+        if (in == null) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_CODECS_DECODE_NULL_STREAM) + "Failed to decode the image due to null stream");
         return decode(ByteBuffer.wrap(IOTool.readLimited(in, ImageReader.MAX_DECODED_BYTES, -1L, 0L)), requestedFormat);
     }
 
@@ -331,7 +331,7 @@ public final class CodecsAPI extends WaterMedia.Module {
      * @throws IOException              when FFmpeg or the codec is unavailable, or the file cannot be written
      */
     public static Encoder encoder(final Container container, final Path file, final Encoder.Video video, final Encoder.Audio audio) throws IOException {
-        if (file == null) throw new IllegalArgumentException("The target file is null");
+        if (file == null) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_CODECS_ENCODER_NULL_FILE) + "Failed to open the encoder due to null target file");
         Encoder.check(container, video, audio);
         return switch (container) {
             case PNG -> new PngEncoder(new LazyFile(file), video);
@@ -354,7 +354,7 @@ public final class CodecsAPI extends WaterMedia.Module {
      * @throws IOException              when FFmpeg or the codec is unavailable, or setup fails
      */
     public static Encoder encoder(final Container container, final OutputStream out, final Encoder.Video video, final Encoder.Audio audio) throws IOException {
-        if (out == null) throw new IllegalArgumentException("The output stream is null");
+        if (out == null) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_CODECS_ENCODER_NULL_OUT) + "Failed to open the encoder due to null output stream");
         Encoder.check(container, video, audio);
         return switch (container) {
             case PNG -> new PngEncoder(out, video);
@@ -380,7 +380,7 @@ public final class CodecsAPI extends WaterMedia.Module {
      * @throws IllegalArgumentException when {@code in} is null
      */
     public static MediaType sniff(final InputStream in) throws IOException {
-        if (in == null) throw new IllegalArgumentException("Stream cannot be null");
+        if (in == null) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_CODECS_SNIFF_NULL_STREAM) + "Failed to sniff the media type due to null stream");
         return sniff(ByteBuffer.wrap(in.readNBytes(PROBE_SIZE)));
     }
 
@@ -393,7 +393,7 @@ public final class CodecsAPI extends WaterMedia.Module {
      * @throws IllegalArgumentException when {@code source} is null
      */
     public static MediaType sniff(final ByteBuffer source) {
-        if (source == null) throw new IllegalArgumentException("Source cannot be null");
+        if (source == null) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_CODECS_SNIFF_NULL_SOURCE) + "Failed to sniff the media type due to null source");
         final byte[] h = new byte[Math.min(source.remaining(), PROBE_SIZE)];
         source.get(source.position(), h);
         if (h.length < 2) return MediaType.UNKNOWN;
@@ -537,7 +537,7 @@ public final class CodecsAPI extends WaterMedia.Module {
             final Path installed = WaterMediaBinaries.pathOf(WaterMediaBinaries.FFMPEG_ID);
             final var customPath = WaterMediaConfig.codecs.ffmpeg.customPath;
             final String configPath = customPath != null && !customPath.toString().isBlank() ? customPath.toAbsolutePath().toString() : null;
-            if (installed == null && configPath == null) throw new IllegalStateException("Verified FFmpeg binaries are unavailable");
+            if (installed == null && configPath == null) throw new IllegalStateException(DataTool.errCode(WaterMedia.ERR_CODECS_FFMPEG_BINARIES) + "Failed to start FFMPEG due to unavailable verified binaries");
             // THE BINARIES GO FIRST ON THE PRELOAD PATH, SO A CUSTOM DIRECTORY ONLY SERVES WHAT THEY LACK
             final String paths = installed == null ? configPath : configPath == null
                     ? installed.toString() : installed + File.pathSeparator + configPath;
@@ -625,7 +625,7 @@ public final class CodecsAPI extends WaterMedia.Module {
             IOTool.closeQuietly(license);
             ffmpegLoaded = true;
         } catch (final Exception | LinkageError t) {
-            LOGGER.error(IT, "Failed to load FFMPEG", t);
+            LOGGER.error(IT, DataTool.errCode(WaterMedia.ERR_CODECS_FFMPEG_LOG) + "Failed to load FFMPEG", t);
             vulkanHwDecode = false;
             ffmpegFailure = t;
         }
