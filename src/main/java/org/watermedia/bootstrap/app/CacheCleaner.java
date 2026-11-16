@@ -52,6 +52,11 @@ public final class CacheCleaner {
     // RUNS THE DIALOG'S NEXT ACTION ON A WORKER: OPEN AND SCAN, WIPE THE CACHE, OR CLOSE AND RECOUNT FOR THE NEXT OPEN;
     // A STAGE STILL WORKING JUST KEEPS THE DIALOG OPEN
     void step() {
+        // A DIALOG REOPENED WHILE ITS WORKER RUNS SHOWS THAT RUN; A RESET HERE WOULD START A SECOND WORKER OVER IT
+        if (this.working) {
+            this.visible = true;
+            return;
+        }
         if (!this.visible) {
             // BACK TO THE FIRST STAGE, SCANNED ON A WORKER: scan() WALKS THE WHOLE MEDIA CACHE, POSSIBLY THOUSANDS OF FILES
             this.done = false;
@@ -64,10 +69,6 @@ public final class CacheCleaner {
             this.visible = true;
             this.working = true;
             ThreadTool.thread("CacheCleaner-Scan", this::count);
-            return;
-        }
-        if (this.working) {
-            this.visible = true;
             return;
         }
         if (this.stage <= 1) {
