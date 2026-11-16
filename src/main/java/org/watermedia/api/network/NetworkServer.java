@@ -47,9 +47,6 @@ public final class NetworkServer {
     // EACH WRITTEN CHUNK TOUCHES THE IDLE WATCHDOG AND BLOCKS UNTIL SENT: SMALL ENOUGH THAT A SLOW PEER STILL MOVES ONE PER TIMEOUT,
     // AND THAT A CANCELLED UPLOAD STOPS WITHIN ONE CHUNK
     static final int CHUNK_BYTES = 8 * 1_024;
-    // BOUNDS OF THE REQUEST THE SERVER SENDS TO ITS OWN remoteUrl AT STARTUP, WHICH ANSWERS ONLY THE PROJECT NAME
-    private static final int PROBE_TIMEOUT_MS = 5_000;
-    private static final int PROBE_MAX_BYTES = 64;
     private static final SecureRandom RANDOM = new SecureRandom();
     // THE IDLE WATCHDOG OF THE REQUEST THE CURRENT WORKER IS SERVING; TRANSFERS TOUCH IT PER CHUNK
     private static final ThreadLocal<Watchdog> WATCHDOG = new ThreadLocal<>();
@@ -211,11 +208,8 @@ public final class NetworkServer {
                     final String remote = NetworkAPI.remoteUrl();
                     boolean open = false;
                     Exception unreachable = null;
-                    try (final NetRequest probe = new NetRequest(remote + "/").connectTimeout(PROBE_TIMEOUT_MS).readTimeout(PROBE_TIMEOUT_MS).maxBytes(PROBE_MAX_BYTES).send()) {
-                        open = probe.statusCode() == HttpURLConnection.HTTP_OK && WaterMedia.NAME.equals(probe.text());
-                    } catch (final IOException | IllegalArgumentException failure) {
-                        unreachable = failure;
-                    }
+                    try { open = answers(remote); }
+                    catch (final IOException | IllegalArgumentException failure) { unreachable = failure; }
                     if (!open) throw new IOException(DataTool.errCode(WaterMedia.ERR_SERVER_PORT_CLOSED) + "Failed to start the file server due to closed port " + port + ", " + remote + " does not reach it", unreachable);
                 }
                 running = state;

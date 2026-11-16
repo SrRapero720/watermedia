@@ -885,6 +885,10 @@ if (status.completed()) {
 `NetworkAPI.upload` faz o upload em segundo plano e retorna um `UploadStatus` por arquivo: `percentage()` e
 `displaySpeed()` acompanham a transferência, `cancel()` a interrompe e `error()` diz por que um deles falhou.
 
+`NetworkAPI.serverEnabled()` diz se o servidor de arquivos está no ar. A máquina que o hospeda recebe true na hora; as
+demais consultam `network.remoteUrl` em segundo plano e recebem false até o servidor responder. Depois de true, continua
+true, então consulte-o a partir de um tick ou de um timer da interface antes de oferecer uploads.
+
 ## 4.2 DOWNLOADS
 > [!NOTE]
 > Configurável: `network.timeout`, `maxRedirects` e `maxTextBytes`. Veja os comentários deles em

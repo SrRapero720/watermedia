@@ -964,9 +964,17 @@ requested, and SVG yields RGBA when RGBA is requested (everything else is conver
   POST `<remoteUrl>/upload` with `network.token`, filename and content-type headers, fixed-length streaming in 8 KiB
   chunks; 503 → "busy server" failure (`ERR_NETWORK_UPLOAD_SERVER_BUSY`). `remoteUrl()` validates `network.remoteUrl`
   (http(s), trailing slash stripped; else ISE `ERR_NETWORK_REMOTE_URL`). `start(...)`: upload pool, then
-  `NetworkServer.start(network.serverPort, cwd)` when the package-private gate `serverEnabled(client, server)` passes
+  `NetworkServer.start(network.serverPort, cwd)` when the package-private gate `enable(client, server)` passes
   (`network.server` is `ALWAYS`, or `DEDICATED` on a non-client); a failure logs ERROR `ERR_NETWORK_SERVER_START` and
-  uploads keep working.
+  uploads keep working; a start that succeeds latches `serverUp`.
+  - `serverEnabled()` (public): true once `serverUp` is latched, by the local start above or by a remote answer; it is
+    never cleared. Otherwise it returns false and queues one request on the upload pool, `answers(remoteUrl())`, when
+    the module started (`uploads` set), no request is in flight (`PROBING` CAS) and the pause is over (`probeAt`,
+    `PROBE_RETRY_NS` 5 s after each request). A reached remote logs INFO; a silent, foreign or misconfigured one logs
+    WARN once per process (`probeWarned`). ⚠ The first call always returns false: callers poll it.
+  - `answers(remote)` (package-private, shared with the port check): `NetRequest` GET `<remote>/` with
+    `PROBE_TIMEOUT_MS` 5 s connect and read and `PROBE_MAX_BYTES` 64; true only on HTTP 200 with the body
+    `WaterMedia.NAME` (what `GET /` serves), false for any other answer, `IOException` when nothing answers.
 - `NetworkServer` (package-private entry points `start`, `address`, `stop`): JDK `HttpServer` bound to
   `network.serverBindAddress:serverPort` (`127.0.0.1:25572`; ⚠ a non-loopback bind with the default token refuses to
   start), storage `cwd/watermedia/files` with a `.server.lock` file lock and an `.upload-*` sweep, elastic
@@ -975,12 +983,12 @@ requested, and SVG yields RGBA when RGBA is requested (everything else is conver
   echoed for FFmpeg. `POST /upload`: 401 token, 400 filename, 411 no length, 413 over `maxUploadSize`, 507 over
   `maxStorageSize`, stores `files/<8 lowercase alnum id>/<filename>` atomically, answers the id. `GET|HEAD /<id>`: first
   regular file of the directory, `Accept-Ranges`, one `bytes=` range → 206 (416 when unsatisfiable, malformed ranges
-  ignored), `Content-Disposition` on full answers. The module never calls `stop()`.
+  ignored), `Content-Disposition` on full answers. The module never calls `stop()`. ⚠ The JDK dispatcher is not a
+  daemon thread: a JVM whose `main` returns stays alive while the server runs (child-JVM probes call `stop()`).
   - Port check (a fixed port only; port 0 is ephemeral, as in tests, and skips both steps): before the storage is
     created, locked or swept, a probe `ServerSocket` binds and closes `serverBindAddress:port` (IOException
-    `ERR_SERVER_PORT_BUSY` when busy or blocked); after `server.start()` a `NetRequest` to
-    `NetworkAPI.remoteUrl() + "/"` (`PROBE_TIMEOUT_MS` 5 s connect and read, `PROBE_MAX_BYTES` 64) must get HTTP 200
-    with the body `WaterMedia.NAME` (what `GET /` serves). Otherwise the server, both pools and the storage lock are
+    `ERR_SERVER_PORT_BUSY` when busy or blocked); after `server.start()`,
+    `NetworkAPI.answers(NetworkAPI.remoteUrl())` must be true. Otherwise the server, both pools and the storage lock are
     released and it throws IOException `ERR_SERVER_PORT_CLOSED` (an invalid `remoteUrl` throws its ISE
     `ERR_NETWORK_REMOTE_URL` the same way). ⚠ A router without NAT loopback fails the second step.
 - `NetRequest` (`api/util`): one request, manual redirect walk (`network.maxRedirects`, http(s)-only hops, 303 → GET,
@@ -1369,7 +1377,8 @@ System properties: `watermedia.engine`, `watermedia.app` (child JVM flag), `wate
   `BootstrapProbe` (`server`, `client`, `native`, `native-failure`, `optional-failure`, `tls` via
   `TLSLifecycleProbe.run`, `tls-empty`), `WithoutBinariesProbe` (`server-no-binaries`, `client-no-binaries`),
   `ServiceLifecycleProbe` (`platform`, `uploads`, `evicted`, `failed-probe`), `AppConfigProbe` (`defaults`, `shared`,
-  `malformed`, `override`, launched by `AppConfigTest`), `NetworkServerTest.main` (`storage-lock`).
+  `malformed`, `override`, launched by `AppConfigTest`), `NetworkServerTest.main` (`storage-lock`),
+  `NetworkAPITest.main` (`host`: a dedicated server that starts the file server reports `serverEnabled()` at once).
   `PlatformSmokeTest` is a manual network harness, not a JUnit test.
 - Test classes by area: codecs `CodecsApiContractTest`, `ImageDataTest`, `ImageMetadataTest`, `MediaTypeSniffTest`,
   `ScanTest`, `PentestTest` (hostile corpus), `BcReaderTest`, `DdsHeaderTest`, PNG/GIF `ChunkContractTest`,
@@ -1378,7 +1387,8 @@ System properties: `watermedia.engine`, `watermedia.app` (child JVM flag), `wate
   `HuffmanTableTest`, `VP8LosslessDecoderTest`, `FFmpegLogRoutingTest` (disabled); network `NetworkServerTest`
   (snapshots and restores `remoteUrl` with the other `network.*` keys; `Port`: a busy port fails before the storage
   exists, a port `remoteUrl` reaches starts, an unreachable `remoteUrl` gives the port and the storage lock back, a
-  foreign answer and an invalid `remoteUrl` fail), `NetworkServerGateTest`, `UploadStatusTest`;
+  foreign answer and an invalid `remoteUrl` fail), `NetworkServerGateTest` (`NetworkAPI.enable`), `NetworkAPITest`
+  (`answers` and `serverEnabled`; it resets `serverUp`, `probeWarned` and `probeAt` by reflection), `UploadStatusTest`;
   platform `PlatformApiTest`, `PlatformSearchTest`, `PlatformClaimTest`,
   `WaterPlatformTest`, offline handler tests `BiliBiliPlatformTest`, `KickPlatformTest`, `NewgroundsPlatformTest`,
   `OdyseePlatformTest` (loopback proxy through `LocalHttp`), `TwitchPlatformTest` (search hits), `TwitterPlatformTest`,

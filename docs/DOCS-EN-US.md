@@ -862,6 +862,10 @@ if (status.completed()) {
 `NetworkAPI.upload` uploads in the background and returns one `UploadStatus` per file: `percentage()` and
 `displaySpeed()` follow the transfer, `cancel()` stops it and `error()` tells why one failed.
 
+`NetworkAPI.serverEnabled()` tells whether the file server is up. The host that runs it gets true right away; anyone
+else asks `network.remoteUrl` in the background and gets false until the server answers. Once true it stays true, so
+check it from a tick or a UI timer before you offer uploads.
+
 ## 4.2 DOWNLOADS
 > [!NOTE]
 > Configurable: `network.timeout`, `maxRedirects` and `maxTextBytes`. See their comments in `config/watermedia.toml`.

@@ -815,6 +815,9 @@ if (status.completed()) {
 `NetworkAPI.upload` 在后台上传，并为每个文件返回一个 `UploadStatus`：`percentage()` 和 `displaySpeed()`
 跟踪传输进度，`cancel()` 停止传输，`error()` 说明失败的原因。
 
+`NetworkAPI.serverEnabled()` 告诉你文件服务器是否已启动。运行它的主机会立即得到 true；其他主机会在后台请求 `network.remoteUrl`，
+在服务器应答之前得到 false。一旦为 true 就保持 true，所以在提供上传之前，请从 tick 或界面定时器中查询它。
+
 ## 4.2 下载
 > [!NOTE]
 > 可配置项：`network.timeout`、`maxRedirects` 和 `maxTextBytes`。请查看 `config/watermedia.toml` 中它们的注释。

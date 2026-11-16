@@ -25,16 +25,20 @@ import static org.watermedia.WaterMedia.LOGGER;
 /** File transfer facade: uploads to the remote WaterMedia file server and the local one's startup. */
 public final class NetworkAPI extends WaterMedia.Module {
     private static final Marker IT = MarkerManager.getMarker(NetworkAPI.class.getSimpleName());
-    /** URI scheme of the internal sources the WaterMedia file servers serve. */
     public static final String PROTOCOL_WATER = "water";
-    /** Request header carrying the upload token the file server authenticates with. */
     public static final String X_WATERMEDIA_TOKEN = "X-WaterMedia-Token";
-    /** Request header carrying the original name of an uploaded file. */
     public static final String X_WATERMEDIA_FILENAME = "X-WaterMedia-Filename";
     private static final int UPLOAD_THREADS = 4;
+    // BOUNDS OF THE REQUEST THAT ASKS A FILE SERVER FOR ITS ROOT LINE, AND THE PAUSE BEFORE ASKING A SILENT ONE AGAIN
+    private static final int PROBE_TIMEOUT_MS = 5_000;
+    private static final int PROBE_MAX_BYTES = 64;
+    private static final long PROBE_RETRY_NS = 5_000_000_000L;
     private static final AtomicBoolean LOADED = new AtomicBoolean(); // FLIPS ON THE FIRST CONSTRUCTION, WHEN WATERMEDIA STARTS
-    // THE UPLOAD WORKERS, CREATED WHEN THE MODULE STARTS AND KEPT FOR THE LIFE OF THE PROCESS; upload() CHECKS THEM AS ITS OWN LOAD GATE
-    private static volatile ExecutorService uploads;
+    private static final AtomicBoolean PROBING = new AtomicBoolean(); // HELD BY THE ONE REQUEST serverEnabled() HAS IN FLIGHT
+    private static volatile ExecutorService uploads; // THE UPLOAD WORKERS, CREATED WHEN THE MODULE STARTS
+    private static volatile boolean serverUp; // LATCHED ONCE THE FILE SERVER STARTED HERE OR ANSWERED AT network.remoteUrl
+    private static volatile boolean probeWarned; // ONLY THE FIRST REQUEST LOGS A SILENT REMOTE SERVER
+    private static volatile long probeAt = System.nanoTime(); // EARLIEST TIME OF THE NEXT REQUEST, WRITTEN ONLY UNDER PROBING
 
     /** Creates the network module; {@link WaterMedia#start} calls it once per process and a second call throws. */
     public NetworkAPI() {
@@ -42,9 +46,35 @@ public final class NetworkAPI extends WaterMedia.Module {
             throw new IllegalStateException(DataTool.errCode(WaterMedia.ERR_NETWORK_ALREADY_LOADED) + "Failed to load NetworkAPI, it is already loaded");
     }
 
-    // ==========================================================================
-    // PUBLIC API
-    // ==========================================================================
+    /** Returns whether the WaterMedia file server is up: true on the host that started it, and elsewhere false until {@code network.remoteUrl} answers a background request; a true answer is kept. */
+    public static boolean serverEnabled() {
+        if (serverUp) return true;
+        final ExecutorService workers = uploads;
+        if (workers == null || !PROBING.compareAndSet(false, true)) return false; // NOT LOADED, OR ALREADY ASKING
+        // A SILENT SERVER IS ASKED AGAIN ONLY AFTER A PAUSE, HOWEVER OFTEN THE CALLER POLLS
+        if (System.nanoTime() - probeAt < 0) {
+            PROBING.set(false);
+            return false;
+        }
+        workers.execute(() -> {
+            final String remote = WaterMediaConfig.network.remoteUrl;
+            try {
+                if (answers(remoteUrl())) {
+                    serverUp = true;
+                    LOGGER.info(IT, "Reached the remote file server at {}", remote);
+                } else if (!probeWarned) LOGGER.warn(IT, "Could not reach the remote file server at {}: another service answers there", remote);
+            } catch (final IOException | IllegalStateException | IllegalArgumentException unreachable) {
+                // DOWN, UNRESOLVABLE OR MISCONFIGURED: EXPECTED CONDITIONS, NOT BUGS: NO TRACE
+                if (!probeWarned) LOGGER.warn(IT, "Could not reach the remote file server at {}: {}", remote, unreachable.getMessage());
+            } finally {
+                probeWarned = true;
+                probeAt = System.nanoTime() + PROBE_RETRY_NS;
+                PROBING.set(false);
+            }
+        });
+        return false;
+    }
+
     /** Uploads every file to the remote WaterMedia server, one status each; all of them are checked before the first upload starts. */
     public static UploadStatus[] upload(final File... files) {
         if (files == null) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_NETWORK_UPLOAD_NULL_FILES) + "Failed to upload due to null files");
@@ -78,27 +108,27 @@ public final class NetworkAPI extends WaterMedia.Module {
         return base.endsWith("/") ? base.substring(0, base.length() - 1) : base;
     }
 
-    // ==========================================================================
-    // INTERNAL API
-    // ==========================================================================
-    // THE UPLOAD WORKERS AND, WHEN CONFIGURED, THE LOCAL FILE SERVER
     @Override
     protected void start(final String name, final Path tmp, final Path cwd, final boolean clientSide) {
         uploads = Executors.newFixedThreadPool(UPLOAD_THREADS, ThreadTool.workerFactory("NetworkAPI-Upload", Thread.NORM_PRIORITY));
-        if (!serverEnabled(clientSide, WaterMediaConfig.network.server)) return;
+        if (!enable(clientSide, WaterMediaConfig.network.server)) return;
         try {
             NetworkServer.start(WaterMediaConfig.network.serverPort, cwd);
+            serverUp = true; // NO REQUEST NEEDED: ITS STARTUP CHECK ALREADY ASKED network.remoteUrl
         } catch (final Exception failure) { // UPLOADS STILL WORK WITHOUT THE LOCAL SERVER
             LOGGER.error(IT, DataTool.errCode(WaterMedia.ERR_NETWORK_SERVER_START) + "Failed to start the local file server, uploads still work without it", failure);
         }
     }
 
-    // ==========================================================================
-    // UTILITY
-    // ==========================================================================
-    // THE FILE SERVER RUNS EVERYWHERE UNDER ALWAYS AND ONLY ON HOSTS WITHOUT A CLIENT UNDER DEDICATED
-    static boolean serverEnabled(final boolean client, final WaterMediaConfig.Network.Server server) {
+    static boolean enable(final boolean client, final WaterMediaConfig.Network.Server server) {
         return server == WaterMediaConfig.Network.Server.ALWAYS || (!client && server == WaterMediaConfig.Network.Server.DEDICATED);
+    }
+
+    // ASKS A FILE SERVER FOR ITS ROOT LINE, THE PROJECT NAME: A SILENT HOST THROWS AND ANY OTHER SERVICE ANSWERS FALSE
+    static boolean answers(final String remote) throws IOException {
+        try (final NetRequest probe = new NetRequest(remote + "/").connectTimeout(PROBE_TIMEOUT_MS).readTimeout(PROBE_TIMEOUT_MS).maxBytes(PROBE_MAX_BYTES).send()) {
+            return probe.statusCode() == HttpURLConnection.HTTP_OK && WaterMedia.NAME.equals(probe.text());
+        }
     }
 
     private static void upload(final File file, final UploadStatus status) {
@@ -183,9 +213,6 @@ public final class NetworkAPI extends WaterMedia.Module {
         }
     }
 
-    // ==========================================================================
-    // NESTED TYPES
-    // ==========================================================================
     /** Tracks a file upload to the remote WaterMedia server; every accessor is thread-safe and can be polled from any thread. */
     public static final class UploadStatus {
         private final long totalBytes;

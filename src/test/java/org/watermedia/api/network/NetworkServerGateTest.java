@@ -14,21 +14,21 @@ public class NetworkServerGateTest {
     @Test
     @DisplayName("OFF never starts the server")
     void offNeverStarts() {
-        assertFalse(NetworkAPI.serverEnabled(true, Server.OFF));
-        assertFalse(NetworkAPI.serverEnabled(false, Server.OFF));
+        assertFalse(NetworkAPI.enable(true, Server.OFF));
+        assertFalse(NetworkAPI.enable(false, Server.OFF));
     }
 
     @Test
     @DisplayName("DEDICATED starts only on hosts without a client")
     void dedicatedNeedsNoClient() {
-        assertFalse(NetworkAPI.serverEnabled(true, Server.DEDICATED));
-        assertTrue(NetworkAPI.serverEnabled(false, Server.DEDICATED));
+        assertFalse(NetworkAPI.enable(true, Server.DEDICATED));
+        assertTrue(NetworkAPI.enable(false, Server.DEDICATED));
     }
 
     @Test
     @DisplayName("ALWAYS starts on clients too")
     void alwaysStartsEverywhere() {
-        assertTrue(NetworkAPI.serverEnabled(true, Server.ALWAYS));
-        assertTrue(NetworkAPI.serverEnabled(false, Server.ALWAYS));
+        assertTrue(NetworkAPI.enable(true, Server.ALWAYS));
+        assertTrue(NetworkAPI.enable(false, Server.ALWAYS));
     }
 }

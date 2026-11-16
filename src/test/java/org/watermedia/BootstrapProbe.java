@@ -59,6 +59,7 @@ public final class BootstrapProbe {
                 throw new AssertionError("Progress did not stop at the failed module: " + WaterMedia.step() + "/" + WaterMedia.steps());
         }
         if (WaterMediaBinaries.pathOf(WaterMediaBinaries.FFMPEG_ID) != null) throw new AssertionError("Failed installation published a native path");
+        if (NetworkAPI.serverEnabled()) throw new AssertionError("A network module that never started reported the file server up");
         try {
             PlayerAPI.mrl("https://example.invalid/clip.mp4");
             throw new AssertionError("A failed load resolved media");

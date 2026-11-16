@@ -899,6 +899,10 @@ if (status.completed()) {
 `NetworkAPI.upload` sube en segundo plano y devuelve un `UploadStatus` por archivo: `percentage()` y `displaySpeed()`
 siguen la transferencia, `cancel()` la detiene y `error()` dice por qué falló una.
 
+`NetworkAPI.serverEnabled()` dice si el servidor de archivos está arriba. El equipo que lo aloja recibe true de
+inmediato; los demás consultan `network.remoteUrl` en segundo plano y reciben false hasta que el servidor responde. Una
+vez en true se queda así, así que consúltalo desde un tick o un temporizador de la interfaz antes de ofrecer subidas.
+
 ## 4.2 DESCARGAS
 > [!NOTE]
 > Configurable: `network.timeout`, `maxRedirects` y `maxTextBytes`. Mira sus comentarios en `config/watermedia.toml`.
