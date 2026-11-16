@@ -243,8 +243,7 @@ public final class TextRenderer {
     // UTILITY
     // ==========================================================================
     private static Font loadBundledFont(final int style) {
-        final String resource = style == Font.BOLD ? "assets/watermedia/font/jetbrainsmono-bld.ttf" : "assets/watermedia/font/jetbrainsmono-reg.ttf";
-        try (final InputStream in = IOTool.jarOpenFile(resource)) {
+        try (final InputStream in = IOTool.jarOpenFile(style == Font.BOLD ? AppTheme.FONT_BOLD : AppTheme.FONT_PLAIN)) {
             if (in != null) return Font.createFont(Font.TRUETYPE_FONT, in).deriveFont(Font.PLAIN, 1f);
         } catch (final Exception ignored) {}
         return new Font("Consolas", style, 1);

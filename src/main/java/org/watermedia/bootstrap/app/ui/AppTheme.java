@@ -29,6 +29,11 @@ public final class AppTheme {
     public static final Color AMBER = hex(0xFFC266);
     public static final Color RED = hex(0xFF6C8E);
 
+    // FONT WEIGHTS OF THE WHOLE UI: SEMIBOLD AS THE REGULAR TEXT (THE 400 WEIGHT READS TOO THIN OVER THE DARK
+    // BACKGROUNDS) AND EXTRABOLD AS THE EMPHASIS; EVERY JETBRAINS MONO WEIGHT SHARES ONE ADVANCE WIDTH
+    public static final String FONT_PLAIN = "assets/watermedia/font/jetbrainsmono-semibold.ttf";
+    public static final String FONT_BOLD = "assets/watermedia/font/jetbrainsmono-extrabold.ttf";
+
     // TEXT SCALES BY ROLE; TINY, SUBTITLE AND BODY SHARE A SIZE ON PURPOSE SO EACH CAN BE RETUNED WITHOUT
     // TOUCHING ITS CALLERS
     private static final float FONT_BASE_PX = 20f;
