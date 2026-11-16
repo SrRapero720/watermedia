@@ -842,6 +842,10 @@ The optional file server stores the files your players upload and shares them wi
 3. Point `network.remoteUrl` at the server's public address and port, on the server and on every client.
 4. Give the server and every client the same custom `network.token`.
 
+When it starts, the server checks its port: it must be free on `serverBindAddress`, and `network.remoteUrl` must
+answer from this same server. If a check fails (a busy or closed port, a wrong `remoteUrl`, a router without NAT
+loopback), the server stays off and the log says why.
+
 Uploaded files land in `watermedia/files` under the server's working directory; delete them there to free space.
 
 ## 4.1 UPLOADS

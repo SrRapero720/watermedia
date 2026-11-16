@@ -156,8 +156,10 @@ public final class WaterMedia {
     public static final int ERR_SERVER_NO_TOKEN = 723;
     public static final int ERR_SERVER_DEFAULT_TOKEN = 724;
     public static final int ERR_SERVER_INVALID_LIMITS = 725;
+    public static final int ERR_SERVER_PORT_BUSY = 726;
     public static final int ERR_SERVER_STORAGE_OVERLAP = 727;
     public static final int ERR_SERVER_STORAGE_IN_USE = 728;
+    public static final int ERR_SERVER_PORT_CLOSED = 729;
     public static final int ERR_SERVER_EXCHANGES_BUSY = 730;
     public static final int ERR_SERVER_STOP_INTERRUPTED = 731;
     public static final int ERR_SERVER_STOP_STORAGE_LOCK = 732;

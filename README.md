@@ -154,6 +154,8 @@ that offers uploads.
 
 - The server won't start for outside players while `token` keeps its default value. Change it on every server
   update to keep strangers from uploading.
+- When it starts, the server checks its port: it must be free, and `remoteUrl` must answer from that same server.
+  If the port is closed or the address is wrong, it stays off and the log says why.
 - Each upload can weigh up to 8 MB (`maxUploadSize`, 0 means no limit) and all of them together up to 1024 MB
   (`maxStorageSize`).
 - Uploaded files land in `watermedia/files` inside the server folder; delete them there to free space.

@@ -878,6 +878,10 @@ El servidor de archivos opcional guarda los archivos que suben tus jugadores y l
 3. Apunta `network.remoteUrl` a la dirección pública y el puerto del servidor, en el servidor y en cada cliente.
 4. Dale al servidor y a cada cliente el mismo `network.token` personalizado.
 
+Al arrancar, el servidor revisa su puerto: debe estar libre en `serverBindAddress`, y `network.remoteUrl` debe
+responder desde este mismo servidor. Si una revisión falla (puerto ocupado o cerrado, `remoteUrl` equivocado, un
+router sin NAT loopback), el servidor se queda apagado y el log dice por qué.
+
 Los archivos subidos quedan en `watermedia/files` dentro del directorio de trabajo del servidor; bórralos ahí para
 liberar espacio.
 

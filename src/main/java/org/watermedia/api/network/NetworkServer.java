@@ -17,6 +17,7 @@ import java.math.BigInteger;
 import java.net.HttpURLConnection;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
+import java.net.ServerSocket;
 import java.nio.channels.Channels;
 import java.nio.channels.FileChannel;
 import java.nio.channels.FileLock;
@@ -46,6 +47,9 @@ public final class NetworkServer {
     // EACH WRITTEN CHUNK TOUCHES THE IDLE WATCHDOG AND BLOCKS UNTIL SENT: SMALL ENOUGH THAT A SLOW PEER STILL MOVES ONE PER TIMEOUT,
     // AND THAT A CANCELLED UPLOAD STOPS WITHIN ONE CHUNK
     static final int CHUNK_BYTES = 8 * 1_024;
+    // BOUNDS OF THE REQUEST THE SERVER SENDS TO ITS OWN remoteUrl AT STARTUP, WHICH ANSWERS ONLY THE PROJECT NAME
+    private static final int PROBE_TIMEOUT_MS = 5_000;
+    private static final int PROBE_MAX_BYTES = 64;
     private static final SecureRandom RANDOM = new SecureRandom();
     // THE IDLE WATCHDOG OF THE REQUEST THE CURRENT WORKER IS SERVING; TRANSFERS TOUCH IT PER CHUNK
     private static final ThreadLocal<Watchdog> WATCHDOG = new ThreadLocal<>();
@@ -56,7 +60,7 @@ public final class NetworkServer {
     // ==========================================================================
     // INTERNAL API
     // ==========================================================================
-    // STARTS THE CONFIGURED LISTENER UNDER cwd; INVALID CONFIGURATION AND BIND FAILURES PROPAGATE TO THE CALLER
+    // STARTS THE CONFIGURED LISTENER UNDER cwd; INVALID CONFIGURATION, A CLOSED PORT AND BIND FAILURES PROPAGATE TO THE CALLER
     static synchronized void start(final int port, final Path cwd) throws IOException {
         if (running != null)
             throw new IllegalStateException(DataTool.errCode(WaterMedia.ERR_SERVER_ALREADY_RUNNING) + "Failed to start the file server, it is already running");
@@ -77,6 +81,15 @@ public final class NetworkServer {
 
         if (config.maxServerRequests < 1 || config.serverTimeout < 1 || config.maxStorageSize < 1 || config.maxUploadSize < 0)
             throw new IllegalStateException(DataTool.errCode(WaterMedia.ERR_SERVER_INVALID_LIMITS) + "Failed to start the file server due to non-positive concurrency, idle timeout or storage limits");
+
+        // A PORT THAT CANNOT OPEN FAILS HERE, BEFORE THE STORAGE IS LOCKED AND SWEPT; 0 ASKS FOR AN EPHEMERAL PORT, ALWAYS FREE
+        if (port != 0) {
+            try (final ServerSocket probe = new ServerSocket()) {
+                probe.bind(new InetSocketAddress(bind, port));
+            } catch (final IOException closed) {
+                throw new IOException(DataTool.errCode(WaterMedia.ERR_SERVER_PORT_BUSY) + "Failed to start the file server due to closed port " + port + " on " + bind.getHostAddress() + ", it is busy or blocked", closed);
+            }
+        }
 
         final Path storage = cwd.resolve("watermedia").resolve("files").toAbsolutePath().normalize();
         Files.createDirectories(storage);
@@ -192,22 +205,36 @@ public final class NetworkServer {
                     });
                 });
                 server.start();
+                // THE ANNOUNCED ADDRESS MUST REACH THIS SERVER: A PORT CLOSED BY A FIREWALL OR A ROUTER, OR A remoteUrl THAT
+                // POINTS ELSEWHERE, FAILS THE START. AN EPHEMERAL PORT HAS NO ANNOUNCED ADDRESS TO ASK
+                if (port != 0) {
+                    final String remote = NetworkAPI.remoteUrl();
+                    boolean open = false;
+                    Exception unreachable = null;
+                    try (final NetRequest probe = new NetRequest(remote + "/").connectTimeout(PROBE_TIMEOUT_MS).readTimeout(PROBE_TIMEOUT_MS).maxBytes(PROBE_MAX_BYTES).send()) {
+                        open = probe.statusCode() == HttpURLConnection.HTTP_OK && WaterMedia.NAME.equals(probe.text());
+                    } catch (final IOException | IllegalArgumentException failure) {
+                        unreachable = failure;
+                    }
+                    if (!open) throw new IOException(DataTool.errCode(WaterMedia.ERR_SERVER_PORT_CLOSED) + "Failed to start the file server due to closed port " + port + ", " + remote + " does not reach it", unreachable);
+                }
                 running = state;
                 retained = true;
                 LOGGER.info(IT, "Started file server at {} with {} request slots and {} bytes of storage capacity",
                         server.getAddress(), config.maxServerRequests, state.maxStorage);
-            } catch (final RuntimeException | Error failure) {
+            } catch (final IOException | RuntimeException | Error failure) {
                 running = null;
                 retained = false;
+                // THE CASTS ONLY LET BOTH MULTI-CATCH TYPES BE COMPARED: A FAILURE NEVER SUPPRESSES ITSELF
                 try { server.stop(0); }
-                catch (final RuntimeException | Error cleanup) { if (cleanup != failure) failure.addSuppressed(cleanup); }
+                catch (final RuntimeException | Error cleanup) { if ((Throwable) cleanup != failure) failure.addSuppressed(cleanup); }
                 if (executor != null) {
                     try { executor.shutdownNow(); }
-                    catch (final RuntimeException | Error cleanup) { if (cleanup != failure) failure.addSuppressed(cleanup); }
+                    catch (final RuntimeException | Error cleanup) { if ((Throwable) cleanup != failure) failure.addSuppressed(cleanup); }
                 }
                 if (deadlines != null) {
                     try { deadlines.shutdownNow(); }
-                    catch (final RuntimeException | Error cleanup) { if (cleanup != failure) failure.addSuppressed(cleanup); }
+                    catch (final RuntimeException | Error cleanup) { if ((Throwable) cleanup != failure) failure.addSuppressed(cleanup); }
                 }
                 throw failure;
             }

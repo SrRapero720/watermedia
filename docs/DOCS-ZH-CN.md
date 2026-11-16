@@ -796,6 +796,9 @@ player.sync(snapshot); // ON THE CLIENT, FOR EVERY SNAPSHOT RECEIVED
 3. 在服务器和每个客户端上，把 `network.remoteUrl` 指向服务器的公网地址和端口。
 4. 给服务器和每个客户端设置相同的自定义 `network.token`。
 
+启动时，服务器会检查自己的端口：它在 `serverBindAddress` 上必须空闲，并且 `network.remoteUrl` 必须由这同一台服务器应答。任一检查失败（端口被占用或未开放、
+`remoteUrl` 填错、路由器不支持 NAT 回环）时，服务器保持关闭，日志会说明原因。
+
 上传的文件存放在服务器工作目录下的 `watermedia/files` 中；在那里删除它们即可释放空间。
 
 ## 4.1 上传

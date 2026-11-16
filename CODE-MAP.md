@@ -5,7 +5,7 @@ behavior, API, layout or rules, update the matching section (never leave it desc
 Mapped on 2026-10-30 against version `3.0.0` (`RELEASE`); counts (files, latches, throw sites) are as of that date.
 Homologation wave of 2026-11-01 (dividers, member order, nested single-owner types, no dashes), the app upload-logs
 revamp of 2026-11-16 (issue title and description, `TextArea`, clipboard helpers, config copies) and the error codes
-wave of 2026-11-16 (`wm_err` registry) folded in.
+and file server port check wave of 2026-11-16 (`wm_err` registry, startup check of a fixed `serverPort`) folded in.
 Symbol names are exact; line numbers are omitted on purpose.
 Legend: ⚠ gotcha or hard rule, ↪ reuse pointer ("to do X use Y").
 
@@ -976,6 +976,13 @@ requested, and SVG yields RGBA when RGBA is requested (everything else is conver
   `maxStorageSize`, stores `files/<8 lowercase alnum id>/<filename>` atomically, answers the id. `GET|HEAD /<id>`: first
   regular file of the directory, `Accept-Ranges`, one `bytes=` range → 206 (416 when unsatisfiable, malformed ranges
   ignored), `Content-Disposition` on full answers. The module never calls `stop()`.
+  - Port check (a fixed port only; port 0 is ephemeral, as in tests, and skips both steps): before the storage is
+    created, locked or swept, a probe `ServerSocket` binds and closes `serverBindAddress:port` (IOException
+    `ERR_SERVER_PORT_BUSY` when busy or blocked); after `server.start()` a `NetRequest` to
+    `NetworkAPI.remoteUrl() + "/"` (`PROBE_TIMEOUT_MS` 5 s connect and read, `PROBE_MAX_BYTES` 64) must get HTTP 200
+    with the body `WaterMedia.NAME` (what `GET /` serves). Otherwise the server, both pools and the storage lock are
+    released and it throws IOException `ERR_SERVER_PORT_CLOSED` (an invalid `remoteUrl` throws its ISE
+    `ERR_NETWORK_REMOTE_URL` the same way). ⚠ A router without NAT loopback fails the second step.
 - `NetRequest` (`api/util`): one request, manual redirect walk (`network.maxRedirects`, http(s)-only hops, 303 → GET,
   cross-origin strips `Authorization`, `Proxy-Authorization`, `Cookie`, `Cookie2` and `X-WaterMedia-Token`; a `Referer`
   is derived per hop when the caller set none), timeouts from `network.timeout`, builder (`method`, `contentType`, `accept`, `referer`,
@@ -1259,10 +1266,10 @@ original context current; GL needs the pumped render executor; `WaterMedia.start
 | `platforms.searchCleanupInterval` / `searchLimit` | 15.0 min / 2 (1..50) | `PlatformAPI` |
 | `platforms.biliBiliCookie` | "" (password) | `BiliBiliPlatform` |
 | `network.server` | `OFF` (`DEDICATED`, `ALWAYS`) | `NetworkAPI.start` (startup) |
-| `network.serverBindAddress` / `serverPort` | `127.0.0.1` / 25572 | `NetworkServer.start` (startup) |
+| `network.serverBindAddress` / `serverPort` | `127.0.0.1` / 25572 | `NetworkServer.start` (startup; a fixed port must bind and answer through `remoteUrl`, §10) |
 | `network.maxServerRequests` / `serverTimeout` | 8 (1..256) / 30000 ms | `NetworkServer` (startup) |
 | `network.maxStorageSize` / `maxUploadSize` | 1024 MB (≥ 1) / 8 MB (0 = unlimited) | `NetworkServer` (startup) |
-| `network.remoteUrl` | `http://localhost:25572/` | `NetworkAPI.remoteUrl` (per use) |
+| `network.remoteUrl` | `http://localhost:25572/` | `NetworkAPI.remoteUrl` (per use; the file server's startup check asks it, so it must lead back to this server) |
 | `network.token` | `watermedia_default_token_change_it` | server start (refuses the default off loopback) and every upload |
 | `network.timeout` / `maxRedirects` / `maxTextBytes` | 15000 ms / 10 (0..50) / 16 MiB | `NetRequest` defaults, uploads, yt-dlp socket timeout |
 
@@ -1368,8 +1375,10 @@ System properties: `watermedia.engine`, `watermedia.app` (child JVM flag), `wate
   `ScanTest`, `PentestTest` (hostile corpus), `BcReaderTest`, `DdsHeaderTest`, PNG/GIF `ChunkContractTest`,
   `FFDecoderTest`, `QueueLifecycleTest`, `FFEncoderTest`, `GifEncoderTest`, `PngEncoderTest`, readers `GifTest`,
   `JpegTest`, `NetpbmTest`, `PngTest`, `WebpTest`, `WebpMalformedTest`, `SvgTest`, `AlphaDecoderTest`,
-  `HuffmanTableTest`, `VP8LosslessDecoderTest`, `FFmpegLogRoutingTest` (disabled); network `NetworkServerTest`,
-  `NetworkServerGateTest`, `UploadStatusTest`;
+  `HuffmanTableTest`, `VP8LosslessDecoderTest`, `FFmpegLogRoutingTest` (disabled); network `NetworkServerTest`
+  (snapshots and restores `remoteUrl` with the other `network.*` keys; `Port`: a busy port fails before the storage
+  exists, a port `remoteUrl` reaches starts, an unreachable `remoteUrl` gives the port and the storage lock back, a
+  foreign answer and an invalid `remoteUrl` fail), `NetworkServerGateTest`, `UploadStatusTest`;
   platform `PlatformApiTest`, `PlatformSearchTest`, `PlatformClaimTest`,
   `WaterPlatformTest`, offline handler tests `BiliBiliPlatformTest`, `KickPlatformTest`, `NewgroundsPlatformTest`,
   `OdyseePlatformTest` (loopback proxy through `LocalHttp`), `TwitchPlatformTest` (search hits), `TwitterPlatformTest`,

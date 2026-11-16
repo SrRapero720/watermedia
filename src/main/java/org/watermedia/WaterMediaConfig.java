@@ -274,7 +274,8 @@ public final class WaterMediaConfig extends WaterMedia.Module {
 
         @Spec.Field
         @NumberConditions(minInt = 1, maxInt = 65_535)
-        @Comment("File server port; check with your provider that it is reachable from outside before starting the server")
+        @Comment("File server port; open it to the outside before starting the server")
+        @Comment("The server checks it when it starts and stays off while it is busy, blocked or unreachable through remoteUrl")
         @Comment("Used by the file server: on the server, or on a client with server = ALWAYS")
         public int serverPort = DEFAULT_NETWORK_SERVER_PORT;
 
@@ -284,6 +285,7 @@ public final class WaterMediaConfig extends WaterMedia.Module {
         @StringConditions(value = "^https?://([a-zA-Z0-9]([a-zA-Z0-9\\-]*[a-zA-Z0-9])?)(\\.([a-zA-Z0-9]([a-zA-Z0-9\\-]*[a-zA-Z0-9])?))*(:\\d{1,5})?(/.*)?$", regexFlags = Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE, mode = StringField.Mode.REGEX)
         @Comment("Sets the remote file server to upload and download files, it must match your game server IP or domain with the given port")
         @Comment("Include the scheme and port, e.g. http://your-host:25572/")
+        @Comment("The file server asks this address for itself when it starts, so it must lead back to this same server")
         @Comment("Used by every host that uploads through NetworkAPI, clients included")
         public String remoteUrl = "http://localhost:" + DEFAULT_NETWORK_SERVER_PORT + "/";
 

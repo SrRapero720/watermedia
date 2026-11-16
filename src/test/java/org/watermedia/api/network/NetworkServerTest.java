@@ -13,6 +13,7 @@ import org.watermedia.api.player.MRL;
 import org.watermedia.api.player.MediaPlayer;
 import org.watermedia.api.player.PlayerAPI;
 import org.watermedia.test.support.Fixtures;
+import org.watermedia.test.support.LocalHttp;
 import org.watermedia.test.support.LogCapture;
 import org.watermedia.test.support.MediaBootstrap;
 import org.watermedia.test.support.PlayerWait;
@@ -58,13 +59,15 @@ import static org.watermedia.test.support.MediaBootstrap.runProbe;
  * auth/traversal guards, ID downloads (GET/HEAD), the Range handling, the root answer, the playback
  * of a stored video through FFmpeg's own HTTP client, and its limits: configuration refusals, token
  * snapshots, the once-per-server rejection warning, storage accounting, incomplete-upload cleanup,
- * the idle timeout and ownership across an incomplete shutdown.
+ * the idle timeout and ownership across an incomplete shutdown. A fixed port is also validated at
+ * startup: it must be free and the announced {@code remoteUrl} must answer from the same server.
  */
 @DisplayName("NetworkServer")
 public class NetworkServerTest {
     private static final String TOKEN = "local-test-upload-token";
     @TempDir Path directory;
     private String previousBind;
+    private String previousRemote;
     private String previousToken;
     private int previousRequests;
     private int previousTimeout;
@@ -101,6 +104,7 @@ public class NetworkServerTest {
     void snapshotConfig() {
         final var config = WaterMediaConfig.network;
         this.previousBind = config.serverBindAddress;
+        this.previousRemote = config.remoteUrl;
         this.previousToken = config.token;
         this.previousRequests = config.maxServerRequests;
         this.previousTimeout = config.serverTimeout;
@@ -115,6 +119,7 @@ public class NetworkServerTest {
         NetworkServer.stop();
         final var config = WaterMediaConfig.network;
         config.serverBindAddress = this.previousBind;
+        config.remoteUrl = this.previousRemote;
         config.token = this.previousToken;
         config.maxServerRequests = this.previousRequests;
         config.serverTimeout = this.previousTimeout;
@@ -129,6 +134,11 @@ public class NetworkServerTest {
         final InetSocketAddress address = NetworkServer.address();
         assertNotNull(address);
         return address.getPort();
+    }
+
+    // A PORT THAT WAS FREE A MOMENT AGO: THE SOCKET THAT FOUND IT IS ALREADY CLOSED
+    private static int freePort() throws IOException {
+        try (final ServerSocket socket = new ServerSocket(0, 50, InetAddress.getByName("127.0.0.1"))) { return socket.getLocalPort(); }
     }
 
     private static HttpURLConnection open(final String path, final String method) throws IOException {
@@ -587,6 +597,8 @@ public class NetworkServerTest {
                 assertNull(NetworkServer.address());
             }
             NetworkServer.stop();
+            // A FIXED PORT IS VALIDATED THROUGH THE ANNOUNCED ADDRESS
+            WaterMediaConfig.network.remoteUrl = "http://127.0.0.1:" + port + "/";
             NetworkServer.start(port, NetworkServerTest.this.directory);
             assertEquals(200, open("/", "GET").getResponseCode());
         }
@@ -654,6 +666,77 @@ public class NetworkServerTest {
             catch (final SocketException reset) {
                 // A CONNECTION THE SERVER RESET IS DROPPED TOO
             }
+        }
+    }
+
+    @Nested
+    @DisplayName("Port")
+    class Port {
+
+        @Test
+        @DisplayName("A busy port fails the start before the storage is touched")
+        void busyPortFailsBeforeTheStorage() throws Exception {
+            final Path fresh = NetworkServerTest.this.directory.resolve("fresh");
+            try (final ServerSocket occupied = new ServerSocket(0, 50, InetAddress.getByName("127.0.0.1"))) {
+                final IOException closed = assertThrows(IOException.class, () -> NetworkServer.start(occupied.getLocalPort(), fresh));
+                assertTrue(closed.getMessage().startsWith("(wm_err:0726) Failed to start the file server due to closed port " + occupied.getLocalPort()), closed.getMessage());
+            }
+            assertNull(NetworkServer.address());
+            assertFalse(Files.exists(fresh));
+        }
+
+        @Test
+        @DisplayName("A port its remoteUrl reaches starts the server")
+        void reachablePortStarts() throws Exception {
+            final int port = freePort();
+            WaterMediaConfig.network.remoteUrl = "http://127.0.0.1:" + port + "/";
+            NetworkServer.start(port, NetworkServerTest.this.directory);
+            assertEquals(port, port());
+            assertEquals(200, open("/", "GET").getResponseCode());
+        }
+
+        @Test
+        @DisplayName("A remoteUrl nothing answers fails the start and gives the port and the storage back")
+        void unreachableRemoteFailsAndReleases() throws Exception {
+            final Path directory = NetworkServerTest.this.directory;
+            final int port = freePort();
+            int silent = freePort();
+            while (silent == port) silent = freePort();
+            WaterMediaConfig.network.remoteUrl = "http://127.0.0.1:" + silent + "/";
+            final IOException closed = assertThrows(IOException.class, () -> NetworkServer.start(port, directory));
+            assertTrue(closed.getMessage().startsWith("(wm_err:0729) Failed to start the file server due to closed port " + port), closed.getMessage());
+            assertNull(NetworkServer.address());
+            try (final ServerSocket released = new ServerSocket(port, 50, InetAddress.getByName("127.0.0.1"))) {
+                assertTrue(released.isBound());
+            }
+            try (final FileChannel contender = FileChannel.open(directory.resolve("watermedia/files/.server.lock"), StandardOpenOption.WRITE);
+                 final FileLock released = contender.tryLock()) {
+                assertNotNull(released);
+            }
+            WaterMediaConfig.network.remoteUrl = "http://127.0.0.1:" + port + "/";
+            NetworkServer.start(port, directory);
+            assertEquals(port, port());
+        }
+
+        @Test
+        @DisplayName("A remoteUrl answered by another service fails the start")
+        void foreignAnswerFails() throws Exception {
+            final int port = freePort();
+            try (final LocalHttp other = LocalHttp.start("/", exchange -> LocalHttp.respond(exchange, "text/plain", "nginx".getBytes(StandardCharsets.UTF_8), 0))) {
+                WaterMediaConfig.network.remoteUrl = other.uri("/").toString();
+                final IOException closed = assertThrows(IOException.class, () -> NetworkServer.start(port, NetworkServerTest.this.directory));
+                assertTrue(closed.getMessage().endsWith("does not reach it"), closed.getMessage());
+            }
+            assertNull(NetworkServer.address());
+        }
+
+        @Test
+        @DisplayName("A remoteUrl that is no http(s) address fails the start")
+        void invalidRemoteFails() throws Exception {
+            final int port = freePort();
+            WaterMediaConfig.network.remoteUrl = "remote.invalid/upload";
+            assertThrows(IllegalStateException.class, () -> NetworkServer.start(port, NetworkServerTest.this.directory));
+            assertNull(NetworkServer.address());
         }
     }
 }
