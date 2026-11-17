@@ -78,6 +78,9 @@ def intervals = [
         // JAVA KEEPS COMPATIBILITY BETWEEN RELEASES, SO ONE RANGE SPANS FROM THE OLDEST TO THE NEWEST LISTED MAJOR
         java: [[javaReleases[0], ceiling(javaReleases[-1], 1)]]
 ]
+// openranges LEAVES EACH LINE ABOVE OPEN FROM ITS OLDEST MINIMUM, AS A [low, null) SPAN WITHOUT CEILING: BINARIES ONLY
+// SHIPS NATIVES AND WATERMEDIA ALREADY REJECTS THE VERSIONS IT DOESN'T SUPPORT
+if (findProperty('openranges')?.toString()?.toBoolean()) intervals.replaceAll { name, spans -> [[spans[0][0], null]] }
 // THE COMPANION MOD (BINARIES FOR WATERMEDIA, WATERMEDIA FOR BINARIES) CLOSES AT ITS NEXT MINOR
 ['binaries', 'watermedia'].each { name ->
     def versions = list(name + 'versions')
@@ -85,13 +88,13 @@ def intervals = [
 }
 
 // RESOURCES READ "<name>range" AS A MAVEN RANGE, AND "<name>depends" AND "<name>breaks" AS THE FABRIC PREDICATES THAT
-// MATCH THE INTERVALS AND THE GAPS AROUND THEM: BELOW THE FIRST, BETWEEN NEIGHBOURS AND ABOVE THE LAST
+// MATCH THE INTERVALS AND THE GAPS AROUND THEM: BELOW THE FIRST, BETWEEN NEIGHBOURS AND ABOVE THE LAST (UNLESS IT'S OPEN)
 Map<String, String> loaderValues = [:]
 intervals.each { String name, List<List<String>> spans ->
-    def above = spans.collect { low, high -> low == high ? ">$low" : ">=$high" }
-    def gaps = spans.withIndex().collect { List<String> span, Integer i -> (i ? above[i - 1] + ' ' : '') + '<' + span[0] } + above[-1]
-    loaderValues[name + 'range'] = spans.collect { low, high -> low == high ? "[$low]" : "[$low,$high)" }.join(',')
-    loaderValues[name + 'depends'] = JsonOutput.toJson(spans.collect { low, high -> low == high ? low : ">=$low <$high" })
+    def above = spans.collect { low, high -> low == high ? ">$low" : high ? ">=$high" : null }
+    def gaps = spans.withIndex().collect { List<String> span, Integer i -> (i ? above[i - 1] + ' ' : '') + '<' + span[0] } + (above[-1] ?: [])
+    loaderValues[name + 'range'] = spans.collect { low, high -> low == high ? "[$low]" : "[$low,${high ?: ''})" }.join(',')
+    loaderValues[name + 'depends'] = JsonOutput.toJson(spans.collect { low, high -> low == high ? low : high ? ">=$low <$high" : ">=$low" })
     loaderValues[name + 'breaks'] = JsonOutput.toJson(gaps)
 }
 
