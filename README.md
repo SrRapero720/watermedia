@@ -17,7 +17,7 @@ Pictures go through our own pure-Java decoders and everything else through _FFmp
 [_WATERMeDIA: Binaries_](https://www.curseforge.com/minecraft/mc-mods/watermedia-binaries). Nothing to compile or
 install, just plug and play.
 
-Supports Forge, NeoForge and Fabric on every Minecraft version from 1.18.2 to 26.2 that runs on Java 17 or newer,
+Supports Forge, NeoForge and Fabric on every Minecraft version from 1.18.2 to 26.3 that runs on Java 17 or newer,
 on clients and dedicated servers. It also runs outside Minecraft: opening the jar launches a full media player, and
 any Java app can embed the API.
 
@@ -143,13 +143,13 @@ that offers uploads.
    `remoteUrl`:
    ```toml
    [network]
-     server = "DEDICATED"
-     serverBindAddress = "0.0.0.0"
-     serverPort = 25572
-     remoteUrl = "http://play.example.com:25572/"
-     token = "a-long-secret-only-you-know"
+     server = "DEDICATED" # use ALWAYS to have the server in singleplayer
+     serverBindAddress = "0.0.0.0" # we recommend to use the server address to ensure port availability
+     serverPort = 25572 # ensure port is open in your local machine or in your server
+     remoteUrl = "http://play.example.com:25572/" # Address that points to your file server, same as your server
+     token = "a-long-secret-only-you-know" # a small wall to prevent unwanted queries to your server, rotate it on modpack updates
    ```
-2. Open that port (TCP) in your firewall or your host's panel; WATERMeDIA doesn't open it for you.
+2. IMPORTANT: Open that port (TCP) in your firewall, ONT/NAT or your host's panel (KineticHosting makes this easier).
 3. Copy the same `remoteUrl` and `token` into the `config/watermedia.toml` of every player. Modpacks can ship it.
 
 - The server won't start for outside players while `token` keeps its default value. Change it on every server
