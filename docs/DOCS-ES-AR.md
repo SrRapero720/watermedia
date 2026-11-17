@@ -23,7 +23,7 @@ Cada número te dice qué cambió y si te puede romper algo.
 - ``X``: Reescritura total: todo lo que conocés de la librería se tiró abajo y se rehízo desde cero
 - ``Y``: Cambios que rompen: refactors, renombres y eliminaciones de API que pueden romper (o directamente van a romper)
   tu implementación
-- ``Z``: Hotfixes, mejoras, API nueva y anotaciones de deprecación, nada que rompa.
+- ``Z``: Hotfixes, parches, mejoras, API nueva y anotaciones de deprecación, nada que rompa.
 - ``<channel>``: canales ALPHA o BETA; las versiones release no usan este sufijo
   - Nota: a veces se omite a propósito, porque algunos modloaders rompen los rangos de versiones con él.
 - ``W``: número de entrega ALPHA o BETA, se omite en el canal release
@@ -97,6 +97,11 @@ Leé [arranque](#1-arranque), [paquetes públicos e internos](#12-paquetes-públ
   reader, sniff y encoder de `CodecsAPI` son experimentales: no las uses en mods; sus chequeos de estado son seguros.
 - Los servidores dedicados tienen `ServerMediaPlayer`, `PlatformAPI`, las subidas de `NetworkAPI`, el servidor de
   archivos y los códecs de imagen en Java puro; los reproductores y los motores lanzan excepciones ahí.
+- Rechazá el uso de la API `java.lang.reflect` a toda costa: llamá a los métodos directamente dentro de
+  `try {} catch (Throwable t) {}` o de un wrapper de llamada segura. Si la implementación existente usa reflexión,
+  reescribila con llamadas directas a los métodos.
+- Evitá las API marcadas como experimentales. Cuando necesites una, escribí una implementación segura que aguante
+  cambios inesperados que rompen en las actualizaciones de parche.
 
 # 0. INSTALACIÓN
 En Minecraft solo sumá WATERMeDIA y _WATERMeDIA: Binaries_ como dependencias (mirá

@@ -18,7 +18,7 @@ _VLCJ_，会觉得很熟悉，不过这里的一切都已准备就绪：你永�
 ``X.Y.Z-<channel>.W``
 - ``X``：完全重写，你对这个库了解的一切都被推翻，并从零重新构建
 - ``Y``：破坏性变更，即可能或一定会破坏你现有实现的重构、重命名和 API 移除
-- ``Z``：热修复、改进、新 API 和弃用注解，不含任何破坏性变更。
+- ``Z``：热修复、补丁、改进、新 API 和弃用注解，不含任何破坏性变更。
 - ``<channel>``：ALPHA 或 BETA 渠道，正式版不使用这个版本后缀
   - 注意：有时会故意省略它，因为有些模组加载器遇到它会弄坏版本范围。
 - ``W``：ALPHA 或 BETA 的发布序号，在正式版渠道上省略
@@ -81,6 +81,9 @@ _VLCJ_，会觉得很熟悉，不过这里的一切都已准备就绪：你永�
   调用是实验性的：不要在模组中使用；它的状态检查方法可以放心使用。
 - 专用服务器上可用的有 `ServerMediaPlayer`、`PlatformAPI`、`NetworkAPI` 上传、文件服务器和纯 Java
   图片编解码器；在那里使用播放器和引擎会抛出异常。
+- 无论如何都要拒绝使用 `java.lang.reflect` API：改为在 `try {} catch (Throwable t) {}`
+  或安全调用包装器中直接调用方法。如果现有实现使用了反射，请把它改写为直接的方法调用。
+- 尽量避免使用标记为实验性的 API。确实需要时，请编写安全的实现，以应对补丁更新中意外出现的破坏性变更。
 
 # 0. 环境准备
 在 Minecraft 上，只需把 WATERMeDIA 和 _WATERMeDIA: Binaries_ 添加为依赖（见
@@ -269,8 +272,8 @@ Forge、NeoForge 和 Fabric 会在以下版本的客户端和专用服务器上�
 - 会重复出现的问题（缓冲区过短、布局被拒绝、回调失败、上传被拒绝）在每个引擎、播放器、
   服务器或缓存中只在第一次出现时记录。过慢的迭代会被计数，并在结束时汇报一次。
 - _FFmpeg_ 仍会把它自己的日志写到错误输出，不经过项目日志记录器及其机密过滤器。
-- 每条异常消息和每行错误日志都带有形如 `(wm_err:0720)` 的代码。每个代码都是一个 `WaterMedia.ERR_*` 常量，对应 WATERMeDIA 中的一处位置，
-  报告问题时请附上它；应用的 **Upload Logs** 会列出找到的代码。
+- 每条异常消息和每行错误日志都带有形如 `(wm_err:0720)` 的代码。每个代码都是一个 `WaterMedia.ERR_*` 常量，对应 WATERMeDIA
+  中的一处位置，报告问题时请附上它；应用的 **Upload Logs** 会列出找到的代码。
 - `-Dwatermedia.glchecks=true` 会在上传帧时开启 OpenGL 错误检查。
 
 `src/test/java/org/watermedia/ApiGuideExample.java`
@@ -796,8 +799,9 @@ player.sync(snapshot); // ON THE CLIENT, FOR EVERY SNAPSHOT RECEIVED
 3. 在服务器和每个客户端上，把 `network.remoteUrl` 指向服务器的公网地址和端口。
 4. 给服务器和每个客户端设置相同的自定义 `network.token`。
 
-启动时，服务器会检查自己的端口：它在 `serverBindAddress` 上必须空闲，并且 `network.remoteUrl` 必须由这同一台服务器应答。任一检查失败（端口被占用或未开放、
-`remoteUrl` 填错、路由器不支持 NAT 回环）时，服务器保持关闭，日志会说明原因。
+启动时，服务器会检查自己的端口：它在 `serverBindAddress` 上必须空闲，并且 `network.remoteUrl`
+必须由这同一台服务器应答。任一检查失败（端口被占用或未开放、`remoteUrl` 填错、路由器不支持 NAT
+回环）时，服务器保持关闭，日志会说明原因。
 
 上传的文件存放在服务器工作目录下的 `watermedia/files` 中；在那里删除它们即可释放空间。
 
@@ -815,8 +819,9 @@ if (status.completed()) {
 `NetworkAPI.upload` 在后台上传，并为每个文件返回一个 `UploadStatus`：`percentage()` 和 `displaySpeed()`
 跟踪传输进度，`cancel()` 停止传输，`error()` 说明失败的原因。
 
-`NetworkAPI.serverEnabled()` 告诉你文件服务器是否已启动。运行它的主机会立即得到 true；其他主机会在后台请求 `network.remoteUrl`，
-在服务器应答之前得到 false。一旦为 true 就保持 true，所以在提供上传之前，请从 tick 或界面定时器中查询它。
+`NetworkAPI.serverEnabled()` 告诉你文件服务器是否已启动。运行它的主机会立即得到 true；其他主机会在后台请求
+`network.remoteUrl`，在服务器应答之前得到 false。一旦为 true 就保持 true，所以在提供上传之前，请从 tick
+或界面定时器中查询它。
 
 ## 4.2 下载
 > [!NOTE]

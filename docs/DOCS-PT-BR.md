@@ -23,7 +23,7 @@ Cada número diz o que mudou e se isso pode quebrar alguma coisa.
 - ``X``: Reescrita completa: tudo o que você conhece da biblioteca foi jogado fora e refeito do zero
 - ``Y``: Mudanças que quebram: Refatorações, renomeações e remoções de API que podem quebrar (ou vão quebrar) a sua
   implementação
-- ``Z``: Hotfix, Melhorias, API nova e Anotações de depreciação, nada que quebre.
+- ``Z``: Hotfix, Patch, Melhorias, API nova e Anotações de depreciação, nada que quebre.
 - ``<channel>``: Canais ALPHA ou BETA; a release não usa este sufixo de versão
   - Obs.: às vezes ele fica de fora de propósito, porque alguns modloaders quebram os intervalos de versão com ele.
 - ``W``: Lançamento da versão ALPHA ou BETA, omitido no canal release
@@ -97,6 +97,11 @@ antes de escrever código de integração. Estas regras são requisitos obrigat�
   encoder da `CodecsAPI` são experimentais: não use em mods; as verificações de status dela são seguras.
 - Servidores dedicados têm `ServerMediaPlayer`, `PlatformAPI`, os uploads da `NetworkAPI`, o servidor de arquivos e os
   codecs de imagem em Java puro; players e engines lançam exceção lá.
+- Recuse o uso da API `java.lang.reflect` a todo custo: chame os métodos diretamente dentro de
+  `try {} catch (Throwable t) {}` ou de um wrapper de chamada segura. Se a implementação existente usa reflexão,
+  reescreva com chamadas diretas aos métodos.
+- Evite APIs marcadas como experimentais. Quando precisar de uma, escreva uma implementação segura que aguente mudanças
+  inesperadas que quebram nas atualizações de patch.
 
 # 0. INSTALAÇÃO
 No Minecraft, basta adicionar o WATERMeDIA e o _WATERMeDIA: Binaries_ como dependências (veja

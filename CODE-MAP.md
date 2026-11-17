@@ -1,5 +1,9 @@
 # CODE-MAP: WaterMedia
 
+> NOTE: WATERMEDIA IS NOW ON RELEASE CHANNEL, WHICH MEANS NO BREAKING CHANGES WOULD BE ALLOWED ON PUBLIC API, EXCEPT EXPERIMENTAL APIS
+> 
+> CURRENT EXPERIMENTAL APIS: CodecsAPI
+
 Reference map of this repository for agents. Read it before every task and keep it current: when a task changes
 behavior, API, layout or rules, update the matching section (never leave it describing the old code).
 Mapped on 2026-10-30 against version `3.0.0` (`RELEASE`); counts (files, latches, throw sites) are as of that date.
@@ -237,9 +241,14 @@ Package map (`src/main/java/org/watermedia`):
 - Loader ranges (`common.gradle`): each `<name>versions` property lists ascending minimum versions; `ceiling(v, line)`
   increments the component that names the line; `range(...)` yields `[low,high)` intervals (merged when adjacent;
   `release=true` makes `X.Y.Z` an exact match and resumes at `X.Y.Z+1`). Outputs `<name>range` (Maven),
-  `<name>depends` and `<name>breaks` (Fabric JSON predicates). Examples: `forgerange=[40.3.10,41),...,[64,66)`,
-  `neorange=[21.1.0,21.2),...`, `javarange=[17,26)`, `minecraftrange=[1.18.2],[1.19.2],...` (exact),
-  `binariesrange=[3.0.0],[3.0.1,3.1)`. The Binaries build computes `watermediarange` the same way.
+  `<name>depends` and `<name>breaks` (Fabric JSON predicates). Examples: `forgerange=[40.3.10,41),...,[64,67)`,
+  `neorange=[21.1.0,21.2),...`, `neofmlrange=[4,5),[10,13)`, `javarange=[17,26)`,
+  `minecraftrange=[1.18.2],[1.19.2],...` (exact), `binariesrange=[3.0.0],[3.0.1,3.1)`. Forge 66 and NeoForge 26.3.0.x
+  (FML 12) are MC 26.3. The Binaries build computes `watermediarange` the same way.
+- `openranges=true` (Binaries only) turns every game, loader and Java interval into one `[low, null)` span from its
+  oldest minimum: Maven `[40.3.10,)`, Fabric `>=1.18.2`, no gap above. Its loader lists keep only that minimum;
+  `minecraftversions` and `javaversions` stay full because the stores publish them. The companion `watermediarange`
+  stays closed. ⚠ The core keeps exact Minecraft matches and closed loader lines.
 - `publishMods`: CurseForge (`curseforgeid`, `CURSEFORGE_TOKEN`, Minecraft + Java versions, client and server required,
   `requires('watermedia-binaries')`), Modrinth (`modrinthid`, `MODRINTH_TOKEN`) and GitHub (`publishGithub`: release of
   tag `version` in the `github` repository, `GITHUB_TOKEN`, `GITHUB_SHA` as commitish, the jar plus the sources jar,

@@ -22,7 +22,7 @@ Each number tells you what changed and whether it can break something.
 ``X.Y.Z-<channel>.W``
 - ``X``: Full rewrite: everything you know about the library got scrapped and rebuilt from scratch
 - ``Y``: Breaking changes: Refactors, renames, and API removals that might or will break your implementation
-- ``Z``: Hotfix, Enhancements, new API and deprecation Annotations, nothing breaking.
+- ``Z``: Hotfix, Patch, Enhancements, new API and deprecation Annotations, nothing breaking.
 - ``<channel>``: ALPHA or BETA channels, release doesn't use this version suffix
   - Note: sometimes it's left out on purpose, because some modloaders break version ranges with it.
 - ``W``: ALPHA or BETA version drop, omitted when on the release channel
@@ -93,6 +93,10 @@ Read [startup](#1-startup), [public and internal packages](#12-public-and-intern
   encoder calls are experimental: don't use them in mods; its status checks are safe.
 - Dedicated servers get `ServerMediaPlayer`, `PlatformAPI`, `NetworkAPI` uploads, the file server and the pure Java
   image codecs; players and engines throw there.
+- Refuse to use the `java.lang.reflect` API at all costs: call methods directly inside `try {} catch (Throwable t) {}`
+  or a safe call wrapper. If the existing implementation uses reflection, rewrite it to direct method calls.
+- Avoid APIs marked as experimental. When you need one, write a safe implementation that withstands unexpected breaking
+  changes in patch updates.
 
 # 0. SETUP
 On Minecraft just add WATERMeDIA and _WATERMeDIA: Binaries_ as dependencies (see
