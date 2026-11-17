@@ -187,10 +187,10 @@ The generic version of these rules lives in AGENTS.md → "Code pattern"; this i
 | `src/main/java/org/watermedia/` | `WaterMedia` (entry), `WaterMediaConfig` (TOML spec), `api/` (public API), `bootstrap/` (loader entry points, launcher, app), `tools/` (internal utilities) |
 | `src/main/resources/` | `META-INF/mods.toml`, `META-INF/neoforge.mods.toml`, `fabric.mod.json`, `pack.mcmeta`, `icon.png`, `pack.png`, `assets/watermedia/{shaders,font,textures,sounds,catalog}`, `META-INF/licenses/{javacpp,jetbrainsmono}-LICENSE.txt` |
 | `src/test/java/org/watermedia/` | Tests mirroring the main packages, child-JVM probes (`*Probe.java` + `*ProcessTest`), `test/support` helpers; `src/test/resources` fixtures (`pentest/` hostile corpus); `src/test/tools/GeneratePngReference.java` |
-| `binaries/` | Included build of "WaterMedia: Binaries": `src/main/java/org/watermedia/binaries` (module + provisioning), `src/main/resources/libs/ffmpeg-*.zip`, `libs/ffmpeg-<ver>.jar`, `tools/` (rebuild and verification scripts), own `gradle.properties`, `CHANGELOG.md`, `.github/workflows` |
+| `binaries/` | Included build of "WaterMedia: Binaries": `src/main/java/org/watermedia/binaries` (module + provisioning), `src/main/resources/libs/ffmpeg-*.zip`, `libs/ffmpeg-<ver>.jar`, `tools/` (rebuild and verification scripts), own `gradle.properties`, `CHANGELOG.md`, `.github/workflows`, `docs/assets` (OS icons of its README) |
 | `modloaders/` | Compile-only stubs of Forge/NeoForge/Fabric loader classes (bodies throw "Stub!"), never shipped |
 | `gradle/common.gradle` | Shared Java/JUnit setup, loader range math, `processResources` expansion, jar manifest, `publishMods` validation, store description sync |
-| `docs/` | `DOCS-EN-US.md` (API guide) and its five translations `DOCS-<LANG>.md` (see §18), `BLUEPRINTS.md` (the guide's outline), `animated-picture-stream-spec.md` (APS example spec) |
+| `docs/` | `DOCS-EN-US.md` (API guide) and its five translations `DOCS-<LANG>.md` (see §18), `BLUEPRINTS.md` (the guide's outline), `animated-picture-stream-spec.md` (APS example spec), `assets/` (README icons, see §18) |
 | `scripts/ai/` | Agent check scripts (PowerShell 7, exit code 1 on failure): `check-translations.ps1` (every `DOCS-<LANG>.md` against `DOCS-EN-US.md`), `check-wiki.ps1` (the `/documentation/` wiki clone against the docs), `wrap-docs.ps1` (reflows docs prose at 120 columns into a scratch folder, `-Wiki` gives the pages the same breaks), see §0 and §18 |
 | `config/` | Gitignored runtime files of the app (`watermedia.toml`, `waterconfig.toml`, `app.properties`); the repo copy of `watermedia.toml` is stale (old key names), the Java spec is the authority |
 | `run/` | Working directory of the IntelliJ run configuration `WaterMedia App` (`run/config`, `run/logs` gitignored) |
@@ -1485,7 +1485,12 @@ System properties: `watermedia.engine`, `watermedia.app` (child JVM flag), `wate
      picker present, each language's pages joined in order equal to its doc, no stray pages); both must pass.
   4. Commit the wiki in the git format and push it right after the docs commit.
 - `README.md`: landing page (projects, donations, basic usage, engines, Vulkan contract incl. Minecraft 26.x,
-  available APIs, Binaries, license). `WATER.md`: `water://` spec. `docs/animated-picture-stream-spec.md`: APS example
+  available APIs, Binaries, license). Supported platforms and supported OSes are centered icon rows
+  (`<p align="center" style="text-align: center;">` of `<img>` with `width`, `height`, `alt` and `title`): 128x128
+  pixel art from `docs/assets/` (platforms at 48 px, OSes at 64 px), and `binaries/README.md` reads its own copies in
+  `binaries/docs/assets/`. ⚠ Icons go by absolute `raw.githubusercontent.com/.../master/docs/assets/` links, since
+  the stores receive the README as is: a new icon shows only after its push. ↪ A new platform adds its icon to the
+  row; Linux ARM64 has no icon yet and stays as text. `WATER.md`: `water://` spec. `docs/animated-picture-stream-spec.md`: APS example
   (never implement). `binaries/tools/NATIVE_REBUILD.md`: native rebuild, repack, reviewed CVEs.
 - `TODO.md`: BCn uploads in GL/VK, HDR tone mapping from metadata and on software engines, real version in IDE runs,
   Vulkan frame-texture fast path. `PENDING.md`: host validation ledger (H1..H15, Spanish).

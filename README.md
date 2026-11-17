@@ -53,16 +53,37 @@ any Java app can embed the API.
 
 <h1 style="color: #EB622B;"><strong>🌐 SUPPORTED PLATFORMS</strong></h1>
 
-- 📺 YouTube, Twitch, Kick, BiliBili, Odysee, D.Tube, VidLii
-- 🐦 Twitter (X), Bluesky, TikTok, Facebook, Instagram
-- 🎵 SoundCloud, Newgrounds (movies, music and art)
-- 🖼️ Imgur, Lightshot, Medal, Streamable, Sendvid
-- 📁 Google Drive, Dropbox, MediaFire
-- 🔞 PornHub (only with mature content allowed in the settings)
-- 🔗 Direct links to any video, music, picture or playlist, local files and `water://` resources
+<p align="center" style="text-align: center;">
+<img src="https://raw.githubusercontent.com/SrRapero720/watermedia/master/docs/assets/youtube2.png" width="48" height="48" alt="YouTube" title="YouTube">
+<img src="https://raw.githubusercontent.com/SrRapero720/watermedia/master/docs/assets/twitch.png" width="48" height="48" alt="Twitch" title="Twitch">
+<img src="https://raw.githubusercontent.com/SrRapero720/watermedia/master/docs/assets/kick.png" width="48" height="48" alt="Kick" title="Kick">
+<img src="https://raw.githubusercontent.com/SrRapero720/watermedia/master/docs/assets/bilibili.png" width="48" height="48" alt="BiliBili" title="BiliBili">
+<img src="https://raw.githubusercontent.com/SrRapero720/watermedia/master/docs/assets/odysee.png" width="48" height="48" alt="Odysee" title="Odysee">
+<img src="https://raw.githubusercontent.com/SrRapero720/watermedia/master/docs/assets/dtube2.png" width="48" height="48" alt="D.Tube" title="D.Tube">
+<img src="https://raw.githubusercontent.com/SrRapero720/watermedia/master/docs/assets/vidlee.png" width="48" height="48" alt="VidLii" title="VidLii">
+<img src="https://raw.githubusercontent.com/SrRapero720/watermedia/master/docs/assets/twitter.png" width="48" height="48" alt="Twitter (X)" title="Twitter (X)">
+<img src="https://raw.githubusercontent.com/SrRapero720/watermedia/master/docs/assets/bluesky.png" width="48" height="48" alt="Bluesky" title="Bluesky">
+<img src="https://raw.githubusercontent.com/SrRapero720/watermedia/master/docs/assets/tiktok2.png" width="48" height="48" alt="TikTok" title="TikTok">
+<img src="https://raw.githubusercontent.com/SrRapero720/watermedia/master/docs/assets/facebook.png" width="48" height="48" alt="Facebook" title="Facebook">
+<img src="https://raw.githubusercontent.com/SrRapero720/watermedia/master/docs/assets/instagram.png" width="48" height="48" alt="Instagram" title="Instagram">
+<img src="https://raw.githubusercontent.com/SrRapero720/watermedia/master/docs/assets/soundcloud.png" width="48" height="48" alt="SoundCloud" title="SoundCloud">
+<img src="https://raw.githubusercontent.com/SrRapero720/watermedia/master/docs/assets/newgrounds2.png" width="48" height="48" alt="Newgrounds" title="Newgrounds">
+<img src="https://raw.githubusercontent.com/SrRapero720/watermedia/master/docs/assets/imgur.png" width="48" height="48" alt="Imgur" title="Imgur">
+<img src="https://raw.githubusercontent.com/SrRapero720/watermedia/master/docs/assets/lightshot2.png" width="48" height="48" alt="Lightshot" title="Lightshot">
+<img src="https://raw.githubusercontent.com/SrRapero720/watermedia/master/docs/assets/medal.png" width="48" height="48" alt="Medal" title="Medal">
+<img src="https://raw.githubusercontent.com/SrRapero720/watermedia/master/docs/assets/streamable.png" width="48" height="48" alt="Streamable" title="Streamable">
+<img src="https://raw.githubusercontent.com/SrRapero720/watermedia/master/docs/assets/sendvid.png" width="48" height="48" alt="Sendvid" title="Sendvid">
+<img src="https://raw.githubusercontent.com/SrRapero720/watermedia/master/docs/assets/googoodrive.png" width="48" height="48" alt="Google Drive" title="Google Drive">
+<img src="https://raw.githubusercontent.com/SrRapero720/watermedia/master/docs/assets/dropbox.png" width="48" height="48" alt="Dropbox" title="Dropbox">
+<img src="https://raw.githubusercontent.com/SrRapero720/watermedia/master/docs/assets/mediafire.png" width="48" height="48" alt="MediaFire" title="MediaFire">
+<img src="https://raw.githubusercontent.com/SrRapero720/watermedia/master/docs/assets/porkhub.png" width="48" height="48" alt="PornHub" title="PornHub">
+</p>
 
-YouTube, SoundCloud, Facebook and Instagram play through _yt-dlp_, which requires _WATERMeDIA: Binaries_. BiliBili
-plays up to 1080p (8K with VIP) when you add your session cookie in the settings; without it, up to 480p.
+- Direct links to any video, music, picture or playlist, local files and `water://` resources play too
+- YouTube, SoundCloud, Facebook and Instagram play through _yt-dlp_, which requires _WATERMeDIA: Binaries_
+- BiliBili plays up to 1080p (8K with VIP) when you add your session cookie in the settings; without it, up to 480p
+- Newgrounds plays movies, music and art
+- PornHub plays only with mature content allowed in the settings
 
 <h1 style="color: #EB622B;"><strong>🧩 MODS USING WATERMeDIA</strong></h1>
 
@@ -96,11 +117,14 @@ this repository under [`binaries/`](https://github.com/SrRapero720/watermedia/tr
 - Apps embedding the Java API can run without it, keeping picture support but losing video decoding and the
   platforms backed by _yt-dlp_
 
-<table width="100%" style="width: 100%">
-  <tr><th>Architecture</th><th align="center">Windows</th><th align="center">Linux</th><th align="center">macOS</th><th align="center">Android</th></tr>
-  <tr><td>x86_64</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">⛔</td></tr>
-  <tr><td>aarch64</td><td align="center">⛔</td><td align="center">✅</td><td align="center">✅</td><td align="center">⛔</td></tr>
-</table>
+<p align="center" style="text-align: center;">
+<img src="https://raw.githubusercontent.com/SrRapero720/watermedia/master/docs/assets/windows64.png" width="64" height="64" alt="Windows x64" title="Windows x64">
+<img src="https://raw.githubusercontent.com/SrRapero720/watermedia/master/docs/assets/linux64.png" width="64" height="64" alt="Linux x64" title="Linux x64">
+<img src="https://raw.githubusercontent.com/SrRapero720/watermedia/master/docs/assets/mac64.png" width="64" height="64" alt="macOS Intel" title="macOS Intel">
+<img src="https://raw.githubusercontent.com/SrRapero720/watermedia/master/docs/assets/macarm.png" width="64" height="64" alt="macOS Apple Silicon" title="macOS Apple Silicon">
+</p>
+
+Linux runs on ARM64 too. Windows on ARM and Android aren't supported.
 
 <h1 style="color: #EB622B;"><strong>🎮 CREATE YOUR SERVER AT LOW PRICES</strong></h1>
 
