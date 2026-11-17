@@ -433,7 +433,7 @@ public final class MRLSelectorScreen extends BaseScreen {
                 this.ctx.requestRender();
             }
             case ERROR -> this.ctx.showError("Error", "Unable to open media, exception occurred on opening", null);
-            case BLOCKED -> this.ctx.showError("Blocked", "This media was blocked by the platform", null);
+            case BLOCKED -> this.ctx.showError("Blocked", Previews.blocked(mrl), null);
             // EXPIRED OR CACHE-EVICTED MRLS ARE UNUSABLE: DROP THE CACHED ONE SO THE NEXT ACCESS REGENERATES IT
             case EXPIRED, FORGOTTEN -> this.ctx.showError("MRL expired", "Re-freshing MRL", () -> {
                 this.ctx.media.selectedMRL = null;

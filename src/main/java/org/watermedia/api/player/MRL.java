@@ -122,7 +122,7 @@ public final class MRL {
         }
     }
 
-    /** Returns the load failure, cleared on {@link #reload()}: a {@link MatureContentException} when blocked, a {@link PlatformException} for platform or I/O failures, else the raw error. */
+    /** Returns the load failure, cleared on {@link #reload()}: a {@link MatureContentException}, {@link WhitelistException} or {@link BlacklistException} when blocked, a {@link PlatformException} for platform or I/O failures, else the raw error. */
     public Throwable exception() {
         return this.exception;
     }
@@ -232,6 +232,18 @@ public final class MRL {
         return mrl;
     }
 
+    // A LINK THE SITE LISTS REFUSE AFTER IT RESOLVED LOSES ITS SOURCES AND GOES BLOCKED, SO ITS HOLDERS STOP ASKING FOR PLAYERS
+    void block(final IOException refusal) {
+        synchronized (this.loadLock) {
+            if (this.sources == null) return; // NOTHING RESOLVED TO TAKE BACK, OR A RELOAD IS ALREADY JUDGING IT AGAIN
+            this.sources = null;
+            this.expiresAt = null;
+            this.exception = refusal;
+            this.status = Status.BLOCKED;
+        }
+        LOGGER.warn(IT, "Blocked {}: {}", this.uri, refusal.getMessage());
+    }
+
     // RELABELS THE UNKNOWN QUALITY OF SOURCE sourceIndex AS to ONCE A PLAYER DECODED THE REAL SIZE OF uri; TRUE ALSO WHEN AN EARLIER
     // RUN OR ANOTHER PLAYER ALREADY DID. COPY-ON-WRITE UNDER loadLock; FALSE WHEN uri LEFT UNKNOWN (A RELOAD) OR to IS TAKEN
     boolean moveQuality(final int sourceIndex, final URI uri, final MediaQuality to) {
@@ -308,6 +320,9 @@ public final class MRL {
             LOGGER.error(IT, DataTool.errCode(WaterMedia.ERR_MRL_DISPOSE_FORGOTTEN) + "Failed to dispose forgotten MRLs", ex);
         }
         try {
+            // THE SITE LISTS JUDGE THE LINK BEFORE ANY PLATFORM OR REQUEST TOUCHES IT
+            MediaPlayer.checkSite(this.uri);
+
             // NO HANDLER CLAIMS A DIRECT LINK; THE PROBE BELOW RESOLVES IT FROM ITS CONTENT TYPE
             Platform.Resolution data = PlatformAPI.fetch(this.uri);
             if (data == null) {
@@ -418,14 +433,15 @@ public final class MRL {
             LOGGER.info(IT, "Loaded {} uri(s) for: {}", data.sourceCount(), this.uri);
         } catch (final Throwable t) {
             // STORE THE FAILURE VERBATIM SO exception() EXPOSES THE REAL MESSAGE, CAUSE AND STACK TO DEVS.
+            final boolean blocked = t instanceof MatureContentException || t instanceof BlacklistException || t instanceof WhitelistException;
             synchronized (this.loadLock) {
                 this.exception = t;
-                this.status = t instanceof MatureContentException ? Status.BLOCKED : Status.ERROR;
+                this.status = blocked ? Status.BLOCKED : Status.ERROR;
             }
 
             // A BLOCK IS EXPECTED AND SELF-DESCRIBING (WARN WITHOUT TRACE); EVERY OTHER FAILURE TRAVELS WITH ITS THROWABLE
-            if (t instanceof MatureContentException)
-                LOGGER.warn(IT, "Blocked (mature content disabled) {}: {}", this.uri, t.getMessage());
+            if (blocked)
+                LOGGER.warn(IT, "Blocked {}: {}", this.uri, t.getMessage());
             else
                 LOGGER.error(IT, DataTool.errCode(WaterMedia.ERR_MRL_RESOLVE) + "Failed to resolve {}", this.uri, t);
 
@@ -520,7 +536,7 @@ public final class MRL {
 
         /** Sources are loaded and usable. */
         public boolean loaded() { return this == LOADED; }
-        /** Loading failed: either a plain error or a platform block. */
+        /** Loading failed: either a plain error or a block (mature content or the site lists). */
         public boolean failed() { return this == ERROR || this == BLOCKED; }
         /** A terminal, non-loaded state the user must regenerate from: load failures (ERROR/BLOCKED) plus stale instances (EXPIRED/FORGOTTEN). */
         public boolean regenerable() { return this == ERROR || this == BLOCKED || this == EXPIRED || this == FORGOTTEN; }

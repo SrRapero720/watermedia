@@ -13,6 +13,7 @@ import java.awt.Color;
 import java.lang.reflect.Method;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
 import java.util.Locale;
@@ -275,6 +276,7 @@ final class SettingsModel {
                 final String raw = path.toString();
                 return raw.isBlank() ? "." : raw;
             }
+            if (value instanceof final Object[] items) return items.length == 0 ? "EMPTY" : Arrays.toString(items);
             if (this.control == Control.PASSWORD) {
                 final int len = Math.max(8, String.valueOf(value).length());
                 return "*".repeat(Math.min(32, len));

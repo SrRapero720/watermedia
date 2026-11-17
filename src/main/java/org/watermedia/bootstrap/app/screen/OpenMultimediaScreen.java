@@ -427,7 +427,7 @@ public class OpenMultimediaScreen extends BaseScreen {
                 return;
             }
             case BLOCKED -> {
-                this.ctx.showError("Blocked", "This media was blocked by the platform.", null);
+                this.ctx.showError("Blocked", Previews.blocked(this.previewMRL) + ".", null);
                 return;
             }
             // EXPIRED OR FORGOTTEN MRLS ARE UNUSABLE: REGENERATE A FRESH ONE BEFORE PLAYING

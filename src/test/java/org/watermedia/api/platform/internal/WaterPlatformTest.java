@@ -4,6 +4,8 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import org.watermedia.WaterMedia;
 import org.watermedia.api.network.NetworkAPI;
 import org.watermedia.api.platform.Platform.Resolution;
@@ -11,6 +13,7 @@ import org.watermedia.api.platform.PlatformException;
 import org.watermedia.test.support.MediaBootstrap;
 
 import java.net.URI;
+import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -46,6 +49,37 @@ public class WaterPlatformTest {
         @DisplayName("water://local resolves against the session working directory")
         void testLocalResolvesAgainstCwd() throws PlatformException {
             assertEquals(WaterMedia.cwd().resolve("foo.png").toUri().toString(), WaterPlatform.location(URI.create("water://local/foo.png")));
+        }
+
+        @Test
+        @DisplayName("A plain water://local path stays under the session working directory")
+        void testLocalPathStaysUnderCwd() throws PlatformException {
+            final String location = WaterPlatform.location(URI.create("water://local/a/b.png"));
+            assertEquals(WaterMedia.cwd().resolve("a/b.png").toUri().toString(), location);
+            assertTrue(Path.of(URI.create(location)).startsWith(WaterMedia.cwd()), "The file must live under the working directory, got: " + location);
+        }
+
+        @Test
+        @EnabledOnOs(OS.WINDOWS)
+        @DisplayName("A water://local path that resolves to a Windows share is refused with its code")
+        void testLocalShareIsRefused() {
+            final PlatformException failure = assertThrows(PlatformException.class,
+                    () -> WaterPlatform.location(URI.create("water://local///server/share/x.mp4")));
+            assertEquals("WaterMedia Internal: (wm_err:2043) Failed to resolve the water:// URL due to a network share path: water://local///server/share/x.mp4",
+                    failure.getMessage());
+        }
+
+        @Test
+        @EnabledOnOs(OS.WINDOWS)
+        @DisplayName("Escaped, extra and device spellings of a share path are refused too")
+        void testLocalShareSpellingsAreRefused() {
+            // BACKSLASHES, ESCAPED SLASHES, EXTRA SLASHES AND THE \\.\UNC AND \\?\UNC DEVICE PREFIXES ALL NAME ANOTHER MACHINE
+            for (final String link: new String[] { "water://local/%5C%5Cserver%5Cshare%5Cx.mp4", "water://local/%2F%2Fserver/share/x.mp4",
+                    "water://local////server/share/x.mp4", "water://local/%5C%5C.%5CUNC%5Cserver%5Cshare%5Cx.mp4",
+                    "water://local/%5C%5C%3F%5CUNC%5Cserver%5Cshare%5Cx.mp4" }) {
+                final PlatformException failure = assertThrows(PlatformException.class, () -> WaterPlatform.location(URI.create(link)), link);
+                assertTrue(String.valueOf(failure.getMessage()).contains("(wm_err:2043)"), link + " was refused for another reason: " + failure.getMessage());
+            }
         }
 
         @Test

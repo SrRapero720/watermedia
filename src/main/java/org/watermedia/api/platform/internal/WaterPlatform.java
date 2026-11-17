@@ -50,7 +50,7 @@ public final class WaterPlatform implements Platform {
      *
      * @param u water address to resolve
      * @return the resolved URL text
-     * @throws PlatformException if the address has no supported host
+     * @throws PlatformException if the address has no supported host, or a local path names a network share
      * @throws IllegalStateException if the remote base URL is not configured or WaterMedia has not started
      */
     public static String location(final URI u) throws PlatformException {
@@ -63,6 +63,9 @@ public final class WaterPlatform implements Platform {
                 String path = u.getPath() == null ? "" : u.getPath();
                 if (path.startsWith("/")) path = path.substring(1);
                 final Path file = WaterMedia.cwd().resolve(path);
+                // A PATH WITH EXTRA LEADING SLASHES RESOLVES TO A WINDOWS SHARE (\\server\share): THAT IS ANOTHER MACHINE, NOT LOCAL
+                if (file.getRoot() != null && file.getRoot().toString().startsWith("\\\\"))
+                    throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_WATER_LOCAL_SHARE) + "Failed to resolve the water:// URL due to a network share path: " + u);
                 yield file.toUri().toString();
             }
             // NetworkAPI.remoteUrl() VALIDATES THE CONFIG UP FRONT AND STRIPS THE TRAILING SLASH

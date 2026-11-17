@@ -197,7 +197,7 @@ The defaults work out of the box, fields read at startup apply on the next launc
 file is the first place to check.
 
 - `codecs.*`: _FFmpeg_, hardware decoding and the picture decoders.
-- `player.*`: the default quality and the caches.
+- `player.*`: the default quality, the caches and the site lists.
 - `platforms.*`: mature content, search and platform accounts.
 - `network.*`: the file server and web requests.
 
@@ -305,8 +305,9 @@ makes the tests fail instead of skipping when the _FFmpeg_ natives are missing.
 
 # 2. MANAGING LINKS
 > [!NOTE]
-> Configurable: `platforms.allowMatureContent`, `searchLimit`, `searchCleanupInterval`, `biliBiliCookie` and
-> `player.mrlCleanupInterval`. See their comments in `config/watermedia.toml`.
+> Configurable: `platforms.allowMatureContent`, `searchLimit`, `searchCleanupInterval`, `biliBiliCookie`,
+> `player.mrlCleanupInterval`, `player.whitelist.*` and `player.blacklist.*`. See their comments in
+> `config/watermedia.toml`.
 
 An MRL (Multimedia Resource Location) turns any link into the media it holds: one or more sources, each with its
 qualities, audio tracks and metadata. It resolves in the background and stays cached.
@@ -320,7 +321,7 @@ MRL[] queue = PlayerAPI.preload(firstUri, secondUri);        // START RESOLVING 
 switch (mrl.status()) {
     case FETCHING -> { }                                     // STILL RESOLVING
     case LOADED -> play(mrl);                                // READY TO PLAY
-    case BLOCKED -> showMatureWarning();                     // MATURE CONTENT WHILE IT'S NOT ALLOWED
+    case BLOCKED -> showBlocked(mrl.exception());            // MATURE CONTENT OR A SITE THE LISTS REFUSE
     case ERROR -> showError(mrl.exception());                // WHY IT FAILED; A MALFORMED LINK STARTS HERE
     case EXPIRED, FORGOTTEN -> mrl = mrl.reload();           // STALE OR EVICTED: KEEP THE HANDLE reload() RETURNS
 }
@@ -346,6 +347,11 @@ MediaPlayer player = PlayerAPI.player(mrl, 1, gfx, sfx);     // PLAY THE SOURCE 
 
 A direct link fails when the server answers with an error status or a response that isn't media; HLS playlists open as
 one video and IPTV playlists as one source per channel.
+
+A `BLOCKED` link says why through `mrl.exception()`: a `MatureContentException` for mature content while it's off, a
+`WhitelistException` for a site the whitelist doesn't allow, or a `BlacklistException` for a site the blacklist forbids.
+The site lists read only the link as you wrote it, before any platform or request touches it, so the servers a platform
+streams from are never checked, and `water://global` links always pass.
 
 ## 2.2 PLATFORMS
 Links from these platforms resolve out of the box:
@@ -448,7 +454,8 @@ try {
 ```
 
 `player` returns null when the source is still resolving, the index doesn't exist, the backend is missing or
-construction throws an `Exception` (an `Error` does propagate). Check the MRL status before retrying.
+construction throws an `Exception` (an `Error` does propagate). Check the MRL status before retrying. The site lists are
+checked again here, so a link they refuse by now leaves its MRL `BLOCKED`.
 
 - Suppliers run only when needed, and images never call the audio supplier.
 - A supplier returning null omits that output, such as `() -> null` as the graphics engine for audio-only playback.

@@ -231,22 +231,39 @@ while the game is closed is safe.
 
 <h2 style="color: #EB622B;"><strong>🚦 WHITELIST, BLACKLIST AND MATURE CONTENT</strong></h2>
 
-Choose which sites can play under `[platforms]`:
+Choose which sites can play under `[player.whitelist]` and `[player.blacklist]`:
 
 ```toml
+[player.whitelist]
+  enable = true
+  sites = ["youtube.com", "youtu.be", "192.168.0.1"]
+  trustLocal = true
+
+[player.blacklist]
+  enable = true
+  sites = ["pornhub.com"]
+
 [platforms]
-  allowMatureContent = false
-  whitelist = ["youtube.com", "imgur.com"]
-  blacklist = ["example.com"]
+  allowMatureContent = true
 ```
 
-- `whitelist`: when it lists any site, only links from those sites play. Empty, the default, lets every site play.
-- `blacklist`: links from these sites never play.
-- Both take hostnames only, like `website.com`: no `https://`, paths or `*`.
+- `whitelist`: once `enable` is `true`, only links from its `sites` play. It stays off while `sites` is empty and
+  `trustLocal` is `false`.
+- `trustLocal`: also plays what you host yourself: `water://local` and `water://remote` links, local files,
+  `localhost`, local network IPs and `.local` names.
+- `blacklist`: once `enable` is `true`, links from its `sites` never play, even when the whitelist allows them.
+- `water://global` links always play, and no list can block them.
+- Both lists start off. The whitelist already names YouTube, Twitch, Imgur and Kick, sites that mark their mature
+  content.
+- A config file from an older version doesn't get these tables by itself: copy them from the example above.
+- `sites` takes hostnames or IPs only, like `website.com` or `192.168.0.1`: no `https://`, paths or `*`.
 - `website.com` covers the whole site, subdomains included (`some.website.com`, `another.website.com`), while
   `some.website.com` covers only that subdomain and never `website.com` itself.
+- Only the link you paste is checked: short links need their own entry (`youtu.be` next to `youtube.com`), and the
+  servers a site streams from need none.
 - `allowMatureContent`: mature videos and streams stay blocked until you set it to `true`. It works where the
-  platform marks them, such as Kick, Twitch or Twitter (X), and PornHub needs it to play at all.
+  platform marks them, such as Kick, Twitch or Twitter (X), and PornHub needs it to play at all. To allow mature
+  streams and still keep a site out, add that site to the blacklist, as in the example above.
 
 <h1 style="color: #EB622B;"><strong>💻 FOR DEVELOPERS</strong></h1>
 

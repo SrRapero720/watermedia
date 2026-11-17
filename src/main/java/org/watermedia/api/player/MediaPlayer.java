@@ -4,22 +4,31 @@ import org.apache.logging.log4j.Marker;
 import org.apache.logging.log4j.MarkerManager;
 import org.watermedia.WaterMedia;
 import org.watermedia.WaterMediaConfig;
+import org.watermedia.api.network.NetworkAPI;
+import org.watermedia.api.platform.internal.WaterPlatform;
 import org.watermedia.api.util.MathUtil;
 import org.watermedia.api.util.MediaQuality;
 import org.watermedia.tools.DataTool;
 import org.watermedia.tools.ThreadTool;
 
+import java.net.IDN;
+import java.net.Inet6Address;
+import java.net.InetAddress;
 import java.net.URI;
+import java.net.UnknownHostException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import static org.watermedia.WaterMedia.LOGGER;
 
@@ -46,6 +55,13 @@ public abstract sealed class MediaPlayer permits ServerMediaPlayer, FFMediaPlaye
     // FOLLOWER CORRECTION CONSTANTS
     private static final long SEEK_COOLDOWN_NS = 1_000_000_000L; // 1s BETWEEN SEEKS WHILE THE PIPELINE RESETTLES
     private static final long SKIP_STEP_MS = 5_000L;             // forward()/rewind() DISTANCE FOR VIDEO AND MUSIC
+
+    // SITE LISTS: A PLAIN IPv4 IS FOUR DECIMALS WITHOUT LEADING ZEROS. A DISGUISED HOST HIDES WHERE IT LEADS: IT KEEPS A MARK THE
+    // PARSERS READ DIFFERENTLY (@, %, ?), IT IS THE IPv6 ALIAS OF WINDOWS, OR ITS LAST LABEL IS A NUMBER, WHICH NO DOMAIN
+    // HAS, SO IT IS AN ADDRESS WRITTEN AS ONE NUMBER, IN HEX OR SHORTENED (2130706433, 0x7f.1, 127.1)
+    private static final Pattern IPV4 = Pattern.compile("(?:(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)\\.){3}(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)");
+    private static final Pattern DISGUISED = Pattern.compile(".*[@%?].*|.*\\.ipv6-literal\\.net|(?:.*\\.)?(?:\\d+|0x[0-9a-f]*)");
+    private static final Pattern SHARE = Pattern.compile("[/\\\\]{2,}([^/\\\\]*)"); // THE SERVER OF A WINDOWS SHARE PATH (//server/share)
 
     // SHARED 50 MS TICKER: DRIVES SERVER CLOCKS AND FOLLOWER CORRECTIONS. ONE DAEMON THREAD TICKS EVERY REGISTERED
     // PLAYER, SO ALL CORRECTION STATE IS SINGLE-THREADED AND OFF THE GAME THREAD
@@ -119,6 +135,13 @@ public abstract sealed class MediaPlayer permits ServerMediaPlayer, FFMediaPlaye
     MediaPlayer(final MRL mrl, final int sourceIndex, final GFXEngine gfx, final SFXEngine sfx) {
         WaterMedia.checkIsClientSideOrThrow(this.getClass());
         if (mrl == null) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_PLAYER_NULL_MRL) + "Failed to create the MediaPlayer due to null MRL");
+        // THE SITE LISTS MAY HAVE CHANGED SINCE THE MRL RESOLVED, SO THE LINK IS JUDGED AGAIN BEFORE IT PLAYS
+        try {
+            checkSite(mrl.uri());
+        } catch (final BlacklistException | WhitelistException refusal) {
+            mrl.block(refusal);
+            throw new IllegalStateException(DataTool.errCode(WaterMedia.ERR_PLAYER_SITE_BLOCKED) + "Failed to create the MediaPlayer due to a blocked site: " + mrl.uri(), refusal);
+        }
         final MRL.Source resolved = mrl.source(sourceIndex);
         if (resolved == null) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_PLAYER_SOURCE_UNAVAILABLE) + "Failed to create the MediaPlayer due to unavailable source: index " + sourceIndex);
         if (gfx == null && sfx == null) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_PLAYER_NULL_ENGINES) + "Failed to create the MediaPlayer due to null GFX and SFX engines");
@@ -964,6 +987,124 @@ public abstract sealed class MediaPlayer permits ServerMediaPlayer, FFMediaPlaye
         if (percent < 100) size = (int) Math.round(size * (percent / 100.0));
         if (size >= nativeSize) return nativeSize;
         return Math.max(2, size & ~1);
+    }
+
+    // ==========================================================================
+    // UTILITY: SITE LISTS
+    // ==========================================================================
+
+    // JUDGES A LINK AGAINST player.blacklist AND player.whitelist BY THE HOST IT WAS WRITTEN WITH. THE HOSTS A PLATFORM, A
+    // PLAYLIST OR A REDIRECT LEADS TO ARE NEVER JUDGED: YOUTUBE PLAYS FROM GOOGLE DOMAINS AND MOST SITES FROM A CDN
+    static void checkSite(final URI uri) throws BlacklistException, WhitelistException {
+        // ONE READ OF EACH LIST: THE CONFIG CAN BE RELOADED WHILE A LINK IS JUDGED
+        final WaterMediaConfig.Player.Whitelist whitelist = WaterMediaConfig.player.whitelist;
+        final WaterMediaConfig.Player.Blacklist blacklist = WaterMediaConfig.player.blacklist;
+        final String[] allowed = whitelist.sites;
+        final String[] forbidden = blacklist.sites;
+        final boolean trustLocal = whitelist.trustLocal;
+
+        // AN ENABLED LIST WITH NOTHING TO JUDGE BY STAYS OFF
+        final boolean allowing = whitelist.enable && (allowed.length > 0 || trustLocal);
+        final boolean forbidding = blacklist.enable && forbidden.length > 0;
+        if (!allowing && !forbidding) return;
+
+        // jar: WRAPS THE LINK JAVA REALLY FETCHES, WHICH ENDS AT THE FIRST "!/" (jar:https://site.com/pack.jar!/clip.mp4): THAT
+        // INNER LINK IS THE ONE JUDGED
+        URI link = uri;
+        while ("jar".equalsIgnoreCase(link.getScheme())) {
+            final String inner = link.getRawSchemeSpecificPart();
+            final int entry = inner.indexOf("!/");
+            link = URI.create(entry < 0 ? inner : inner.substring(0, entry));
+        }
+
+        // water:// NAMES A STORE INSTEAD OF A SITE: global ALWAYS PLAYS, local AND remote BELONG TO WHOEVER RUNS THE PACK
+        final boolean water = NetworkAPI.PROTOCOL_WATER.equalsIgnoreCase(link.getScheme());
+        if (water && WaterPlatform.HOST_GLOBAL.equalsIgnoreCase(link.getHost())) return;
+        final String host = water ? null : host(link);
+
+        // NO LIST CAN NAME A HOST THAT HIDES WHERE IT LEADS, SO THE BLACKLIST FORBIDS IT AND THE WHITELIST NEVER ALLOWS IT
+        final boolean disguised = host != null && DISGUISED.matcher(host).matches() && !IPV4.matcher(host).matches();
+
+        // THE BLACKLIST WINS OVER THE WHITELIST
+        if (forbidding && host != null && (disguised || listed(host, forbidden)))
+            throw new BlacklistException(DataTool.errCode(WaterMedia.ERR_PLAYER_SITE_FORBIDDEN) + "Failed to resolve " + uri + ", the site is forbidden");
+        if (!allowing) return;
+
+        // A FILE WITHOUT A HOST LIVES ON THIS MACHINE; ONE WITH A HOST IS A NETWORK SHARE, JUDGED LIKE ANY OTHER SITE
+        final boolean local = water || host == null && "file".equalsIgnoreCase(link.getScheme()) || !disguised && local(host);
+        if (trustLocal && local) return;
+        if (host != null && !disguised && listed(host, allowed)) return;
+        throw new WhitelistException(DataTool.errCode(WaterMedia.ERR_PLAYER_SITE_NOT_ALLOWED) + "Failed to resolve " + uri + ", the site is not allowed");
+    }
+
+    // THE HOST OF A LINK IN THE ONE FORM THE SITE LISTS COMPARE: LOWERCASE ASCII WITHOUT PORT, USER, BRACKETS OR TRAILING
+    // DOT, AND IPv6 WRITTEN IN FULL; null ONLY WHEN THE LINK WRITES NO HOST AT ALL
+    private static String host(final URI uri) {
+        String host = uri.getHost();
+        if (host == null && uri.getRawAuthority() != null) {
+            // java.net.URI GIVES NO HOST TO NAMES IT REJECTS BUT THE NETWORK STILL REACHES (UNDERSCORES, UNICODE, 127.1). ONLY
+            // THE FIRST USER MARK IS CUT: A SECOND ONE OR AN ESCAPE STAYS IN THE HOST, WHICH LEAVES IT DISGUISED
+            host = uri.getRawAuthority();
+            host = host.substring(host.indexOf('@') + 1);
+            final int port = host.lastIndexOf(':');
+            if (port >= 0 && !host.endsWith("]")) host = host.substring(0, port);
+        }
+        if ("file".equalsIgnoreCase(uri.getScheme()) && (host == null || host.isEmpty() || host.equalsIgnoreCase("localhost") || host.equals("~"))) {
+            // JAVA READS THESE HOSTS AS NO HOST AND WINDOWS OPENS A PATH THAT STARTS WITH TWO SEPARATORS AS A NETWORK SHARE
+            // (file:////server/share): ITS SERVER IS THE HOST
+            final String path = uri.isOpaque() ? uri.getSchemeSpecificPart() : uri.getPath();
+            final Matcher share = SHARE.matcher(path == null ? "" : path);
+            if (share.lookingAt()) host = share.group(1);
+        }
+        if (host == null) return null;
+        host = host.strip().toLowerCase(Locale.ROOT);
+        if (host.startsWith("[") && host.endsWith("]")) host = host.substring(1, host.length() - 1);
+        while (host.endsWith(".")) host = host.substring(0, host.length() - 1);
+        // A HOST THAT WAS WRITTEN BUT NAMES NOTHING (AN EMPTY SERVER, THE DEVICE PREFIX \\.\) HIDES WHERE THE LINK LEADS
+        if (host.isEmpty()) return "?";
+
+        if (host.indexOf(':') >= 0) {
+            // BETWEEN BRACKETS InetAddress READS AN IPv6 LITERAL OR FAILS, NEVER ASKS THE DNS; IT ALSO UNWRAPS ::ffff:127.0.0.1
+            final int zone = host.indexOf('%');
+            try { return InetAddress.getByName("[" + (zone < 0 ? host : host.substring(0, zone)) + "]").getHostAddress(); }
+            catch (final UnknownHostException e) { return host; }
+        }
+        // A UNICODE NAME RESOLVES AS ITS ASCII FORM, WHERE FULLWIDTH LETTERS AND DOTS FOLD INTO PLAIN ONES
+        try { return IDN.toASCII(host, IDN.ALLOW_UNASSIGNED); }
+        catch (final IllegalArgumentException e) { return host; }
+    }
+
+    // WHETHER A LIST NAMES host: A SITE COVERS ITS SUBDOMAINS, AN ADDRESS ONLY ITSELF
+    private static boolean listed(final String host, final String[] sites) {
+        final boolean address = host.indexOf(':') >= 0 || IPV4.matcher(host).matches();
+        for (final String site: sites) {
+            // AN ENTRY IS READ LIKE A LINK, SO A PASTED https://site.com/page, site.com:8080 OR *.site.com STILL NAMES ITS SITE;
+            // TWO COLONS WITHOUT BRACKETS CAN ONLY BE A BARE IPv6 (::1)
+            String entry = site.strip();
+            while (entry.startsWith("*.") || entry.startsWith(".")) entry = entry.substring(entry.indexOf('.') + 1);
+            if (!entry.contains("://")) entry = "x://" + (entry.indexOf(':') != entry.lastIndexOf(':') && !entry.startsWith("[") ? "[" + entry + "]" : entry);
+            final String name;
+            try { name = host(URI.create(entry)); }
+            catch (final IllegalArgumentException e) { continue; }
+            if (host.equals(name) || !address && name != null && host.endsWith("." + name)) return true;
+        }
+        return false;
+    }
+
+    // WHETHER host IS THIS MACHINE OR ITS OWN NETWORK: localhost, mDNS NAMES (.local) AND LOOPBACK, PRIVATE OR LINK-LOCAL ADDRESSES
+    private static boolean local(final String host) {
+        if (host == null) return false;
+        if (host.equals("localhost") || host.endsWith(".localhost") || host.endsWith(".local")) return true;
+        final boolean ipv6 = host.indexOf(':') >= 0;
+        if (!ipv6 && !IPV4.matcher(host).matches()) return false;
+        try {
+            // BOTH SHAPES ARE LITERALS BY NOW, WHICH InetAddress PARSES WITHOUT ASKING THE DNS
+            final InetAddress address = InetAddress.getByName(ipv6 ? "[" + host + "]" : host);
+            return address.isLoopbackAddress() || address.isSiteLocalAddress() || address.isLinkLocalAddress() || address.isAnyLocalAddress()
+                    || address instanceof Inet6Address && (address.getAddress()[0] & 0xFE) == 0xFC; // fc00::/7, THE PRIVATE RANGE OF IPv6
+        } catch (final UnknownHostException e) {
+            return false;
+        }
     }
 
     // ==========================================================================

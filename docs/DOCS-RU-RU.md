@@ -207,7 +207,7 @@ WATERMeDIA записывает свои настройки в `config/watermedi
 бэкенд кажется недоступным, первым делом проверьте этот файл.
 
 - `codecs.*`: _FFmpeg_, аппаратное декодирование и декодеры изображений.
-- `player.*`: качество по умолчанию и кэши.
+- `player.*`: качество по умолчанию, кэши и списки сайтов.
 - `platforms.*`: контент для взрослых, поиск и аккаунты платформ.
 - `network.*`: файловый сервер и веб-запросы.
 
@@ -319,8 +319,9 @@ Forge, NeoForge и Fabric загружают WATERMeDIA на клиентах и
 
 # 2. РАБОТА СО ССЫЛКАМИ
 > [!NOTE]
-> Настраивается: `platforms.allowMatureContent`, `searchLimit`, `searchCleanupInterval`, `biliBiliCookie` и
-> `player.mrlCleanupInterval`. Смотрите их комментарии в `config/watermedia.toml`.
+> Настраивается: `platforms.allowMatureContent`, `searchLimit`, `searchCleanupInterval`, `biliBiliCookie`,
+> `player.mrlCleanupInterval`, `player.whitelist.*` и `player.blacklist.*`. Смотрите их комментарии в
+> `config/watermedia.toml`.
 
 MRL (Multimedia Resource Location) превращает любую ссылку в медиа, которое она содержит: один или несколько источников,
 у каждого свои варианты качества, аудиодорожки и метаданные. Он разрешается в фоне и остаётся в кэше.
@@ -334,7 +335,7 @@ MRL[] queue = PlayerAPI.preload(firstUri, secondUri);        // START RESOLVING 
 switch (mrl.status()) {
     case FETCHING -> { }                                     // STILL RESOLVING
     case LOADED -> play(mrl);                                // READY TO PLAY
-    case BLOCKED -> showMatureWarning();                     // MATURE CONTENT WHILE IT'S NOT ALLOWED
+    case BLOCKED -> showBlocked(mrl.exception());            // MATURE CONTENT OR A SITE THE LISTS REFUSE
     case ERROR -> showError(mrl.exception());                // WHY IT FAILED; A MALFORMED LINK STARTS HERE
     case EXPIRED, FORGOTTEN -> mrl = mrl.reload();           // STALE OR EVICTED: KEEP THE HANDLE reload() RETURNS
 }
@@ -360,6 +361,12 @@ MediaPlayer player = PlayerAPI.player(mrl, 1, gfx, sfx);     // PLAY THE SOURCE 
 
 Прямая ссылка завершается ошибкой, если сервер отвечает статусом ошибки или ответом без медиа; плейлисты HLS
 открываются как одно видео, а плейлисты IPTV как один источник на канал.
+
+Почему ссылка получила `BLOCKED`, подскажет `mrl.exception()`: `MatureContentException`, если это контент для взрослых,
+а он не разрешён; `WhitelistException`, если сайт не разрешён белым списком; `BlacklistException`, если сайт запрещён
+чёрным списком. Списки сайтов проверяют только саму ссылку в том виде, в каком вы её написали, ещё до любой платформы
+или запроса, поэтому серверы, с которых платформа отдаёт поток, никогда не проверяются, а ссылки `water://global`
+проходят всегда.
 
 ## 2.2 ПЛАТФОРМЫ
 Ссылки с этих платформ разрешаются из коробки:
@@ -464,7 +471,8 @@ try {
 ```
 
 `player` возвращает null, если источник ещё разрешается, такого индекса нет, бэкенд отсутствует или конструирование
-бросает `Exception` (а вот `Error` пробрасывается дальше). Проверьте статус MRL, прежде чем повторять попытку.
+бросает `Exception` (а вот `Error` пробрасывается дальше). Проверьте статус MRL, прежде чем повторять попытку. Здесь
+списки сайтов проверяются ещё раз: если к этому моменту они отклоняют ссылку, её MRL получает статус `BLOCKED`.
 
 - Поставщики вызываются только при необходимости, а изображения никогда не вызывают аудиопоставщик.
 - Поставщик, возвращающий null, отключает этот вывод, например `() -> null` в качестве графического движка для

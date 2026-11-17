@@ -178,7 +178,7 @@ WATERMeDIA 会把设置写入工作目录下的 `config/watermedia.toml`，每�
 启动时读取的字段会在下次启动时生效；当某个后端看起来不可用时，首先应该检查的就是这个文件。
 
 - `codecs.*`：_FFmpeg_、硬件解码和图片解码器。
-- `player.*`：默认画质和缓存。
+- `player.*`：默认画质、缓存和网站黑白名单。
 - `platforms.*`：成人内容、搜索和平台账号。
 - `network.*`：文件服务器和网络请求。
 
@@ -282,8 +282,9 @@ Forge、NeoForge 和 Fabric 会在以下版本的客户端和专用服务器上�
 
 # 2. 管理链接
 > [!NOTE]
-> 可配置项：`platforms.allowMatureContent`、`searchLimit`、`searchCleanupInterval`、`biliBiliCookie` 和
-> `player.mrlCleanupInterval`。请查看 `config/watermedia.toml` 中它们的注释。
+> 可配置项：`platforms.allowMatureContent`、`searchLimit`、`searchCleanupInterval`、`biliBiliCookie`、
+> `player.mrlCleanupInterval`、`player.whitelist.*` 和 `player.blacklist.*`。请查看 `config/watermedia.toml`
+> 中它们的注释。
 
 MRL（Multimedia Resource Location，多媒体资源位置）会把任何链接变成它所包含的媒体：一个或多个媒体源，
 每个源都带有自己的画质、音轨和元数据。它在后台解析，并保留在缓存中。
@@ -297,7 +298,7 @@ MRL[] queue = PlayerAPI.preload(firstUri, secondUri);        // START RESOLVING 
 switch (mrl.status()) {
     case FETCHING -> { }                                     // STILL RESOLVING
     case LOADED -> play(mrl);                                // READY TO PLAY
-    case BLOCKED -> showMatureWarning();                     // MATURE CONTENT WHILE IT'S NOT ALLOWED
+    case BLOCKED -> showBlocked(mrl.exception());            // MATURE CONTENT OR A SITE THE LISTS REFUSE
     case ERROR -> showError(mrl.exception());                // WHY IT FAILED; A MALFORMED LINK STARTS HERE
     case EXPIRED, FORGOTTEN -> mrl = mrl.reload();           // STALE OR EVICTED: KEEP THE HANDLE reload() RETURNS
 }
@@ -323,6 +324,11 @@ MediaPlayer player = PlayerAPI.player(mrl, 1, gfx, sfx);     // PLAY THE SOURCE 
 
 当服务器返回错误状态或非媒体响应时，直链会解析失败；HLS 播放列表会作为一个视频打开，IPTV
 播放列表则每个频道对应一个媒体源。
+
+`BLOCKED` 状态的链接会通过 `mrl.exception()` 说明原因：成人内容未被允许时是 `MatureContentException`，
+白名单不允许的网站是 `WhitelistException`，黑名单禁止的网站是 `BlacklistException`。黑白名单只检查你写下的链接本身，
+而且在任何平台或请求接触它之前就完成检查，因此平台实际传输媒体所用的服务器永远不会被检查，`water://global`
+链接也总能通过。
 
 ## 2.2 平台
 以下平台的链接开箱即可解析：
@@ -423,7 +429,7 @@ try {
 ```
 
 当媒体源仍在解析中、索引不存在、缺少后端或构造时抛出 `Exception` 时，`player` 返回 null（`Error`
-则会继续向上抛出）。重试之前，先检查 MRL 的状态。
+则会继续向上抛出）。重试之前，先检查 MRL 的状态。这里会再次检查黑白名单，此时被拒绝的链接会让其 MRL 变为 `BLOCKED`。
 
 - supplier 只在需要时运行，图片永远不会调用音频 supplier。
 - supplier 返回 null 时会省略对应的输出，例如在纯音频播放时用 `() -> null` 作为图形引擎。

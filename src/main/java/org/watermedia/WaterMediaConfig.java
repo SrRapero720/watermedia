@@ -170,7 +170,7 @@ public final class WaterMediaConfig extends WaterMedia.Module {
         }
     }
 
-    /** Settings of the media players and their caches. */
+    /** Settings of the media players, their caches and the site lists. */
     @Spec(value = "player", disableStatic = true)
     public static final class Player {
         @Spec.Field(control = Control.DROPDOWN)
@@ -193,6 +193,14 @@ public final class WaterMediaConfig extends WaterMedia.Module {
         @Comment("WaterTexture general settings")
         public final WaterTx tx = new WaterTx();
 
+        @Spec.Field
+        @Comment("Sites allowed to play")
+        public final Whitelist whitelist = new Whitelist();
+
+        @Spec.Field
+        @Comment("Sites that never play")
+        public final Blacklist blacklist = new Blacklist();
+
         /** Settings of the picture player, publicly known as WaterTX. */
         @Spec(value = "watertx", disableStatic = true)
         public static final class WaterTx {
@@ -206,6 +214,39 @@ public final class WaterMediaConfig extends WaterMedia.Module {
             @Comment("Set to 0 to force TxMediaPlayer to stream animated image frames into a single texture")
             @NumberConditions(minInt = 0, maxInt = 512)
             public int texturesBudget = 32;
+        }
+
+        /** Settings of the sites allowed to play. */
+        @Spec(value = "whitelist", disableStatic = true)
+        public static final class Whitelist {
+            @Spec.Field
+            @Comment("Plays only the links of the sites listed below")
+            @Comment("Stays off while sites is empty and trustLocal is false; water://global links always play")
+            public boolean enable = false;
+
+            @Spec.Field
+            @Comment("Hostnames or IPs only, like website.com or 192.168.0.1: no https://, paths or *")
+            @Comment("website.com covers its subdomains too, some.website.com covers only that subdomain")
+            @Comment("Only the link as written is checked, so short links need their own entry (youtu.be)")
+            public String[] sites = { "youtube.com", "youtu.be", "twitch.tv", "imgur.com", "kick.com" };
+
+            @Spec.Field
+            @Comment("Also plays water://local and water://remote links, local files, localhost, local network IPs and .local names")
+            public boolean trustLocal = true;
+        }
+
+        /** Settings of the sites that never play. */
+        @Spec(value = "blacklist", disableStatic = true)
+        public static final class Blacklist {
+            @Spec.Field
+            @Comment("Never plays the links of the sites listed below, even when the whitelist allows them")
+            @Comment("water://global links always play")
+            public boolean enable = false;
+
+            @Spec.Field
+            @Comment("Hostnames or IPs only, like website.com or 192.168.0.1: no https://, paths or *")
+            @Comment("website.com covers its subdomains too, some.website.com covers only that subdomain")
+            public String[] sites = {};
         }
     }
 

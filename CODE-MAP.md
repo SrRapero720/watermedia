@@ -9,7 +9,8 @@ behavior, API, layout or rules, update the matching section (never leave it desc
 Mapped on 2026-10-30 against version `3.0.0` (`RELEASE`); counts (files, latches, throw sites) are as of that date.
 Homologation wave of 2026-11-01 (dividers, member order, nested single-owner types, no dashes), the app upload-logs
 revamp of 2026-11-16 (issue title and description, `TextArea`, clipboard helpers, config copies) and the error codes
-and file server port check wave of 2026-11-16 (`wm_err` registry, startup check of a fixed `serverPort`) folded in.
+and file server port check wave of 2026-11-16 (`wm_err` registry, startup check of a fixed `serverPort`) and the site
+lists wave of 2026-11-17 (`player.whitelist`, `player.blacklist`, `WhitelistException`, `BlacklistException`) folded in.
 Symbol names are exact; line numbers are omitted on purpose.
 Legend: ⚠ gotcha or hard rule, ↪ reuse pointer ("to do X use Y").
 
@@ -27,6 +28,7 @@ Where to look (task → section → entry point):
 | Give a player a GPU or audio sink | §8 | `PlayerAPI.glEngine` / `vkEngine` / `alEngine`; the host implements `VKContext` |
 | Synchronize players across hosts | §7.4 | `PlayerAPI.serverPlayer()`, `MediaPlayer.PlayerState.toBytes`, `MediaPlayer.sync` |
 | Resolve a site URL or add a platform | §9 | `PlatformAPI.fetch` / `register`, implement `Platform`, `WebRequests.fetchJson` |
+| Restrict which sites play | §7.1, §14 | `MediaPlayer.checkSite`, `player.whitelist` / `player.blacklist` |
 | HTTP request, download, redirects | §10 | `NetRequest`, `HttpHeaders.defaults` |
 | Upload a file to the WaterMedia file server | §10 | `NetworkAPI.upload` → `UploadStatus.uri()` |
 | Parse M3U, HLS or IPTV playlists | §11 | `M3UTool.parse` / `fetch` / `qualities` |
@@ -206,7 +208,8 @@ Package map (`src/main/java/org/watermedia`):
   `GifEncoder`, `FFEncoder`).
 - `api/player`: `PlayerAPI`, `MediaPlayer`, `FFMediaPlayer`, `TxMediaPlayer`, `ServerMediaPlayer`, `MRL`,
   `MasterClock`, `NetworkCache`, `GFXEngine`, `GLEngine`, `VKEngine`, `VKContext`, `HeadlessGFXEngine`, `SWEngine`,
-  `AWTEngine`, `JFXEngine`, `SFXEngine`, `ALEngine`, `JSEngine`, `Colorimetry`.
+  `AWTEngine`, `JFXEngine`, `SFXEngine`, `ALEngine`, `JSEngine`, `Colorimetry`, `WhitelistException`,
+  `BlacklistException`.
 - `api/platform`: `PlatformAPI`, `Platform`, `PlatformResult`, `PlatformException`, `MatureContentException`,
   `internal/WaterPlatform`, `web/*` (21 handlers + `WebRequests`).
 - `api/network`: `NetworkAPI`, `NetworkServer`. `api/util`: `NetRequest`, `HttpHeaders`, `MediaType`, `MediaQuality`,
@@ -639,6 +642,36 @@ requested, and SVG yields RGBA when RGBA is requested (everything else is conver
   `!WaterMedia.loaded()` when the player has an MRL; `ServerMediaPlayer` is exempt); the shared 50 ms `MediaSync` ticker
   (`TICK_MS=50`, single daemon thread) only ticks armed
   players.
+- Site lists (owner, 2026-11-17): `static checkSite(URI)` (box `UTILITY: SITE LISTS`, helpers `host`, `listed`,
+  `local`) judges a link against `player.blacklist` and `player.whitelist` by the host it was written with, never by
+  the hosts a platform, playlist or redirect leads to. Callers: `MRL.doLoad` before `PlatformAPI.fetch` (no request
+  reaches a refused site) and the constructor again (the config can change after an MRL resolved), where a refusal
+  calls `MRL.block` and throws `IllegalStateException` (`ERR_PLAYER_SITE_BLOCKED`, cause = the refusal), so
+  `PlayerAPI.player` returns null.
+  - A list is on with `enable` and something to judge by: the whitelist needs `sites` or `trustLocal`, the blacklist
+    `sites`. The blacklist wins: `BlacklistException` (`ERR_PLAYER_SITE_FORBIDDEN`, "the site is forbidden"), then
+    `WhitelistException` (`ERR_PLAYER_SITE_NOT_ALLOWED`, "the site is not allowed"); both `extends IOException`,
+    package-private constructors.
+  - `water://global` always passes. `trustLocal` covers the rest of `water://`, `file:` without a host, `localhost`,
+    `*.localhost`, `*.local` and loopback, private, link-local and any-local addresses (IPv6 `fc00::/7` too).
+  - `host(URI)` is the compared form: lowercase ASCII (`IDN.toASCII`), no port, user, brackets or trailing dot, IPv6
+    in full; when `URI.getHost()` is null it is cut from the raw authority after the first `@`. An entry is read like
+    a link (`x://` + entry, a bare IPv6 gets its brackets, leading `*.` and dots dropped), so a pasted URL or a port
+    still names its site. A site covers its subdomains at a dot boundary, an address only itself.
+  - `jar:` links are unwrapped at the first `!/` (where `JarURLConnection` cuts, repeatedly) and judged by the link
+    they wrap, which is the one Java fetches; an inner text that is no URI throws `IllegalArgumentException` (the MRL
+    ends in ERROR).
+  - ⚠ A `file:` path starting with two separators (`file:////server/share`, `file://localhost//server/share`, the
+    `%5C` spellings) is a Windows share: when the link host is missing, empty, `localhost` or `~` (Java reads those
+    as no host) its server is the host, so it is never "local" by itself; any other link host is the one judged.
+    `host` returns null only for a link that writes no host at all, which is what makes a `file:` link local.
+  - ⚠ Disguised hosts (`DISGUISED` and not `IPV4`) are forbidden by an active blacklist, never allowed by the
+    whitelist and never local, because the parsers and network stacks disagree on where they lead: an IPv4 as one
+    number, hex, shortened or with leading zeros (`2130706433`, `0x7f.1`, `127.1`; any last label that is a number),
+    a host keeping `@`, `%` or `?` (a second user mark, an escape, the device prefix `\\?\`), a host that was written
+    but names nothing (`.`, an empty share server, the device prefix `\\.\`; `host` returns it as `?`) and
+    `*.ipv6-literal.net`. ⚠ Only bracketed literals and validated dotted quads reach `InetAddress`, so the check
+    never asks the DNS.
 - Status enum `WAITING, LOADING, BUFFERING, PLAYING, PAUSED, STOPPED, ENDED, ERROR` (the `PlayerState` status byte is the
   ordinal: a reorder bumps `PlayerState.VERSION`); `allows(next)` is the one transition map (pause, resume, buffering, end, stop, failure; no
   self-moves, STOPPED allows nothing; starts, seeks and restarts take their own paths); terminal for listeners: STOPPED,
@@ -679,6 +712,8 @@ requested, and SVG yields RGBA when RGBA is requested (everything else is conver
 ### 7.2 `PlayerAPI` (final utility)
 - `mrl(String)` (existing file relative to `WaterMedia.cwd()` → file URI, else `URI.create`; malformed → uncached
   `MRL.error`), `mrl(URI)`, `preload(URI...)`: throw `IllegalStateException` before `loaded()` or on a server.
+  ⚠ A string resolving to a Windows share (`\\server\share\x`) is never probed with the file system (that already
+  connects to its server): it becomes the link `file://server/share/x` for the loader, where the site lists judge it.
 - `player(MRL, [int sourceIndex,] Supplier<GFXEngine>, Supplier<SFXEngine>)`: null when the source is missing (FETCHING
   logs DEBUG), `MediaType.IMAGE` → `TxMediaPlayer` (sfx supplier never called), else `FFMediaPlayer` when
   `CodecsAPI.ffmpegLoaded()`, else null (ERROR `ERR_PLAYERAPI_NO_BACKEND` "Failed to create the player due to no
@@ -697,13 +732,16 @@ requested, and SVG yields RGBA when RGBA is requested (everything else is conver
   idle). `reload()` returns the active handle (a FORGOTTEN one
   is replaced; a reload during a fetch is deferred). `subscribe(Consumer<MRL>)` fires once on completion or failure
   (dropped afterwards); `await(timeoutMs)` polls.
-- `doLoad()`: `PlatformAPI.fetch(uri)`; null → direct probe with `NetRequest.accept(ACCEPT_MEDIA)`: HTTP ≥ 400 fails,
+- `doLoad()`: `MediaPlayer.checkSite(uri)` first (site lists, §7.1), then `PlatformAPI.fetch(uri)`; null → direct
+  probe with `NetRequest.accept(ACCEPT_MEDIA)`: HTTP ≥ 400 fails,
   document content types are rejected (`text/html`, `text/css`, `text/javascript`, `application/xhtml+xml`,
   `application/(x-)javascript`, `application/ecmascript`, `application/json`, `*+json`), M3U shapes parsed with
   `M3UTool` (IPTV → one source per channel, HLS → one VIDEO source), otherwise one source typed by `sniffType`
   (`MediaType.of(contentType)` → `CodecsAPI.sniff(stream)` → `MediaType.ofExtension`). A single UNKNOWN platform source
   is re-sniffed with its headers. Qualities are bucketed per `MediaQuality.of(width, height)`, one URL per bucket
-  (widest, tallest, highest fps, first). `MatureContentException` → BLOCKED, any other Throwable → ERROR.
+  (widest, tallest, highest fps, first). `MatureContentException`, `WhitelistException` and `BlacklistException` →
+  BLOCKED (WARN without trace), any other Throwable → ERROR. `block(IOException)` (package-private, called by the
+  `MediaPlayer` constructor) turns a resolved MRL BLOCKED and drops its sources; a no-op without sources.
 - `MRL.Source(MediaType type, URI thumbnail, Metadata metadata, HttpHeaders headers (frozen), Map<MediaQuality,URI>
   qualities, List<Track> audioTracks, List<Track> subtitleTracks)`: `uri(MediaQuality)` (closest bucket),
   `qualityOf(URI)`. Accessors `uri()`, `status()`, `exception()`, `sources()`, `sourceCount()`, `source(int)`,
@@ -925,7 +963,7 @@ requested, and SVG yields RGBA when RGBA is requested (everything else is conver
   `platforms.searchCleanupInterval` minutes (0 = effectively no cache), `searching(query)`, `searchHistory()` (10).
   Built-in search only in YouTube, Twitch, Kick, Imgur.
 - `internal/WaterPlatform` (`water://` scheme, spec `WATER.md`): `local/<path>` → `WaterMedia.cwd()` file URI (⚠ `..`
-  escapes cwd), `remote/<id>` → `NetworkAPI.remoteUrl()/<id>`, `global/<id>` → `GLOBAL_SERVER`
+  escapes cwd; a path that resolves to a Windows share throws, `ERR_WATER_LOCAL_SHARE`), `remote/<id>` → `NetworkAPI.remoteUrl()/<id>`, `global/<id>` → `GLOBAL_SERVER`
   (`https://watermedia.srrapero720.me/`); `location(URI)` reusable translator.
 - `web/WebRequests` (package-private): `fetchJson(NAME, uri|NetRequest, Class)` (status/body errors → `PlatformException`),
   `follow(URI)` (short links), `hls(playlist, headers)` (best-effort ladder via `M3UTool.qualities`),
@@ -1211,7 +1249,8 @@ requested, and SVG yields RGBA when RGBA is requested (everything else is conver
   video dialogs; ⚠ not restored after an engine swap), `SettingsScreen` + `SettingsModel` (edits every WaterConfig spec
   reflectively, autosave on `WaterMedia-ConfigSave`, `SaveMachine` states; only the App spec has a live applier),
   `LoadingScreen` (reads `WaterMedia.loading()/step()/steps()`), `TitleBar`, `Header`, `KeybindsBar`, `Background`,
-  `CrtOverlay`, `Previews` (MRL status label/colour, thumbnail release through `ctx.releaseAsync`).
+  `CrtOverlay`, `Previews` (MRL status label/colour, `blocked(mrl)` reason text by exception type, thumbnail release
+  through `ctx.releaseAsync`).
 - `HomeScreen` dialogs: the upload and cleanup `Dialog`s stay mounted on the overlay and only follow `ctx.upload`/
   `ctx.cleanup` in `onUpdate`; the primary buttons reach `step()` through `navigator.accept(Action.UPLOAD_LOGS|CLEANUP)`
   (the cleanup CLOSE hides the dialog itself). Upload (`Stepper` SCAN/UPLOAD/ISSUE, one `UPLOAD_PANEL_W` width):
@@ -1279,6 +1318,8 @@ original context current; GL needs the pumped render executor; `WaterMedia.start
 | `player.mrlCleanupInterval` | 60.0 min (≥ 1) | `MRL` sweep |
 | `player.cacheBudget` | 8192 MB | `NetworkCache` eviction |
 | `player.watertx.cache` / `texturesBudget` | true / 32 MB (0..512; 0 = streaming) | `TxMediaPlayer` |
+| `player.whitelist.enable` / `sites` / `trustLocal` | false / `youtube.com`, `youtu.be`, `twitch.tv`, `imgur.com`, `kick.com` / true | `MediaPlayer.checkSite` (per MRL load and per player) |
+| `player.blacklist.enable` / `sites` | false / empty | `MediaPlayer.checkSite` (per MRL load and per player) |
 | `platforms.allowMatureContent` | false | mature gates in the web handlers |
 | `platforms.searchCleanupInterval` / `searchLimit` | 15.0 min / 2 (1..50) | `PlatformAPI` |
 | `platforms.biliBiliCookie` | "" (password) | `BiliBiliPlatform` |
@@ -1401,7 +1442,10 @@ System properties: `watermedia.engine`, `watermedia.app` (child JVM flag), `wate
   platform `PlatformApiTest`, `PlatformSearchTest`, `PlatformClaimTest`,
   `WaterPlatformTest`, offline handler tests `BiliBiliPlatformTest`, `KickPlatformTest`, `NewgroundsPlatformTest`,
   `OdyseePlatformTest` (loopback proxy through `LocalHttp`), `TwitchPlatformTest` (search hits), `TwitterPlatformTest`,
-  `YtDlpPlatformTest` (dubbed JSON offline); player `MediaPlayerBaseTest`, `MasterClockTest`, `MrlTest`, `NetworkCacheTest`, `PlayerStateTest`,
+  `YtDlpPlatformTest` (dubbed JSON offline); player `MediaPlayerBaseTest`, `MasterClockTest`, `MrlTest`,
+  `SiteListsTest` (the `checkSite` matrix with disguised hosts, `file:` shares and `jar:` links, BLOCKED MRLs
+  without a request, player revalidation, Windows share strings; it snapshots and restores the
+  `player.whitelist`/`player.blacklist` fields and gives every case its own URI), `NetworkCacheTest`, `PlayerStateTest`,
   `ServerMediaPlayerTest`, `FollowerClockTest`, `FollowerPlayerStateTest`, `StatusDeliveryTest`, `FFMediaPlayerTest`,
   `FFControlContractTest`, `FFAudioTracksTest` (pick, language, hot switch), `ColorimetryTest`, `Tx*Test` (animated, control contract, display time, frame step, frame
   textures, release, scaling, static image), engines `GFXEngineTest`, `GLEngineTest`, `VKEngineTest`,
@@ -1503,7 +1547,9 @@ System properties: `watermedia.engine`, `watermedia.app` (child JVM flag), `wate
   `CodecsAPI.reader`; VK `preload`/`frame` fast path; HDR tone mapping on software engines.
 - Codec limits: JPEG 12-bit/CMYK/arithmetic/lossless; SVG text/use/clip/mask/filter/radial; WebP ANIM background and
   VP8 scaling bits; PNG 16-bit output and ICC application; GIF LZW min code 1.
-- Platform notes: mature gates only where the service exposes a flag; `WaterPlatform.local` allows `..`; Sendvid/yt-dlp
+- Platform notes: the site lists judge only the link of an MRL, so `PlatformAPI.fetch`/`search` called directly,
+  thumbnails and resolved sources are never checked; mature gates only where the service exposes a flag;
+  `WaterPlatform.local` allows `..`; Sendvid/yt-dlp
   resolves can hold a loader thread for 60/120 s; Twitch persisted-query hashes rotate.
 - App notes: no Vulkan validation layers; `PlayerScreen` not restored after a hot swap; `TextField` has no caret
   movement/selection; `TextArea` has no selection, copy, cut or undo; `HomeScreen.Action.SETTINGS` navigates only with

@@ -249,6 +249,9 @@ public final class WaterMedia {
     public static final int ERR_PLAYER_STATE_SPEED = 1146;
     public static final int ERR_PLAYER_SNAPSHOT_PAYLOAD = 1147;
     public static final int ERR_PLAYER_SNAPSHOT_VERSION = 1148;
+    public static final int ERR_PLAYER_SITE_FORBIDDEN = 1149;
+    public static final int ERR_PLAYER_SITE_NOT_ALLOWED = 1150;
+    public static final int ERR_PLAYER_SITE_BLOCKED = 1151;
     // NetworkCache 1170-1189
     public static final int ERR_CACHE_WAIT_INTERRUPTED = 1170;
     public static final int ERR_CACHE_DOWNLOAD = 1171;
@@ -330,6 +333,7 @@ public final class WaterMedia {
     public static final int ERR_WATER_RESOLVE = 2040;
     public static final int ERR_WATER_HOST_MISSING = 2041;
     public static final int ERR_WATER_HOST_UNKNOWN = 2042;
+    public static final int ERR_WATER_LOCAL_SHARE = 2043;
     // BiliBiliPlatform 2050-2079
     public static final int ERR_BILIBILI_RESOLVE = 2050;
     public static final int ERR_BILIBILI_CID_MISSING = 2051;

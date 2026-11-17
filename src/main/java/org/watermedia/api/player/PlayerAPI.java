@@ -9,6 +9,7 @@ import org.watermedia.tools.DataTool;
 import org.watermedia.tools.ThreadTool;
 
 import java.net.URI;
+import java.net.URISyntaxException;
 import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
@@ -52,9 +53,13 @@ public final class PlayerAPI extends WaterMedia.Module {
         if (uri == null) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_PLAYERAPI_NULL_URI) + "Failed to create the player due to null URI");
         try {
             final Path file = WaterMedia.cwd().resolve(uri);
+            // ASKING WINDOWS ABOUT A SHARE (\\server\share) ALREADY CONNECTS TO ITS SERVER: IT GOES TO THE LOADER AS A LINK,
+            // WHERE THE SITE LISTS JUDGE THE SERVER BEFORE ANYTHING REACHES IT
+            if (file.getRoot() != null && file.getRoot().toString().startsWith("\\\\"))
+                return MRL.get(new URI("file", file.normalize().toString().replace('\\', '/'), null));
             if (Files.isRegularFile(file)) return MRL.get(file.toAbsolutePath().normalize().toUri());
-        } catch (final InvalidPathException ignored) {
-            // URLS CARRY CHARACTERS A PATH CANNOT (":" ON WINDOWS): NOT A FILE
+        } catch (final InvalidPathException | URISyntaxException ignored) {
+            // URLS CARRY CHARACTERS A PATH CANNOT (":" ON WINDOWS): NOT A FILE; NEITHER IS A SHARE NO LINK CAN SPELL
         }
         try {
             return MRL.get(URI.create(uri));

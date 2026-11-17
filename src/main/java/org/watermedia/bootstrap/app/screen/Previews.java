@@ -1,8 +1,10 @@
 package org.watermedia.bootstrap.app.screen;
 
+import org.watermedia.api.player.BlacklistException;
 import org.watermedia.api.player.MRL;
 import org.watermedia.api.player.MediaPlayer;
 import org.watermedia.api.player.TxMediaPlayer;
+import org.watermedia.api.player.WhitelistException;
 import org.watermedia.bootstrap.app.AppContext;
 import org.watermedia.bootstrap.app.ui.AppTheme;
 
@@ -32,6 +34,13 @@ final class Previews {
             case EXPIRED -> "EXPIRED";
             case FORGOTTEN -> "FORGOTTEN";
         };
+    }
+
+    // WHY A BLOCKED MRL DOES NOT PLAY: A SITE LIST REFUSED ITS LINK OR ITS PLATFORM MARKED IT AS MATURE
+    static String blocked(final MRL mrl) {
+        if (mrl.exception() instanceof WhitelistException) return "This site is not on the whitelist";
+        if (mrl.exception() instanceof BlacklistException) return "This site is on the blacklist";
+        return "This media was blocked by the platform";
     }
 
     static Color color(final MRL mrl) {
