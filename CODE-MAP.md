@@ -1423,7 +1423,9 @@ System properties: `watermedia.engine`, `watermedia.app` (child JVM flag), `wate
 - Fixtures: `gif/`, `jpeg/` (+`raw/*.pam` references), `png/` (+`raw/`), `webp/{animated,lossless,lossy}` (+`raw/`),
   `netpbm/`, `svg/` (+`png/` renders), `mp4/fibonaccisongh264.mp4`, `m3u/iptv_sample.m3u8`, `pentest/{dds,gif,jpeg,
   netpbm,png,svg,webp}`, `log4j2.xml` (console, `watermedia` DEBUG). `src/test/tools/GeneratePngReference.java`
-  regenerates PNG references with ImageIO.
+  regenerates PNG references with ImageIO. `.gitattributes` marks `pentest/**` and every `*.pam` under
+  `src/test/resources` `-text`: ⚠ a byte-exact fixture without a zero byte in its first 8000 bytes is sniffed as text
+  and rewritten to CRLF by a checkout with `core.autocrlf=true` (it broke `PngTest [1.png]` with `png/raw/1.pam`).
 - Gates: natives optional unless `watermedia.test.requireNatives`; GPU tests need a real GL/VK context (LWJGL stack
   `test_lwjgl_stack`); `VKEngineTest.Decoded.playerDecodesOnTheDevice` is skipped with the Khronos validation layer
   installed (run with `VK_LOADER_LAYERS_DISABLE=~all~`); symlink tests skip without the Windows privilege;
