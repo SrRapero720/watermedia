@@ -16,6 +16,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
@@ -26,7 +28,10 @@ public class StatusDeliveryTest {
 
     private static final int ROUNDS = 50_000;
     private static final int TOGGLERS = 4;
+    private static final long TOGGLE_TIMEOUT_MS = 10_000L; // THE ROUNDS TAKE A FRACTION OF A SECOND: ONLY A HANG REACHES IT
     private static final long JOIN_MS = 2_000L;
+    private static final long MRL_TIMEOUT_MS = 3_000L;
+    private static final long LOAD_TIMEOUT_MS = 15_000L;
 
     // ==========================================================================
     // INTERNAL API
@@ -43,26 +48,35 @@ public class StatusDeliveryTest {
     // THE LISTENER RUNS UNDER THE PLAYER'S RELEASE LOCK; THE JOIN TIMES OUT INSTEAD OF HANGING THE TEST
     private static void assertReleaseIsLockFree(final Path media) {
         final MRL mrl = PlayerAPI.mrl(Fixtures.fileUri(media));
-        assertTrue(mrl.await(3_000L));
+        assertTrue(mrl.await(MRL_TIMEOUT_MS), "the MRL resolves");
         final HeadlessGFXEngine gfx = PlayerAPI.headlessEngine();
         final MediaPlayer player = PlayerAPI.player(mrl, () -> gfx, () -> null);
+        assertNotNull(player, () -> "no player for " + media);
         final AtomicBoolean ran = new AtomicBoolean();
         final AtomicBoolean joined = new AtomicBoolean();
+        final AtomicReference<Throwable> failure = new AtomicReference<>();
         // REGISTERED BEFORE start(): NEITHER FIXTURE ENDS, SO ONLY THE RELEASE'S STOPPED CONSUMES IT
         player.onStatus((p, previous, current) -> {
             if (current != Status.STOPPED) return;
             ran.set(true);
-            final Thread other = new Thread(p::release, "second-release");
+            final Thread other = new Thread(() -> {
+                try { p.release(); }
+                catch (final Throwable t) { failure.set(t); }
+            }, "second-release");
             other.start();
             try { other.join(JOIN_MS); }
             catch (final InterruptedException e) { Thread.currentThread().interrupt(); }
             joined.set(!other.isAlive());
         });
-        assertTrue(player.start());
-        assertTrue(PlayerWait.awaitStatus(player, 15_000L, Status.PLAYING, Status.PAUSED));
-        player.release();
+        try {
+            assertTrue(player.start());
+            assertTrue(PlayerWait.awaitStatus(player, LOAD_TIMEOUT_MS, Status.PLAYING), () -> "the player went live, not " + player.status());
+        } finally {
+            player.release();
+        }
         assertTrue(ran.get(), "the release published STOPPED to the listener");
         assertTrue(joined.get(), "the second release waited for the lock the first one held while the listener ran");
+        assertNull(failure.get(), "the second release returned without a failure");
     }
 
     // ==========================================================================
@@ -100,7 +114,10 @@ public class StatusDeliveryTest {
                     togglers[i].start();
                 }
                 go.countDown();
-                for (final Thread toggling: togglers) toggling.join();
+                for (final Thread toggling: togglers) {
+                    toggling.join(TOGGLE_TIMEOUT_MS);
+                    assertFalse(toggling.isAlive(), () -> toggling.getName() + " finished its rounds");
+                }
                 assertTrue(heard.get() > ROUNDS, "the togglers raced through real transitions: " + heard.get());
                 assertNull(broken.get(), "out-of-order transition");
                 assertEquals(player.status(), last.get(), "the last transition heard is the current status");

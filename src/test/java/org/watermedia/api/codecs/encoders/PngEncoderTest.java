@@ -42,8 +42,10 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Verifies the house-made PNG encoder by decoding what it writes: still pictures in every accepted layout, adaptive
- * filtering, APNG animations with cropped frames, sequenced chunks and exact timing, and the refusals of its contract.
+ * Verifies the house-made {@link PngEncoder} by decoding what it writes: still pictures in every accepted layout,
+ * adaptive filtering, APNG animations with cropped frames, sequenced chunks, exact timing, play counts and the default
+ * image a decoder without APNG support shows, a file target and its contract (refused layouts, closing without frames,
+ * quality ignored).
  */
 @DisplayName("PNG encoder")
 public class PngEncoderTest {
@@ -84,7 +86,7 @@ public class PngEncoderTest {
         final ByteBuffer buffer = ByteBuffer.wrap(png);
         final byte[] signature = new byte[ImageBytes.PNG_SIGNATURE.length];
         buffer.get(signature);
-        assertArrayEquals(ImageBytes.PNG_SIGNATURE, signature);
+        assertArrayEquals(ImageBytes.PNG_SIGNATURE, signature, "the file starts with the PNG signature");
         final List<PngChunk> chunks = new ArrayList<>();
         while (buffer.hasRemaining()) {
             final PngChunk chunk = PngChunk.read(buffer);
@@ -109,10 +111,9 @@ public class PngEncoderTest {
             if (chunk.type() == FCTL.SIGNATURE) {
                 final FCTL control = FCTL.convert(chunk);
                 assertEquals(sequence++, control.sequence(), "fcTL sequence");
-                assertEquals(FCTL.DISPOSE_OP_NONE, control.dispose());
-                assertEquals(FCTL.BLEND_OP_SOURCE, control.blend());
-                final int next = chunks.get(i + 1).type();
-                assertTrue(next == (controls.isEmpty() ? IDAT.SIGNATURE : FDAT.SIGNATURE), "frame " + controls.size() + " has data");
+                assertEquals(FCTL.DISPOSE_OP_NONE, control.dispose(), "every frame stays as the base of the next");
+                assertEquals(FCTL.BLEND_OP_SOURCE, control.blend(), "every region replaces what it covers");
+                assertEquals(controls.isEmpty() ? IDAT.SIGNATURE : FDAT.SIGNATURE, chunks.get(i + 1).type(), "frame " + controls.size() + " has data");
                 controls.add(control);
             } else if (chunk.type() == FDAT.SIGNATURE) {
                 assertTrue(controls.size() > 1, "fdAT only carries later frames");
@@ -156,7 +157,7 @@ public class PngEncoderTest {
     @DisplayName("Still pictures")
     class Still {
 
-        @ParameterizedTest(name = "{0}")
+        @ParameterizedTest(name = "{displayName}: {0}")
         @EnumSource(value = PixelFormat.class, names = { "RGBA", "BGRA", "RGB", "GRAY" })
         @DisplayName("One frame round-trips pixel-exact as a plain PNG without animation chunks")
         void roundTrip(final PixelFormat format) throws IOException {
@@ -165,18 +166,18 @@ public class PngEncoderTest {
 
             final List<PngChunk> chunks = chunks(png);
             final IHDR header = IHDR.convert(chunks.get(0));
-            assertEquals(List.of(37, 23, 8, 0), List.of(header.width(), header.height(), header.depth(), header.interlace()));
+            assertEquals(List.of(37, 23, 8, 0), List.of(header.width(), header.height(), header.depth(), header.interlace()), "IHDR holds the size, 8-bit samples and no interlace");
             assertEquals(switch (format) {
                 case RGB -> 2;
                 case GRAY -> 0;
                 default -> 6;
             }, header.colorType(), "BGRA is stored as RGBA");
             for (final PngChunk chunk: chunks)
-                assertTrue(chunk.type() == IHDR.SIGNATURE || chunk.type() == IDAT.SIGNATURE || chunk.type() == IEND.SIGNATURE, chunk.typeName());
-            assertEquals(IEND.SIGNATURE, chunks.get(chunks.size() - 1).type());
+                assertTrue(chunk.type() == IHDR.SIGNATURE || chunk.type() == IDAT.SIGNATURE || chunk.type() == IEND.SIGNATURE, "a still picture has no " + chunk.typeName());
+            assertEquals(IEND.SIGNATURE, chunks.get(chunks.size() - 1).type(), "IEND comes last");
 
             final ImageData image = assertFrames(png, format, frame);
-            assertArrayEquals(new long[] { 0L }, image.delays());
+            assertArrayEquals(new long[] { 0L }, image.delays(), "a still picture has no delay");
             assertEquals(1, image.repeat(), "a still picture plays once");
         }
 
@@ -206,7 +207,7 @@ public class PngEncoderTest {
             final ByteArrayOutputStream zlib = new ByteArrayOutputStream();
             for (final PngChunk chunk: chunks(png)) if (chunk.type() == IDAT.SIGNATURE) zlib.writeBytes(chunk.data());
             final byte[] filtered = new InflaterInputStream(new ByteArrayInputStream(zlib.toByteArray())).readAllBytes();
-            assertEquals((width + 1) * height, filtered.length);
+            assertEquals((width + 1) * height, filtered.length, "one filter type byte leads every row");
             for (int y = 1; y < 16; y++) assertEquals(4, filtered[y * (width + 1)], "row " + y + " takes Paeth");
             assertEquals(1, filtered[16 * (width + 1)], "the first ramp row takes Sub");
             for (int y = 17; y < 32; y++) assertEquals(2, filtered[y * (width + 1)], "row " + y + " repeats the one above and takes Up");
@@ -219,7 +220,7 @@ public class PngEncoderTest {
     @DisplayName("Animation")
     class Animation {
 
-        @ParameterizedTest(name = "{0}")
+        @ParameterizedTest(name = "{displayName}: {0}")
         @EnumSource(value = PixelFormat.class, names = { "RGBA", "BGRA", "RGB", "GRAY" })
         @DisplayName("Every frame round-trips pixel-exact with cropped regions, millisecond delays and the exact length")
         void roundTrip(final PixelFormat format) throws IOException {
@@ -247,7 +248,7 @@ public class PngEncoderTest {
                 assertTrue(Math.abs(image.delays()[f] * 1_000L - durationUs) < 1_000L, "frame " + f + " lasts " + image.delays()[f] + " ms for " + durationUs + " us");
             }
             assertEquals(Math.floorDiv(totalUs + 500L, 1_000L), image.duration(), "the rounding never drifts the animation length");
-            assertEquals(ImageData.REPEAT_FOREVER, image.repeat());
+            assertEquals(ImageData.REPEAT_FOREVER, image.repeat(), "repeat 0 plays forever");
         }
 
         @ParameterizedTest(name = "{0} plays")
@@ -255,8 +256,8 @@ public class PngEncoderTest {
         @DisplayName("The repeat count becomes the acTL play count")
         void repeat(final int plays) throws IOException {
             final byte[] png = encode(8, 8, PixelFormat.RGBA, plays, new long[] { 0L, 100_000L }, picture(8, 8, 4, 1), picture(8, 8, 4, 2));
-            assertEquals(plays, ACTL.convert(chunks(png).get(1)).repeat());
-            assertEquals(plays, CodecsAPI.decode(png).repeat(), "0 plays forever");
+            assertEquals(plays, ACTL.convert(chunks(png).get(1)).repeat(), "acTL counts the plays");
+            assertEquals(plays, CodecsAPI.decode(png).repeat(), "the decoder reads the plays back, 0 for forever");
         }
 
         @Test
@@ -300,11 +301,12 @@ public class PngEncoderTest {
             final List<FCTL> controls = controls(png);
             final List<List<Integer>> delays = new ArrayList<>();
             for (final FCTL control: controls) delays.add(List.of(control.delayNum() & 0xFFFF, control.delayDen() & 0xFFFF));
-            assertEquals(List.of(List.of(7_000, 100), List.of(20_000, 10), List.of(33, 1_000)), delays);
-            assertArrayEquals(new long[] { 70_000L, 2_000_000L, 33L }, CodecsAPI.decode(png).delays());
+            // 70 s IN HUNDREDTHS AND 2000 s IN TENTHS FIT 16 BITS, WHERE MILLISECONDS WOULD NOT; THE LAST LASTS 1 / fps
+            assertEquals(List.of(List.of(7_000, 100), List.of(20_000, 10), List.of(33, 1_000)), delays, "fcTL delays as numerator and denominator");
+            assertArrayEquals(new long[] { 70_000L, 2_000_000L, 33L }, CodecsAPI.decode(png).delays(), "delays in ms");
         }
 
-        @ParameterizedTest(name = "{0}")
+        @ParameterizedTest(name = "{displayName}: {0}")
         @EnumSource(value = PixelFormat.class, names = { "RGBA", "BGRA", "RGB", "GRAY" })
         @DisplayName("A decoder without APNG support, the JDK's, shows the first frame")
         void defaultImage(final PixelFormat format) throws IOException {
@@ -315,7 +317,7 @@ public class PngEncoderTest {
             // THE RASTER HANDS BACK RGBA ORDER, SO A BGRA SOURCE TRADES ITS RED AND BLUE
             final int[] expected = new int[first.length];
             for (int i = 0; i < first.length; i++) expected[i] = first[format == PixelFormat.BGRA && (i & 1) == 0 ? i ^ 2 : i] & 0xFF;
-            assertArrayEquals(expected, image.getRaster().getPixels(0, 0, 300, 200, (int[]) null));
+            assertArrayEquals(expected, image.getRaster().getPixels(0, 0, 300, 200, (int[]) null), "the JDK decoder shows the first frame");
         }
     }
 
@@ -345,9 +347,9 @@ public class PngEncoderTest {
                 }
             };
             final Encoder encoder = CodecsAPI.encoder(Container.PNG, out, new Encoder.Video(VideoCodec.PNG, 4, 4, PixelFormat.RGBA, FPS), null);
-            assertThrows(IllegalStateException.class, encoder::close);
-            assertTrue(closed[0]);
-            assertEquals(0, out.size());
+            assertThrows(IllegalStateException.class, encoder::close, "closing without frames throws");
+            assertTrue(closed[0], "the failed close still closes the stream");
+            assertEquals(0, out.size(), "nothing is written");
             assertDoesNotThrow(encoder::close, "a second close does nothing");
         }
 
@@ -363,7 +365,7 @@ public class PngEncoderTest {
             try (final Encoder encoder = CodecsAPI.encoder(Container.PNG, highest, new Encoder.Video(VideoCodec.PNG, 20, 20, PixelFormat.RGBA, FPS, 100, 0), null)) {
                 encoder.video(ByteBuffer.wrap(frame), 0L);
             }
-            assertArrayEquals(lowest.toByteArray(), highest.toByteArray());
+            assertArrayEquals(lowest.toByteArray(), highest.toByteArray(), "quality 0 and 100 write the same bytes");
         }
 
         @Test
@@ -377,7 +379,7 @@ public class PngEncoderTest {
                 for (int f = 0; f < frames.length; f++) encoder.video(ByteBuffer.wrap(frames[f]), f * 100_000L);
             }
             final ImageData image = assertFrames(Files.readAllBytes(file), PixelFormat.RGBA, frames);
-            assertArrayEquals(new long[] { 100L, 100L, 33L }, image.delays());
+            assertArrayEquals(new long[] { 100L, 100L, 33L }, image.delays(), "delays in ms, the last one 1 / fps");
         }
     }
 }

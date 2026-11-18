@@ -36,13 +36,16 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 import static org.lwjgl.glfw.GLFW.*;
 import static org.lwjgl.system.MemoryUtil.NULL;
 
-/** Verifies {@link GLEngine} plane layouts, colorimetry, uploads and shared programs on a real OpenGL 3.2 core context, if any. */
+/** Verifies {@link GLEngine} plane layouts, colorimetry, the synchronous and render-thread upload pipelines and the shared programs on a real OpenGL 3.2 core context; skips without a display or a context. */
 @DisplayName("GLEngine")
 public class GLEngineTest {
 
+    // STANDARD LUMA WEIGHTS (KR, KB), WRITTEN OUT SO A WRONG MATRIX CONSTANT CANNOT HIDE BEHIND THE SAME CONSTANT HERE
     private static final double[] BT601 = { 0.299, 0.114 };
     private static final double[] BT709 = { 0.2126, 0.0722 };
     private static final double[] BT2020 = { 0.2627, 0.0593 };
+
+    private static final long PRODUCER_TIMEOUT_MS = 5_000L;
 
     private static boolean initialized;
     private static long window = NULL;
@@ -50,6 +53,7 @@ public class GLEngineTest {
     // ==========================================================================
     // INTERNAL API
     // ==========================================================================
+
     @BeforeAll
     static void context() {
         assumeTrue(!GraphicsEnvironment.isHeadless(), "No display, skipping the OpenGL uploads");
@@ -82,6 +86,7 @@ public class GLEngineTest {
     // ==========================================================================
     // UTILITY
     // ==========================================================================
+
     // READS A PRIVATE FIELD OF AN ENGINE OR ITS KIT: THE RING AND THE SHARED PROGRAMS ARE NOT PART OF THE API
     private static Object field(final Object owner, final String member) {
         try {
@@ -148,7 +153,8 @@ public class GLEngineTest {
                                       final Colorimetry color, final ByteBuffer[] planes) {
         final GLEngine engine = PlayerAPI.glEngine(null, null);
         try {
-            assertTrue(color == null ? engine.format(format, width, height, bits) : engine.format(format, width, height, bits, color));
+            assertTrue(color == null ? engine.format(format, width, height, bits) : engine.format(format, width, height, bits, color),
+                    "the engine takes " + format + " " + width + "x" + height + " at " + bits + " bits");
             engine.upload(planes, new int[planes.length]);
             return pixels(engine, width, height);
         } finally {
@@ -168,6 +174,7 @@ public class GLEngineTest {
     // ==========================================================================
     // NESTED TYPES
     // ==========================================================================
+
     @Nested
     @DisplayName("Plane layouts")
     class Layouts {
@@ -185,7 +192,7 @@ public class GLEngineTest {
             final ByteBuffer v = YuvFrames.plane(0, cw, ch, (row, col) -> 128);
             final GLEngine engine = PlayerAPI.glEngine(null, null);
             try {
-                assertTrue(engine.format(PixelFormat.YUV420P, w, h, 8));
+                assertTrue(engine.format(PixelFormat.YUV420P, w, h, 8), "the engine takes an odd-width YUV420P layout");
                 engine.upload(new ByteBuffer[] { y, u, v }, new int[] { 864, 448, 0 });
                 final ByteBuffer rgba = pixels(engine, w, h);
                 final int first = rgba.get(2) & 0xFF;
@@ -207,7 +214,7 @@ public class GLEngineTest {
             final ByteBuffer yuyv = YuvFrames.plane(0, 12, 1, (row, col) -> col % 2 == 1 ? 128 : col / 2 < luma.length ? luma[col / 2] : 0);
             final GLEngine engine = PlayerAPI.glEngine(null, null);
             try {
-                assertTrue(engine.format(PixelFormat.YUYV, 5, 1, 8));
+                assertTrue(engine.format(PixelFormat.YUYV, 5, 1, 8), "the engine takes an odd-width YUYV layout");
                 engine.upload(new ByteBuffer[] { yuyv }, new int[] { 0 });
                 final ByteBuffer rgba = pixels(engine, 5, 1);
                 for (int x = 0; x < luma.length; x++)
@@ -224,7 +231,7 @@ public class GLEngineTest {
             final ByteBuffer rgb = YuvFrames.plane(16, 15, 2, (row, col) -> row * 100 + col + 1);
             final GLEngine engine = PlayerAPI.glEngine(null, null);
             try {
-                assertTrue(engine.format(PixelFormat.RGB, 5, 2, 8));
+                assertTrue(engine.format(PixelFormat.RGB, 5, 2, 8), "the engine takes an RGB layout");
                 engine.upload(new ByteBuffer[] { rgb }, new int[] { 16 });
                 final ByteBuffer rgba = pixels(engine, 5, 2);
                 for (int row = 0; row < 2; row++) {
@@ -245,11 +252,16 @@ public class GLEngineTest {
 
         @Test
         @DisplayName("Gray frames stay full range unless tagged otherwise")
-        void grayIsFullRange() {
+        void grayIsFullRangeUnlessTagged() {
+            // THE LIMITED-RANGE BLACK AND WHITE CODES: KEPT AS THEY ARE IN FULL RANGE, EXPANDED TO 0 AND 255 IN LIMITED RANGE
             final ByteBuffer gray = YuvFrames.plane(0, 2, 1, (row, col) -> col == 0 ? 16 : 235);
-            final ByteBuffer rgba = convert(PixelFormat.GRAY, 2, 1, 8, null, new ByteBuffer[] { gray });
-            assertEquals(16, rgba.get(0) & 0xFF, "full-range black level");
-            assertEquals(235, rgba.get(4) & 0xFF, "full-range near white");
+            final ByteBuffer untagged = convert(PixelFormat.GRAY, 2, 1, 8, null, new ByteBuffer[] { gray });
+            assertEquals(16, untagged.get(0) & 0xFF, "an untagged gray keeps its black level");
+            assertEquals(235, untagged.get(4) & 0xFF, "an untagged gray keeps its near white");
+            final Colorimetry limited = new Colorimetry(Matrix.BT601, false, true, false, Transfer.SDR, false);
+            final ByteBuffer tagged = convert(PixelFormat.GRAY, 2, 1, 8, limited, new ByteBuffer[] { gray });
+            assertEquals(0, tagged.get(0) & 0xFF, "a gray tagged limited expands its black level to 0");
+            assertEquals(255, tagged.get(4) & 0xFF, "a gray tagged limited expands its white level to 255");
         }
 
         @Test
@@ -298,8 +310,7 @@ public class GLEngineTest {
         @Test
         @DisplayName("PQ and HLG grays keep their SDR brightness below the knee and a 1000-nit peak lands on white")
         void hdrTransfers() {
-            final int[] cases = { 100, 1_000 };
-            for (final int nits: cases) {
+            for (final int nits: new int[] { 100, 1_000 }) {
                 final int code = (int) Math.round(64 + YuvFrames.pq(nits) * 876);
                 final ByteBuffer rgba = convert(PixelFormat.YUV420P, 2, 2, 10, new Colorimetry(Matrix.BT2020, false, true, false, Transfer.PQ, true), gray10(code));
                 final int shown = rgba.get(0) & 0xFF;
@@ -338,7 +349,7 @@ public class GLEngineTest {
         void synchronousUploadsShowTheFrameJustUploaded() {
             final GLEngine engine = PlayerAPI.glEngine(null, null);
             try {
-                assertTrue(engine.format(PixelFormat.BGRA, 2, 2));
+                assertTrue(engine.format(PixelFormat.BGRA, 2, 2), "the engine takes a BGRA layout");
                 // THE FIRST FRAME SPECIFIES THE TEXTURE; THE NEXT ONES STREAM THROUGH THE TWO PBOS IN TURN
                 for (final int shade: new int[] { 40, 120, 200, 80 }) {
                     engine.upload(new ByteBuffer[] { bgra(shade) }, new int[] { 0 });
@@ -355,7 +366,7 @@ public class GLEngineTest {
             assumeTrue(ringCapable(), "the context cannot map a persistent ring");
             final GLEngine engine = PlayerAPI.glEngine(null, null);
             try {
-                assertTrue(engine.format(PixelFormat.BGRA, 2, 2));
+                assertTrue(engine.format(PixelFormat.BGRA, 2, 2), "the engine takes a BGRA layout");
                 for (final int shade: new int[] { 40, 120 }) engine.upload(new ByteBuffer[] { bgra(shade) }, new int[] { 0 });
                 assertEquals(0L, field(engine, "ringAddr"), "no ring is mapped");
                 assertEquals(0, field(engine, "ringBufferId"), "no ring buffer exists");
@@ -372,11 +383,11 @@ public class GLEngineTest {
             final GLEngine engine = PlayerAPI.glEngine(Thread.currentThread(), tasks::add);
             final ExecutorService producer = Executors.newSingleThreadExecutor();
             try {
-                assertTrue(producer.submit(() -> engine.format(PixelFormat.BGRA, 2, 2)).get(5, TimeUnit.SECONDS));
+                assertTrue(producer.submit(() -> engine.format(PixelFormat.BGRA, 2, 2)).get(PRODUCER_TIMEOUT_MS, TimeUnit.MILLISECONDS), "the producer's layout is accepted");
                 assertEquals(0, engine.width(), "the layout waits for the render thread");
                 pump(tasks);
-                assertEquals(2, engine.width());
-                producer.submit(() -> engine.upload(new ByteBuffer[] { bgra(40) }, new int[] { 0 })).get(5, TimeUnit.SECONDS);
+                assertEquals(2, engine.width(), "the drained layout is published");
+                producer.submit(() -> engine.upload(new ByteBuffer[] { bgra(40) }, new int[] { 0 })).get(PRODUCER_TIMEOUT_MS, TimeUnit.MILLISECONDS);
                 assertEquals(0L, engine.texture(), "nothing is uploaded before the render thread drains");
                 pump(tasks);
                 YuvFrames.assertUniform(pixels(engine, 2, 2), new int[] { 40, 40, 40, 40 }, 0, "the first frame");
@@ -385,13 +396,13 @@ public class GLEngineTest {
                 producer.submit(() -> {
                     engine.upload(new ByteBuffer[] { bgra(120) }, new int[] { 0 });
                     engine.upload(new ByteBuffer[] { bgra(200) }, new int[] { 0 });
-                }).get(5, TimeUnit.SECONDS);
+                }).get(PRODUCER_TIMEOUT_MS, TimeUnit.MILLISECONDS);
                 pump(tasks);
                 YuvFrames.assertUniform(pixels(engine, 2, 2), new int[] { 200, 200, 200, 200 }, 0, "the newest frame");
                 assertEquals(ringCapable(), (long) field(engine, "ringAddr") != 0L, "the ring is mapped exactly when the context supports it");
 
                 final int texture = (int) engine.texture();
-                producer.submit(() -> engine.release()).get(5, TimeUnit.SECONDS);
+                producer.submit(() -> engine.release()).get(PRODUCER_TIMEOUT_MS, TimeUnit.MILLISECONDS);
                 assertEquals(0L, engine.texture(), "a released engine exposes no texture at once");
                 assertTrue(GL11.glIsTexture(texture), "the GL teardown waits for the render thread");
                 pump(tasks);
@@ -418,9 +429,9 @@ public class GLEngineTest {
             final Object kit;
             final int program;
             try {
-                assertTrue(first.format(PixelFormat.YUV444P, 2, 2, 8, color));
+                assertTrue(first.format(PixelFormat.YUV444P, 2, 2, 8, color), "the first engine takes the YUV444P layout");
                 first.upload(uniform(120, 90, 200), new int[3]);
-                assertTrue(second.format(PixelFormat.YUV444P, 2, 2, 8, color));
+                assertTrue(second.format(PixelFormat.YUV444P, 2, 2, 8, color), "the second engine takes the YUV444P layout");
                 second.upload(uniform(120, 90, 200), new int[3]);
                 kit = field(first, "kit");
                 assertNotNull(kit, "a conversion layout takes the context's kit");
@@ -441,7 +452,7 @@ public class GLEngineTest {
 
             final GLEngine third = PlayerAPI.glEngine(null, null);
             try {
-                assertTrue(third.format(PixelFormat.YUV444P, 2, 2, 8, color));
+                assertTrue(third.format(PixelFormat.YUV444P, 2, 2, 8, color), "a later engine takes the YUV444P layout");
                 third.upload(uniform(120, 90, 200), new int[3]);
                 assertNotSame(kit, field(third, "kit"), "a later engine builds a fresh kit");
                 YuvFrames.assertUniform(pixels(third, 2, 2), expected, 3, "the fresh kit converts");

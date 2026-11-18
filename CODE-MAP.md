@@ -177,7 +177,9 @@ The generic version of these rules lives in AGENTS.md → "Code pattern"; this i
 - Javadoc: one line (`/** Returns|Creates|Reads ... */`) by default; multi-line `@param`/`@return`/`@throws` only for
   complex contracts such as the `MediaPlayer` control surface; never `/** @return ... */` one-liners; none on private
   or package-private members (plain comments instead). `gradle javadocInventory` checks only `public_packages`.
-- Tests: `public class XTest` with a class Javadoc starting with "Verifies", `@DisplayName` on class and methods,
+- Tests: test methods carry no `test` prefix and `@Nested` groups no `Tests` suffix; a class with a single topic
+  stays flat; boxes are `INTERNAL API` (hooks and probe `main`s), `UTILITY` and `NESTED TYPES`.
+  `public class XTest` with a class Javadoc starting with "Verifies", `@DisplayName` on class and methods,
   explicit static `Assertions` imports, `@Nested` groups; shared helpers in `src/test/java/org/watermedia/test/support`;
   timing assertions bracket the measured call with `System.nanoTime()` instead of fixed tolerances.
 - Gradle: tasks registered with `group` and `description`, values captured outside `doLast`, `.jar` suffix
@@ -189,7 +191,7 @@ The generic version of these rules lives in AGENTS.md → "Code pattern"; this i
 |---|---|
 | `src/main/java/org/watermedia/` | `WaterMedia` (entry), `WaterMediaConfig` (TOML spec), `api/` (public API), `bootstrap/` (loader entry points, launcher, app), `tools/` (internal utilities) |
 | `src/main/resources/` | `META-INF/mods.toml`, `META-INF/neoforge.mods.toml`, `fabric.mod.json`, `pack.mcmeta`, `icon.png`, `pack.png`, `assets/watermedia/{shaders,font,textures,sounds,catalog}`, `META-INF/licenses/{javacpp,jetbrainsmono}-LICENSE.txt` |
-| `src/test/java/org/watermedia/` | Tests mirroring the main packages, child-JVM probes (`*Probe.java`, started by the `*ProcessTest` classes and `AppConfigTest`, plus the `main` of `NetworkServerTest` and `NetworkAPITest`), `test/support` helpers; `src/test/resources` fixtures (`pentest/` hostile corpus); `src/test/tools/GeneratePngReference.java` |
+| `src/test/java/org/watermedia/` | Tests mirroring the main packages, child-JVM probes (`*Probe.java`, started by the `*ProcessTest` classes and `AppConfigTest`, plus the `main` of `NetworkServerTest` and `NetworkAPITest`), `test/support` helpers; `src/test/resources` fixtures (`pentest/` hostile corpus); `src/test/tools/GeneratePngReference.java` and `GenerateJpegReference.java` |
 | `binaries/` | Included build of "WaterMedia: Binaries": `src/main/java/org/watermedia/binaries` (module + provisioning), `src/main/resources/libs/ffmpeg-*.zip`, `libs/ffmpeg-<ver>.jar`, `tools/` (rebuild and verification scripts), own `gradle.properties`, `CHANGELOG.md`, `.github/workflows`, `docs/assets` (OS icons of its README) |
 | `modloaders/` | Compile-only stubs of Forge/NeoForge/Fabric loader classes (bodies throw "Stub!"), never shipped |
 | `gradle/common.gradle` | Shared Java/JUnit setup, loader range math, `processResources` expansion, jar manifest, `publishMods` validation, store description sync |
@@ -311,7 +313,7 @@ Package map (`src/main/java/org/watermedia`):
   x64/arm64, plus a Java 17 "compatibility" leg) running `gradle test -Prequire_natives=true` with explicit `--tests`
   filters (FF players, decoders, encoders; the compat leg: bootstrap, network, AL/AWT/SFX/spatial, NetRequest).
   Both jobs set `ALSOFT_DRIVERS=null`, so OpenAL opens its null device and the `OpenALContext` cases run.
-  ⚠ No filter reaches the FFmpeg cases of `ColorimetryTest` (`StreamTests`) and `StatusDeliveryTest`
+  ⚠ No filter reaches the FFmpeg cases of `ColorimetryTest` (`Tags`) and `StatusDeliveryTest`
   (`LockFreeRelease`): only the `build` job runs them, where natives are optional and a failed load skips them.
 - `build-release.yml` (tags), one job per step over a single build: `build` (fails unless the tag is `version`,
   `gradle build`, keeps `build/libs` as artifact `libs`) → `release` (`publishGithub`) → `curseforge` and `modrinth`
@@ -1503,7 +1505,8 @@ System properties: `watermedia.engine`, `watermedia.app` (child JVM flag), `wate
   symlink refusal (`NOFOLLOW_LINKS`), TLauncher refusal, `DEFAULT_NETWORK_TOKEN` guard off loopback.
 
 ## 16. Tests (`src/test`)
-- Layout mirrors the main packages (132 files, 16 of them support helpers). Root: `ApiGuideExampleTest` (runs the public-only `ApiGuideExample`),
+- Layout mirrors the main packages (127 files, 16 of them support helpers). Root: `ApiGuideExampleTest` (runs the
+  public-only `ApiGuideExample` and checks the sizes its `DownscaleFilter` yields),
   `BootstrapProcessTest` and `ServiceLifecycleProcessTest` (child JVMs through `MediaBootstrap.runProbe`),
   `LoggerRedactionTest`, `ErrorCodeInventoryTest` (parses the `ERR_*` declarations of `WaterMedia.java`; every site
   carries a declared constant used once, inside its package range, and every constant but `ERR_UNKNOWN` has a site;
@@ -1513,23 +1516,31 @@ System properties: `watermedia.engine`, `watermedia.app` (child JVM flag), `wate
   `ServiceLifecycleProbe` (`platform`, `uploads`, `evicted`, `failed-probe`), `AppConfigProbe` (`defaults`, `shared`,
   `malformed`, `override`, launched by `AppConfigTest`), `NetworkServerTest.main` (`storage-lock`),
   `NetworkAPITest.main` (`host`: a dedicated server that starts the file server reports `serverEnabled()` at once).
-  `PlatformSmokeTest` is a manual network harness, not a JUnit test.
+  `PlatformSmokeTest` is a manual network harness with a `main`, not a JUnit test: it resolves the links it is given
+  through `PlatformAPI.fetch` and prints their sources.
 - Test classes by area: codecs `CodecsApiContractTest`, `ImageDataTest`, `ImageMetadataTest`, `MediaTypeSniffTest`,
-  `ScanTest`, `PentestTest` (hostile corpus), `BcReaderTest`, `DdsHeaderTest`, PNG/GIF `ChunkContractTest`,
-  `FFDecoderTest` (incl. `Idle connections`: a segment download reset or left silent while the demuxer is held
-  resumes at its offset, the silent one after the real 10 s timeout; `InputOptions`: transport policy, headers only
-  when present, `request_size` for YouTube's CDN alone, the options of a CDN link reading a loopback file past 10 MiB
-  through bounded requests (raw `avformat`, so a fork that drops `request_size` fails), open requests for any other
-  host, an RTMP input that connects; `Segment retries`: a first segment refused twice still decodes),
-  `QueueLifecycleTest`, `FFEncoderTest`, `GifEncoderTest`, `PngEncoderTest`, readers `GifTest`,
-  `JpegTest`, `NetpbmTest`, `PngTest`, `WebpTest`, `WebpMalformedTest`, `SvgTest`, `AlphaDecoderTest`,
+  `ScanTest`, `PentestTest` (hostile corpus; every refusal must start with the `(wm_err:NNNN)` of the guard its
+  fixture targets, and an accepted file must decode or lose only the chunk under attack), `BcReaderTest`,
+  `DdsHeaderTest`, PNG/GIF `ChunkContractTest`,
+  `FFDecoderTest` (`InputOptions`: transport and probe policy, headers only when present, `request_size` for
+  YouTube's CDN alone, the options of a CDN link reading a loopback file past 10 MiB through bounded requests (raw
+  `avformat`, so a fork that drops `request_size` fails), open requests for any other host, RTMP without `timeout`
+  and an RTMP input that connects; `IdleConnections`: a segment download reset or left silent in the middle of its
+  body while the demuxer is held is asked for again and every frame decodes, the silent one after the real 10 s
+  timeout; `SegmentRetries`: a first segment refused twice still decodes; `Abort`, `EmbeddedAudio`,
+  `SeparateTracks`, `OutputOrder`, `LanguageMatch`),
+  `QueueLifecycleTest`, `FFEncoderTest` (each container is probed for the codec ids and the audio length it wrote),
+  `GifEncoderTest`, `PngEncoderTest`, readers `GifTest`,
+  `JpegTest` (progressive fixtures plus the baseline `7.jpg`, also read as extended sequential), `NetpbmTest` (whole
+  rasters against the samples read straight from the file), `PngTest`, `WebpTest`, `WebpMalformedTest`, `SvgTest`,
+  `AlphaDecoderTest`,
   `HuffmanTableTest`, `VP8LosslessDecoderTest`, `FFmpegLogRoutingTest` (disabled); network `NetworkServerTest`
   (snapshots and restores `remoteUrl` with the other `network.*` keys; `Port`: a busy port fails before the storage
-  exists, a port `remoteUrl` reaches starts, an unreachable `remoteUrl` gives the port and the storage lock back, a
-  foreign answer and an invalid `remoteUrl` fail), `NetworkServerGateTest` (`NetworkAPI.enable`), `NetworkAPITest`
-  (`answers`, `serverEnabled` and the coded message of an upload to a server that is off, silent or behind a wrong
-  `remoteUrl`; it reads `PROBING` and resets `serverUp`, `probeWarned` and `probeAt` by reflection, `probeAt` also
-  in the middle of a case to end the pause between probes), `UploadStatusTest`;
+  exists, a port `remoteUrl` reaches starts, an unreachable, a foreign or an invalid `remoteUrl` fails and gives the
+  port and the storage lock back), `NetworkAPITest`
+  (`enable`, `answers`, `serverEnabled` and the coded message of an upload to a server that is off, silent or behind
+  a wrong `remoteUrl`; it reads `PROBING` and resets `serverUp`, `probeWarned` and `probeAt` by reflection, `probeAt`
+  also in the middle of a case to end the pause between probes), `UploadStatusTest`;
   platform `PlatformApiTest`, `PlatformSearchTest`, `PlatformClaimTest`,
   `WaterPlatformTest`, offline handler tests `BiliBiliPlatformTest`, `KickPlatformTest`, `NewgroundsPlatformTest`,
   `OdyseePlatformTest` (loopback proxy through `LocalHttp`), `TwitchPlatformTest` (search hits), `TwitterPlatformTest`,
@@ -1539,14 +1550,17 @@ System properties: `watermedia.engine`, `watermedia.app` (child JVM flag), `wate
   `SiteListsTest` (the `checkSite` matrix with disguised hosts, `file:` shares and `jar:` links, BLOCKED MRLs
   without a request, player revalidation, Windows share strings; it snapshots and restores the
   `player.whitelist`/`player.blacklist` fields and gives every case its own URI), `NetworkCacheTest`, `PlayerStateTest`,
-  `ServerMediaPlayerTest`, `FollowerClockTest`, `FollowerPlayerStateTest`, `StatusDeliveryTest`, `FFMediaPlayerTest`
+  `ServerMediaPlayerTest`, `FollowerClockTest`, `FollowerSyncTest` (end-to-end mirrors over
+  `MediaPlayer.sync(ByteBuffer)`), `StatusDeliveryTest`, `FFMediaPlayerTest`
   (upload size, native and scaled), `FFHoldResumeTest` (an HLS VOD of MPEG-TS segments served like YouTube's by an
   `IdleOrigin` that resets idle connections; a pause in the middle of a segment and a paused launch held the real
   10 s keep playing from the paused frame, a short pause resumes without BUFFERING or a second request of the
   segment), `FFControlContractTest`, `FFAudioTracksTest` (pick, language, hot switch), `ColorimetryTest`,
-  `Tx*Test` (animated, control contract, display time, frame step, frame
-  textures, release, scaling, static image), engines `GFXEngineTest`, `GLEngineTest`, `VKEngineTest`,
-  `HeadlessGFXEngineTest`, `AWTEngineTest`, `JFXEngineTest`, `SFXEngineTest`, `ALCapabilitiesTest`, `ALSinkTest`, `SpatialAudioTest`;
+  `TxStaticImageTest` (stills, timed or not, and bodies typed by their bytes), `TxAnimatedImageTest` (streaming and
+  frame steps in both modes), `TxScalingTest` (+ `FrameTextures`), `TxControlContractTest`, `TxReleaseTest`,
+  engines `GFXEngineTest`, `GLEngineTest`, `VKEngineTest` (a DEVICE upload must import its planes in place),
+  `HeadlessGFXEngineTest`, `AWTEngineTest`, `JFXEngineTest`, `SFXEngineTest` (`JavaSound`, `OpenAL` and the
+  device-free `ChannelTable`), `ALSinkTest`, `SpatialAudioTest`;
   util `HttpHeadersTest`, `NetRequestTest`, `MediaTypeTest`, `MediaQualityTest`, `PixelFormatTest`, `MathUtilTest`,
   `MathEasesTest`; bootstrap `AppBootstrapDependenciesTest`, `DefensiveCheckTest`, app `AppConfigTest`,
   `FramePlanTest`, `LogUploaderTest` (stages with the stage 3 resume and the report retry, both scan layouts in a
@@ -1556,9 +1570,9 @@ System properties: `watermedia.engine`, `watermedia.app` (child JVM flag), `wate
   still starts the `WaterMedia-CacheSize` walk of the cache folder on its own thread), `CanvasLiveTest`,
   `DialogTest` (panel height against the bands), `ListRowTest`,
   `ListViewInteractionTest` (+ `ScrollbarChannel`), `SpinnerTest`, `TextFieldTest`, `TextAreaTest` (+ `SingleLine`;
-  headless through the package-private `TextArea.metrics` hook), `RenderEngineBatchTest` (its own counting
-  backend), `RenderEngineCacheTest`,
-  `VulkanRenderBackendTest`; tools `DataToolTest` (incl. `errCode` padding), `IOToolTest`, `JSONToolTest`,
+  headless through the package-private `TextArea.metrics` hook), `RenderEngineBatchTest`, `RenderEngineCacheTest`,
+  `VulkanRenderBackendTest` (⚠ it derives "the GPU offers decoding" from the physical device with the same rule as
+  `VulkanRenderBackend.createDeviceAndQueue`, so a change of that queue plan changes the test); tools `DataToolTest` (incl. `errCode` padding), `IOToolTest`, `JSONToolTest`,
   `M3UToolTest`, `ThreadToolTest`. ⚠ Many tests that match an error message match its code too
   (`assertEquals("(wm_err:0410) Failed to pick the quality ...", ...)`), so renumbering a site breaks them.
   ⚠ `LogUploaderTest` expects a test JVM that loads classes from a directory (`LogUploader.DEV`; its `Stages` group
@@ -1581,27 +1595,34 @@ System properties: `watermedia.engine`, `watermedia.app` (child JVM flag), `wate
   `download`, `dependencies`, `versions`, `extract`, `Dependency`), `WaterMediaBinaries.paths`, and WaterConfig's
   `ConfigSpec.save`.
 - Support helpers (`org.watermedia.test.support`): `Fixtures` (resource paths and constants `MP4_H264`, `PNG_STATIC`,
-  `GIF_ANIMATED`, ...; `readAll`, `fileUri`, `wav` (plain, or WAVE_FORMAT_EXTENSIBLE with a channel mask), `tone`,
+  `GIF_ANIMATED`, `JPEG_GRAY`, `M3U_IPTV`, ...; `readAll`, `fileUri`, `wav` (plain, or WAVE_FORMAT_EXTENSIBLE with a channel mask), `tone`,
   `level`, `dubbed` (tagged multi-stream Matroska), `segment` (HLS-ready Matroska), `transportSegments` (intra-only
   MPEG-2 noise cut into `segment<i>.ts` with continuous timestamps and continuity counters, PAT/PMT per segment),
   `webm`), `MediaBootstrap` (`client()`, `ffmpegAvailable()` one shared
-  bootstrap in a temp dir, `runProbe(type, dir, scenario, omitBindings)`), `PlayerWait` (`awaitStatus`,
+  bootstrap in a temp dir, `runProbe(type, dir, scenario, omitBindings)`, whose failures carry the log of the child,
+  a probe killed at its 45 s limit included), `PlayerWait` (`awaitStatus`,
   `awaitCondition`), `LocalHttp` (loopback `HttpServer`, one context with any handler, `respond`, `respondRange`,
-  `expiresIn`), `IdleOrigin`
+  `expiresIn`, `freePort` (a loopback port nobody listens on)), `IdleOrigin`
   (keep-alive HTTP/1.1 with bodies per path and byte ranges that resets, `resetting`, or goes silent, `silent`, on an
   idle connection; `serve`, `stream` (a body served like YouTube's segments: 200 chunked, no ranges, paced), `uri`,
-  `requests(path)`, `cuts`, `connections`, `strays`), `Origin` (one body under every path: ranges with `of`, a feed
+  `requests(path)`, `cuts`, `cuts(path)` (downloads of a path cut in the middle of their body), `connections`,
+  `strays`), `Origin` (one body under every path: ranges with `of`, a feed
   that never ends with `endless`, `hold`/`awaitEntered`/`release` to park requests before their headers,
   `requests()`, a fresh path per `uri(ext)`), `LogCapture` (TRACE capture of a named logger), `OpenALContext`
   (skips without OpenAL),
-  `YuvFrames` (planes and expected colours incl. PQ/HLG), `ImageBytes` (PNG/RIFF builders, bit writer), `PamImage`,
+  `YuvFrames` (planes and expected colours incl. PQ/HLG), `ImageBytes` (PNG/RIFF builders, bit writer, `exif`
+  payload of an orientation), `PamImage` (`read`, `diff` against a BGRA frame, `argb` pixels of a decoded frame),
   `PixelDiff`, `FrameReplay` (frame hashes across two `reset()`), `DdsFixture`, `RecordingBackend` (GPU-less
-  `RenderBackend`), `MaliciousImages` (pentest corpus generator, not a test).
-- Fixtures: `gif/`, `jpeg/` (+`raw/*.pam` references), `png/` (+`raw/` with a `README.md` of provenance and
+  `RenderBackend` that records layers, binds, clips, projections and line widths), `MaliciousImages` (pentest corpus
+  generator, not a test: its `main` writes the committed corpus, or a folder given as argument, and must reproduce
+  every file byte for byte).
+- Fixtures: `gif/`, `jpeg/` (`1.jpg` to `6.jpg` progressive, `7.jpg` baseline 4:2:0; +`raw/*.pam` references and a
+  `README.md` of provenance), `png/` (+`raw/` with a `README.md` of provenance and
   SHA-256), `webp/{lossless,lossy}` (+`raw/`), `webp/animated`, `netpbm/`, `svg/` (+`png/` renders),
   `mp4/fibonaccisongh264.mp4`, `m3u/iptv_sample.m3u8`, `pentest/{dds,gif,jpeg,netpbm,png,svg,webp}`, `log4j2.xml`
   (console, `watermedia` and `watermedia_binaries` DEBUG). `src/test/tools/GeneratePngReference.java`
-  regenerates PNG references with ImageIO. `.gitattributes` marks `pentest/**` and every `*.pam` under
+  regenerates PNG references with ImageIO and `GenerateJpegReference.java` writes the baseline JPEG with its
+  reference (both run with the Java source launcher). `.gitattributes` marks `pentest/**` and every `*.pam` under
   `src/test/resources` `-text`: ⚠ a byte-exact fixture without a zero byte in its first 8000 bytes is sniffed as text
   and rewritten to CRLF by a checkout with `core.autocrlf=true` (it broke `PngTest [1.png]` with `png/raw/1.pam`).
 - Gates: natives optional unless `watermedia.test.requireNatives`; GPU tests need a real GL/VK context (LWJGL stack
@@ -1612,7 +1633,8 @@ System properties: `watermedia.engine`, `watermedia.app` (child JVM flag), `wate
   `FFAudioTracksTest` aborts its `Embedded` and `Separate` cases when no Java Sound line plays mono S16 at 48 kHz;
   `FFmpegLogRoutingTest` is `@Disabled`. CI native matrix filters are listed in §4.
 - Clock-dependent cases that a slow host can stall retry up to 3 times with 5 s pauses and rethrow the last failure
-  (owner rule): `PlatformSearchTest.testTypingDelay`, `FFControlContractTest.Loading.speedBeforeStart` (2x rate window,
+  (owner rule): `PlatformSearchTest.Discard.typedQueryWaitsForTheNextKey`,
+  `FFControlContractTest.Loading.speedBeforeStart` (2x rate window,
   which failed once on the macOS Intel runner) and the rendering check of `FFHoldResumeTest.LongHold` (both cases).
   Bracketed system-clock checks (`ServerMediaPlayerTest`, `FollowerClockTest`) need none.
 - Binaries tests (`binaries/src/test/java`): `NativeProvisionTest` (checksums, generations, interrupted installs,

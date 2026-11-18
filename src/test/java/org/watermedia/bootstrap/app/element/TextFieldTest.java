@@ -35,11 +35,11 @@ public class TextFieldTest {
         void typesAndErases() {
             final List<String> changes = new ArrayList<>();
             final TextField field = new TextField().onChange(changes::add).focused(true);
-            assertTrue(field.dispatchChar('a'));
-            assertTrue(field.dispatchChar('b'));
-            assertTrue(field.dispatchKey(GLFW_KEY_BACKSPACE, GLFW_PRESS));
-            assertTrue(field.dispatchKey(GLFW_KEY_BACKSPACE, GLFW_RELEASE));
-            assertTrue(field.dispatchKey(GLFW_KEY_DELETE, GLFW_PRESS));
+            assertTrue(field.dispatchChar('a'), "typed a");
+            assertTrue(field.dispatchChar('b'), "typed b");
+            assertTrue(field.dispatchKey(GLFW_KEY_BACKSPACE, GLFW_PRESS), "the field takes the BACKSPACE press");
+            assertTrue(field.dispatchKey(GLFW_KEY_BACKSPACE, GLFW_RELEASE), "the release is swallowed");
+            assertTrue(field.dispatchKey(GLFW_KEY_DELETE, GLFW_PRESS), "the field takes the DELETE press");
             assertEquals("", field.value());
             assertEquals(List.of("a", "ab", "a", ""), changes);
         }
@@ -48,15 +48,15 @@ public class TextFieldTest {
         @DisplayName("plain fields keep printable ASCII under the length cap; unicode ones take any character")
         void filtersCharacters() {
             final TextField ascii = new TextField().maxLength(2).focused(true);
-            assertFalse(ascii.dispatchChar('ñ'));
-            assertTrue(ascii.dispatchChar('1'));
-            assertTrue(ascii.dispatchChar('2'));
-            assertFalse(ascii.dispatchChar('3'));
+            assertFalse(ascii.dispatchChar('ñ'), "a plain field takes only ASCII");
+            assertTrue(ascii.dispatchChar('1'), "typed 1");
+            assertTrue(ascii.dispatchChar('2'), "typed 2");
+            assertFalse(ascii.dispatchChar('3'), "the cap is reached");
             assertEquals("12", ascii.value());
 
             final TextField wide = new TextField().unicode(true).focused(true);
-            assertTrue(wide.dispatchChar('ñ'));
-            assertFalse(wide.dispatchChar(127));
+            assertTrue(wide.dispatchChar('ñ'), "a unicode field takes a Latin letter");
+            assertFalse(wide.dispatchChar(127), "DEL is a control");
             assertEquals("ñ", wide.value());
         }
 
@@ -82,8 +82,8 @@ public class TextFieldTest {
             field.attach(ctx);
             ctx.ctrlDown = true;
             ctx.altDown = true;
-            assertTrue(field.dispatchChar('@'));
-            assertTrue(field.dispatchChar('\\'));
+            assertTrue(field.dispatchChar('@'), "AltGr types @");
+            assertTrue(field.dispatchChar('\\'), "AltGr types a backslash");
             assertEquals("a/b@\\", field.value());
             field.dispatchKey(GLFW_KEY_BACKSPACE, GLFW_PRESS);
             assertEquals("a/b@", field.value());
@@ -93,10 +93,11 @@ public class TextFieldTest {
         @DisplayName("a disabled or blurred field ignores keys and characters")
         void inactive() {
             final TextField blurred = new TextField();
-            assertFalse(blurred.dispatchChar('a'));
-            assertFalse(blurred.dispatchKey(GLFW_KEY_BACKSPACE, GLFW_PRESS));
+            assertFalse(blurred.dispatchChar('a'), "a blurred field takes no character");
+            assertFalse(blurred.dispatchKey(GLFW_KEY_BACKSPACE, GLFW_PRESS), "a blurred field takes no key");
             final TextField disabled = new TextField().value("a").focused(true).enabled(false);
-            assertFalse(disabled.dispatchKey(GLFW_KEY_BACKSPACE, GLFW_PRESS));
+            assertFalse(disabled.dispatchKey(GLFW_KEY_BACKSPACE, GLFW_PRESS), "a disabled field takes no key");
+            assertFalse(disabled.dispatchChar('x'), "a disabled field takes no character");
             assertEquals("a", disabled.value());
         }
     }
@@ -109,14 +110,15 @@ public class TextFieldTest {
         @DisplayName("ENTER and ESC reach the screen unless the field has actions, which run on release")
         void submitAndEscape() {
             final TextField plain = new TextField().focused(true);
-            assertFalse(plain.dispatchKey(GLFW_KEY_ENTER, GLFW_RELEASE));
-            assertFalse(plain.dispatchKey(GLFW_KEY_ESCAPE, GLFW_RELEASE));
+            assertFalse(plain.dispatchKey(GLFW_KEY_ENTER, GLFW_RELEASE), "a plain field leaves ENTER to the screen");
+            assertFalse(plain.dispatchKey(GLFW_KEY_ESCAPE, GLFW_RELEASE), "a plain field leaves ESC to the screen");
 
             final List<String> actions = new ArrayList<>();
             final TextField wired = new TextField().onSubmit(() -> actions.add("submit")).onEscape(() -> actions.add("escape")).focused(true);
-            assertTrue(wired.dispatchKey(GLFW_KEY_ENTER, GLFW_PRESS));
-            assertTrue(wired.dispatchKey(GLFW_KEY_ENTER, GLFW_RELEASE));
-            assertTrue(wired.dispatchKey(GLFW_KEY_ESCAPE, GLFW_RELEASE));
+            assertTrue(wired.dispatchKey(GLFW_KEY_ENTER, GLFW_PRESS), "the field takes the ENTER press");
+            assertEquals(List.of(), actions, "the press runs nothing");
+            assertTrue(wired.dispatchKey(GLFW_KEY_ENTER, GLFW_RELEASE), "the field takes the ENTER release");
+            assertTrue(wired.dispatchKey(GLFW_KEY_ESCAPE, GLFW_RELEASE), "the field takes the ESC release");
             assertEquals(List.of("submit", "escape"), actions);
         }
 
@@ -126,12 +128,12 @@ public class TextFieldTest {
             final TextField field = new TextField().focusOnHover(true).size(100, 30);
             field.measure(100, 30);
             field.layout(0, 0);
-            assertTrue(field.dispatchHover(10, 10));
-            assertTrue(field.focused());
-            assertFalse(field.dispatchHover(300, 300));
-            assertTrue(field.focused());
-            assertFalse(field.dispatchClick(300, 300), "a click elsewhere blurs it");
-            assertFalse(field.focused());
+            assertTrue(field.dispatchHover(10, 10), "the field takes the hover");
+            assertTrue(field.focused(), "the pointer entering focused it");
+            assertFalse(field.dispatchHover(300, 300), "a point outside passes on");
+            assertTrue(field.focused(), "the pointer leaving kept the focus");
+            assertFalse(field.dispatchClick(300, 300), "a click elsewhere passes on");
+            assertFalse(field.focused(), "a click elsewhere blurs it");
         }
 
         @Test
@@ -148,8 +150,8 @@ public class TextFieldTest {
             final TextField kept = new TextField().keepFocus(true).focused(true);
             kept.clearFocus();
             assertTrue(kept.focused(), "typing goes on after pressing a button or picking a row");
-            assertFalse(kept.size(100, 30).dispatchClick(300, 300), "a click that reaches it outside still blurs it");
-            assertFalse(kept.focused());
+            assertFalse(kept.size(100, 30).dispatchClick(300, 300), "a click outside passes on");
+            assertFalse(kept.focused(), "a click that reaches it outside still blurs it");
         }
     }
 }

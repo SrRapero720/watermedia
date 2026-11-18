@@ -24,8 +24,8 @@ import static org.lwjgl.glfw.GLFW.GLFW_RELEASE;
 import static org.lwjgl.glfw.GLFW.GLFW_REPEAT;
 
 /**
- * Verifies the upload dialog of {@link HomeScreen}: which keys of each stage submit, move the focus or type, and the
- * status its issue stage shows for each state of the uploader.
+ * Verifies the upload dialog of {@link HomeScreen}: which keys of each stage fire its primary action, move the focus or
+ * type, the key hints of each stage, and the status its issue stage shows for each state of the uploader.
  */
 @DisplayName("Home screen")
 public class HomeScreenTest {
@@ -34,8 +34,9 @@ public class HomeScreenTest {
     // UTILITY
     // ==========================================================================
 
-    // A HOME SCREEN BUILT WITHOUT A WINDOW, ITS UPLOAD DIALOG OPEN AT THE STAGE; THE NAVIGATOR RECORDS WHAT THE SCREEN
-    // FIRES INSTEAD OF RUNNING THE UPLOADER, SO NOTHING IS SCANNED, UPLOADED OR OPENED
+    // A HOME SCREEN BUILT WITHOUT A WINDOW, ITS UPLOAD DIALOG OPEN AT THE STAGE; THE NAVIGATOR RECORDS WHAT THE SCREEN FIRES
+    // INSTEAD OF RUNNING THE UPLOADER, SO NOTHING IS UPLOADED OR OPENED. onEnter() STILL STARTS THE READ-ONLY WALK OF THE
+    // CACHE FOLDER ON A WaterMedia-CacheSize THREAD, WHOSE MENU REBUILD WAITS IN A ctx QUEUE THAT NOTHING DRAINS
     private static HomeScreen screen(final AppContext ctx, final List<Action> fired, final int stage) {
         final HomeScreen screen = new HomeScreen(null, ctx, fired::add);
         screen.onEnter();
@@ -68,7 +69,7 @@ public class HomeScreenTest {
             final AppContext ctx = new AppContext();
             final List<Action> fired = new ArrayList<>();
             final HomeScreen screen = screen(ctx, fired, 3);
-            assertTrue(screen.textInputActive());
+            assertTrue(screen.textInputActive(), "a box holds the focus");
             type(screen, "Crash");
             screen.dispatchKey(GLFW_KEY_ENTER, GLFW_PRESS);
             screen.dispatchKey(GLFW_KEY_ENTER, GLFW_REPEAT);
@@ -86,7 +87,7 @@ public class HomeScreenTest {
         }
 
         @Test
-        @DisplayName("a plain ENTER with nothing focused goes to the title and never opens the issue")
+        @DisplayName("a plain ENTER with nothing focused goes to the title and never fires the primary action")
         void plainEnterNeverSubmits() {
             final AppContext ctx = new AppContext();
             final List<Action> fired = new ArrayList<>();
@@ -94,7 +95,7 @@ public class HomeScreenTest {
             type(screen, "Crash");
             // WHAT A CLICK ON THE DEAD SPACE OF THE PANEL DOES TO THE BOXES
             screen.clearFocus();
-            assertFalse(screen.textInputActive());
+            assertFalse(screen.textInputActive(), "no box holds the focus");
             screen.dispatchKey(GLFW_KEY_ENTER, GLFW_PRESS);
             screen.dispatchKey(GLFW_KEY_ENTER, GLFW_REPEAT);
             screen.dispatchKey(GLFW_KEY_ENTER, GLFW_RELEASE);
@@ -105,7 +106,7 @@ public class HomeScreenTest {
         }
 
         @Test
-        @DisplayName("CTRL+ENTER opens the issue from either box or from none, decided on the press")
+        @DisplayName("CTRL+ENTER fires the primary action from either box or from none, decided on the press")
         void ctrlEnterSubmits() {
             final AppContext ctx = new AppContext();
             final List<Action> fired = new ArrayList<>();
@@ -165,7 +166,7 @@ public class HomeScreenTest {
 
             ctx.upload.visible = false;
             screen.update();
-            assertFalse(screen.textInputActive());
+            assertFalse(screen.textInputActive(), "the closed dialog holds no focus");
             type(screen, "x");
             assertEquals("new", ctx.upload.title);
         }
@@ -176,7 +177,7 @@ public class HomeScreenTest {
     class EarlierKeys {
 
         @Test
-        @DisplayName("a plain ENTER uploads at the scan stage and continues at the upload stage")
+        @DisplayName("a plain ENTER fires the primary action at the scan stage (Upload) and at the upload stage (Continue)")
         void plainEnterContinues() {
             final AppContext ctx = new AppContext();
             final List<Action> fired = new ArrayList<>();

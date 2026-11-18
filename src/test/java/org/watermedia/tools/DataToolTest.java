@@ -17,12 +17,21 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** Verifies the pure byte/string helpers in {@link DataTool}: log redaction, lenient parsing and pixel math. */
+/**
+ * Verifies the pure helpers of {@link DataTool}: log redaction (links, URI passwords, tokens, headers, config copies,
+ * hostile runs), lenient parsing (web URIs, error codes, units, numbers, signed URL expiry, string matching and
+ * similarity) and pixel math (premultiply, area scaling, source-over blending).
+ */
 @DisplayName("DataTool")
 public class DataToolTest {
+
+    // A BACKTRACKING PATTERN WOULD HANG ON A HOSTILE RUN, SO EACH REDACTION OF ONE GETS THIS BUDGET
+    private static final long REDACT_BUDGET_MS = 2_000L;
+
     // ==========================================================================
     // NESTED TYPES
     // ==========================================================================
+
     @Nested
     @DisplayName("Redaction")
     class Redaction {
@@ -35,16 +44,16 @@ public class DataToolTest {
             assertEquals(links, DataTool.redact(links), "links, IDs and user names pass untouched");
             final String safe = DataTool.redact("Source 'ftp://name:password@files.test/path?id=7' failed");
             assertEquals("Source 'ftp://name:********@files.test/path?id=7' failed", safe);
-            assertEquals(safe, DataTool.redact(safe));
+            assertEquals(safe, DataTool.redact(safe), "a second pass changes nothing");
             assertEquals("https://cdn.test/media?access_token=********&id=9", DataTool.redact("https://cdn.test/media?access_token=private-token&id=9"));
         }
 
         @Test
         @DisplayName("redact stays linear on hostile runs and masks cookies and every Authorization scheme")
         void redactBounded() {
-            // A BACKTRACKING PATTERN WOULD HANG HERE, SO THE BUDGET IS ENFORCED WHILE THE RUN IS STILL GOING
+            // THE BUDGET IS ENFORCED WHILE THE RUN IS STILL GOING, SO A HANG FAILS INSTEAD OF STALLING THE SUITE
             for (final String run: new String[] { "a.".repeat(40_000), "a-".repeat(40_000), "eyJ".repeat(40_000), "a://b:".repeat(15_000) })
-                assertTimeoutPreemptively(Duration.ofSeconds(2), () -> DataTool.redact(run), "a 80k run must redact in well under two seconds");
+                assertTimeoutPreemptively(Duration.ofMillis(REDACT_BUDGET_MS), () -> DataTool.redact(run), "an 80k run redacts within the budget");
             final String safe = DataTool.redact("Authorization: Basic dXNlcjpwYXNz\nAuthorization: OAuth abc\nCookie: session=private; theme=dark\nSet-Cookie: id=1");
             assertFalse(safe.contains("dXNlcjpwYXNz"), safe);
             assertFalse(safe.contains("abc"), safe);
@@ -106,7 +115,8 @@ public class DataToolTest {
             assertEquals(kept, DataTool.redact(kept));
             // A GREEDY GROUP RECURSES ONCE PER CHARACTER OF THE VALUE, SO THESE RUNS WOULD THROW StackOverflowError
             for (final String run: new String[] { "token = \"" + "a".repeat(80_000) + "\"", "token = \"" + "a".repeat(80_000), "token=\"" + "\\\\".repeat(40_000) })
-                assertEquals("********", assertTimeoutPreemptively(Duration.ofSeconds(2), () -> DataTool.redact(run)).replaceFirst("token ?= ?", ""));
+                assertEquals("********", assertTimeoutPreemptively(Duration.ofMillis(REDACT_BUDGET_MS), () -> DataTool.redact(run)).replaceFirst("token ?= ?", ""),
+                        "the whole value is masked");
         }
     }
 
@@ -198,15 +208,17 @@ public class DataToolTest {
         @DisplayName("premultiply rounds every channel and alpha pair exactly within position and limit")
         void premultiply() {
             // EVERY (CHANNEL, ALPHA) PAIR: B AND R CARRY THE CHANNEL, G ITS COMPLEMENT, SO LANES CANNOT HIDE EACH OTHER
-            final ByteBuffer pixels = ByteBuffer.allocateDirect(256 * 256 * 4 + 8);
-            pixels.put(0, (byte) 0x7F).put(pixels.capacity() - 1, (byte) 0x7F).position(4);
+            final int end = 4 + 256 * 256 * 4;
+            final ByteBuffer pixels = ByteBuffer.allocateDirect(end + 4);
+            // A PIXEL OF BLUE 0x7F AND ZERO ALPHA ON EACH SIDE OF THE RANGE: A PASS THAT STRAYS ONTO ONE CLEARS ITS BLUE
+            pixels.put(0, (byte) 0x7F).put(end, (byte) 0x7F).position(4);
             for (int a = 0; a < 256; a++)
                 for (int c = 0; c < 256; c++)
                     pixels.put((byte) c).put((byte) (255 - c)).put((byte) c).put((byte) a);
-            pixels.position(4).limit(4 + 256 * 256 * 4);
+            pixels.position(4).limit(end);
             DataTool.premultiply(pixels);
-            assertEquals(4, pixels.position());
-            assertEquals(4 + 256 * 256 * 4, pixels.limit());
+            assertEquals(4, pixels.position(), "the position stays");
+            assertEquals(end, pixels.limit(), "the limit stays");
             pixels.limit(pixels.capacity());
             for (int a = 0, i = 4; a < 256; a++) {
                 for (int c = 0; c < 256; c++, i += 4) {
@@ -217,35 +229,39 @@ public class DataToolTest {
                     assertEquals(a, pixels.get(i + 3) & 0xFF, "A c=" + c + " a=" + a);
                 }
             }
-            assertEquals(0x7F, pixels.get(0) & 0xFF);
-            assertEquals(0x7F, pixels.get(pixels.capacity() - 1) & 0xFF);
+            assertEquals(0x7F, pixels.get(0) & 0xFF, "the pixel before the position stays");
+            assertEquals(0x7F, pixels.get(end) & 0xFF, "the pixel at the limit stays");
         }
 
         @Test
-        @DisplayName("scaleArea walks every plane at its own size and refuses layouts it cannot average")
+        @DisplayName("scaleArea averages each target texel over its source block on every plane and refuses layouts it cannot average")
         void scaleAreaPlanes() {
-            // 5x3 YUV420P: Y 5x3, U/V 3x2 EACH, ROUNDED UP; EVERY PLANE IS UNIFORM SO ANY AVERAGE KEEPS ITS VALUE
+            // 5x3 YUV420P: Y 5x3, U AND V 3x2 EACH (ROUNDED UP). Y(x, y) = 40x + 20y, SO THE 3x1 TARGET AVERAGES THE
+            // COLUMNS {0}, {1, 2} AND {3, 4} OVER ALL THREE ROWS INTO 20, 80 AND 160; THE UNIFORM CHROMA KEEPS ITS VALUE
             final ByteBuffer src = ByteBuffer.allocateDirect((int) PixelFormat.YUV420P.frameBytes(5, 3, 8));
-            for (int i = 0; i < 15; i++) src.put((byte) 200);
+            for (int y = 0; y < 3; y++)
+                for (int x = 0; x < 5; x++) src.put((byte) (40 * x + 20 * y));
             for (int i = 0; i < 6; i++) src.put((byte) 60);
             for (int i = 0; i < 6; i++) src.put((byte) 90);
             src.flip();
             final ByteBuffer dst = ByteBuffer.allocateDirect((int) PixelFormat.YUV420P.frameBytes(3, 1, 8));
             DataTool.scaleArea(src, 5, 3, dst, 3, 1, PixelFormat.YUV420P);
             assertEquals(dst.capacity(), dst.position(), "Y 3x1 plus U and V 2x1 fill the target exactly");
-            for (int i = 0; i < 3; i++) assertEquals(200, dst.get(i) & 0xFF);
-            assertEquals(60, dst.get(3) & 0xFF);
-            assertEquals(60, dst.get(4) & 0xFF);
-            assertEquals(90, dst.get(5) & 0xFF);
-            assertEquals(90, dst.get(6) & 0xFF);
-            assertFalse(DataTool.scalable(PixelFormat.YUYV));
-            assertFalse(DataTool.scalable(PixelFormat.BC1));
-            assertTrue(DataTool.scalable(PixelFormat.NV12));
+            assertEquals(20, dst.get(0) & 0xFF, "Y over column 0");
+            assertEquals(80, dst.get(1) & 0xFF, "Y over columns 1 and 2");
+            assertEquals(160, dst.get(2) & 0xFF, "Y over columns 3 and 4");
+            assertEquals(60, dst.get(3) & 0xFF, "U");
+            assertEquals(60, dst.get(4) & 0xFF, "U");
+            assertEquals(90, dst.get(5) & 0xFF, "V");
+            assertEquals(90, dst.get(6) & 0xFF, "V");
+            assertFalse(DataTool.scalable(PixelFormat.YUYV), "YUYV pairs share chroma");
+            assertFalse(DataTool.scalable(PixelFormat.BC1), "BC1 is compressed");
+            assertTrue(DataTool.scalable(PixelFormat.NV12), "NV12 averages per plane");
             assertThrows(IllegalArgumentException.class, () -> DataTool.scaleArea(src, 5, 3, dst, 3, 1, PixelFormat.YUYV));
         }
 
         @Test
-        @DisplayName("blendOver passes opaque and clear sources through and never overflows a channel")
+        @DisplayName("blendOver passes opaque and clear sources through, composes Porter-Duff alpha and never overflows a channel")
         void blendOver() {
             assertEquals(0x80FF0000, DataTool.blendOver(0x80FF0000, 0x00123456));
             assertEquals(0xFF0000FF, DataTool.blendOver(0x00FF0000, 0xFF0000FF));
@@ -254,12 +270,13 @@ public class DataToolTest {
             assertEquals(0xFF80007F, DataTool.blendOver(0x80FF0000, 0xFF0000FF));
             // ALPHA 1 RED OVER ALPHA 2 RED MUST STAY RED WITH ALPHA 2: NO CHANNEL MAY OVERFLOW INTO ITS NEIGHBOUR
             assertEquals(0x02FF0000, DataTool.blendOver(0x01FF0000, 0x02FF0000));
-            // EVERY ALPHA PAIR: RED COMES ONLY FROM THE SOURCE AND BLUE ONLY FROM THE DESTINATION, SO THEIR SUM IS
-            // THE TOTAL COVERAGE AND CAN NEVER EXCEED 255; GREEN HAS NO CONTRIBUTOR AND STAYS ZERO
+            // EVERY ALPHA PAIR: THE ALPHA STAYS WITHIN ONE OF THE REAL a_s + a_d * (1 - a_s); RED COMES ONLY FROM THE
+            // SOURCE AND BLUE ONLY FROM THE DESTINATION, SO THEIR SUM IS THE TOTAL COVERAGE AND NEVER EXCEEDS 255;
+            // GREEN HAS NO CONTRIBUTOR AND STAYS ZERO
             for (int sa = 1; sa < 255; sa++) {
                 for (int da = 0; da < 256; da++) {
                     final int out = DataTool.blendOver((sa << 24) | 0xFF0000, (da << 24) | 0x0000FF);
-                    assertEquals(sa + da * (255 - sa) / 255, out >>> 24, "alpha sa=" + sa + " da=" + da);
+                    assertEquals(255.0 * (sa / 255.0 + da / 255.0 * (1.0 - sa / 255.0)), out >>> 24, 1.0, "alpha sa=" + sa + " da=" + da);
                     assertEquals(0, (out >> 8) & 0xFF, "green sa=" + sa + " da=" + da);
                     assertTrue(((out >> 16) & 0xFF) + (out & 0xFF) <= 255, "coverage sa=" + sa + " da=" + da);
                 }

@@ -18,14 +18,18 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Verifies {@link JSONTool}: Gson binding and the lenient accessors and path walks that never
- * throw on missing, null or mistyped values.
+ * Verifies {@link JSONTool}: the Gson binding contract callers rely on (null for null or empty text, a syntax error
+ * for malformed text or a tree of another shape) and the lenient path walks and accessors that never throw on
+ * missing, null or mistyped values.
  */
 @DisplayName("JSONTool")
 public class JSONToolTest {
+
     // ==========================================================================
     // UTILITY
     // ==========================================================================
+
+    // ONE KEY PER SHAPE THE ACCESSORS MEET; l NEEDS 54 BITS, SO A DOUBLE ROUND TRIP WOULD LOSE ITS LAST DIGIT
     private static JsonObject sample() {
         return JSONTool.parse("{\"s\":\"x\",\"d\":2.5,\"b\":true,\"i\":7,\"l\":9007199254740993,\"nil\":null,"
                 + "\"obj\":{\"k\":1},\"arr\":[1,2],\"word\":\"seven\",\"numText\":\"42\",\"boolText\":\"TRUE\"}", JsonObject.class);
@@ -34,16 +38,17 @@ public class JSONToolTest {
     // ==========================================================================
     // NESTED TYPES
     // ==========================================================================
+
     @Nested
     @DisplayName("Binding")
-    class BindingTests {
+    class Binding {
 
         @Test
-        @DisplayName("parse(null) and an empty document yield null; write serializes")
+        @DisplayName("parse yields null for null and empty text, and write serializes a value")
         void parseBinding() {
             assertNull(JSONTool.parse((String) null, JsonObject.class));
             assertNull(JSONTool.parse("", JsonObject.class));
-            assertTrue(JSONTool.write(Map.of("a", 1)).contains("\"a\""));
+            assertEquals("{\"a\":1}", JSONTool.write(Map.of("a", 1)));
         }
 
         @Test
@@ -57,17 +62,17 @@ public class JSONToolTest {
 
     @Nested
     @DisplayName("Paths")
-    class PathTests {
+    class Paths {
 
         @Test
         @DisplayName("obj walks a key path to an object and arr reads an array")
         void walk() {
             final JsonObject o = JSONTool.parse("{\"a\":{\"b\":{\"c\":\"x\"}}}", JsonObject.class);
             assertEquals("x", JSONTool.str(JSONTool.obj(o, "a", "b"), "c"));
-            assertSame(o, JSONTool.obj(o));
+            assertSame(o, JSONTool.obj(o), "no keys return the root itself");
             assertEquals(1, JSONTool.intOr(JSONTool.obj(sample(), "obj"), "k", 0));
             assertEquals(2, JSONTool.arr(sample(), "arr").size());
-            assertEquals(o, JSONTool.obj(JSONTool.parse("[" + o + "]", JsonArray.class).get(0)));
+            assertEquals(o, JSONTool.obj(JSONTool.parse("[" + o + "]", JsonArray.class).get(0)), "an array element reads as an object");
         }
 
         @Test
@@ -78,8 +83,8 @@ public class JSONToolTest {
                 assertNull(JSONTool.obj(o, key), key);
             for (final String key: new String[] { "missing", "nil", "obj", "s" })
                 assertNull(JSONTool.arr(o, key), key);
-            assertNull(JSONTool.obj(o, "obj", "k"));
-            assertNull(JSONTool.obj(o, "missing", "k"));
+            assertNull(JSONTool.obj(o, "obj", "k"), "a number in the middle of the path");
+            assertNull(JSONTool.obj(o, "missing", "k"), "a missing step in the middle of the path");
             assertNull(JSONTool.obj(null, "obj"));
             assertNull(JSONTool.obj(JsonNull.INSTANCE));
             assertNull(JSONTool.arr(null, "arr"));
@@ -89,7 +94,7 @@ public class JSONToolTest {
 
     @Nested
     @DisplayName("Accessors")
-    class AccessorTests {
+    class Accessors {
 
         @Test
         @DisplayName("typed accessors read present keys")
@@ -103,7 +108,7 @@ public class JSONToolTest {
         }
 
         @Test
-        @DisplayName("numeric and boolean strings are read as their value")
+        @DisplayName("numeric and boolean strings are read as their value, and numbers read as text")
         void textValues() {
             final JsonObject o = sample();
             assertEquals(42d, JSONTool.num(o, "numText"));
@@ -114,7 +119,7 @@ public class JSONToolTest {
         }
 
         @Test
-        @DisplayName("absent or JSON-null keys fall back to their default")
+        @DisplayName("absent or JSON-null keys and a null object fall back to their default")
         void missingKeys() {
             final JsonObject o = sample();
             for (final String key: new String[] { "missing", "nil" }) {
@@ -129,7 +134,7 @@ public class JSONToolTest {
         }
 
         @Test
-        @DisplayName("objects, arrays and non-numeric text fall back instead of throwing")
+        @DisplayName("objects, arrays, booleans and non-numeric text fall back instead of throwing")
         void wrongTypes() {
             final JsonObject o = sample();
             for (final String key: new String[] { "obj", "arr" }) {
@@ -142,7 +147,7 @@ public class JSONToolTest {
             assertEquals(0d, JSONTool.num(o, "word"));
             assertEquals(-1, JSONTool.intOr(o, "word", -1));
             assertEquals(-1L, JSONTool.longOr(o, "word", -1L));
-            assertEquals(0d, JSONTool.num(o, "b"));
+            assertEquals(0d, JSONTool.num(o, "b"), "a boolean is no number");
             assertFalse(JSONTool.bool(o, "word"));
         }
     }

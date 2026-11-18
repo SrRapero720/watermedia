@@ -20,7 +20,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Verifies how {@link Canvas} handles live painters over a recording render engine: inline in a direct pass, deferred
- * to every composite in a cached one, split by {@link Canvas#raise()}, and repainted with the clip and fade they met.
+ * to every composite in a cached one and dropped by the next pass, split by {@link Canvas#raise()} only in a cached pass
+ * that already met one, and repainted with the clip and fade they met.
  */
 @DisplayName("Canvas live painters")
 public class CanvasLiveTest {
@@ -69,22 +70,26 @@ public class CanvasLiveTest {
             final Canvas canvas = CanvasLiveTest.this.canvas;
             canvas.beginTree(false);
             canvas.live(CanvasLiveTest.this.painter("band"));
-            assertEquals(List.of("band"), CanvasLiveTest.this.calls);
+            assertEquals(List.of("band"), CanvasLiveTest.this.calls, "a direct pass paints the band at once");
 
             canvas.beginTree(true);
             canvas.live(CanvasLiveTest.this.painter("band"));
             assertEquals(List.of("band"), CanvasLiveTest.this.calls, "a cached pass must not paint the band into the layer");
-            assertTrue(canvas.hasLive());
+            assertTrue(canvas.hasLive(), "the cached band needs a composite");
             canvas.paintLive(false);
             canvas.paintLive(false);
-            assertEquals(List.of("band", "band", "band"), CanvasLiveTest.this.calls);
+            assertEquals(List.of("band", "band", "band"), CanvasLiveTest.this.calls, "each composite paints the band again");
         }
 
         @Test
-        @DisplayName("a pass without painters needs no composite")
-        void noPainters() {
-            CanvasLiveTest.this.canvas.beginTree(true);
-            assertFalse(CanvasLiveTest.this.canvas.hasLive());
+        @DisplayName("a new pass drops the painters of the last one, so a pass without painters needs no composite")
+        void newPassDropsPainters() {
+            final Canvas canvas = CanvasLiveTest.this.canvas;
+            canvas.beginTree(true);
+            canvas.live(CanvasLiveTest.this.painter("band"));
+            assertTrue(canvas.hasLive(), "the first pass met the band");
+            canvas.beginTree(true);
+            assertFalse(canvas.hasLive(), "the band of the last pass is gone");
         }
     }
 
@@ -96,38 +101,40 @@ public class CanvasLiveTest {
         @DisplayName("a raise opens the top layer once and splits the painters met before it from those met after it")
         void splits() {
             final Canvas canvas = CanvasLiveTest.this.canvas;
-            canvas.beginTree(true);
             CanvasLiveTest.this.engine.beginCache(0f, 0f, 0f, 1f);
+            canvas.beginTree(true);
             canvas.live(CanvasLiveTest.this.painter("preview"));
             canvas.raise();
             canvas.live(CanvasLiveTest.this.painter("dialog"));
             canvas.raise();
             CanvasLiveTest.this.engine.endCache();
-            assertEquals(List.of(0, 1), CanvasLiveTest.this.backend.begun);
+            assertEquals(List.of(0, 1), CanvasLiveTest.this.backend.begun, "the base layer, then the top one once");
 
             canvas.paintLive(false);
-            assertEquals(List.of("preview"), CanvasLiveTest.this.calls);
+            assertEquals(List.of("preview"), CanvasLiveTest.this.calls, "the base composite paints what came before the raise");
             canvas.paintLive(true);
-            assertEquals(List.of("preview", "dialog"), CanvasLiveTest.this.calls);
+            assertEquals(List.of("preview", "dialog"), CanvasLiveTest.this.calls, "the top composite paints what came after it");
         }
 
         @Test
-        @DisplayName("a raise before any painter, or in a direct pass, splits nothing")
+        @DisplayName("a raise before any painter, or in a direct pass, splits nothing and opens no layer")
         void nothingToSplit() {
             final Canvas canvas = CanvasLiveTest.this.canvas;
+            // THE ENGINE CACHES THROUGH BOTH PASSES, SO A RAISE THAT SHOULD DO NOTHING WOULD STILL OPEN THE TOP LAYER
+            CanvasLiveTest.this.engine.beginCache(0f, 0f, 0f, 1f);
             canvas.beginTree(true);
             canvas.raise();
             canvas.live(CanvasLiveTest.this.painter("band"));
             canvas.paintLive(true);
             assertEquals(List.of(), CanvasLiveTest.this.calls, "nothing was drawn over a band yet");
             canvas.paintLive(false);
-            assertEquals(List.of("band"), CanvasLiveTest.this.calls);
+            assertEquals(List.of("band"), CanvasLiveTest.this.calls, "the base composite paints the band");
 
             canvas.beginTree(false);
             canvas.live(CanvasLiveTest.this.painter("inline"));
             canvas.raise();
-            assertEquals(List.of("band", "inline"), CanvasLiveTest.this.calls);
-            assertTrue(CanvasLiveTest.this.backend.begun.isEmpty(), "a direct pass opens no layer");
+            assertEquals(List.of("band", "inline"), CanvasLiveTest.this.calls, "a direct pass paints the painter at once");
+            assertEquals(List.of(0), CanvasLiveTest.this.backend.begun, "only the base layer opened");
         }
     }
 
@@ -149,20 +156,23 @@ public class CanvasLiveTest {
             canvas.popClip();
             canvas.popAlpha();
 
+            // FLOAT 7 OF A VERTEX IS ITS ALPHA: HALF OF THE 255 OF WHITE ROUNDS TO 128
             for (int composite = 0; composite < 2; composite++) {
                 backend.clips.clear();
+                final int clears = backend.clipClears;
                 canvas.paintLive(false);
-                assertEquals(1, backend.clips.size());
+                assertEquals(1, backend.clips.size(), "one clip per composite");
                 assertArrayEquals(new int[] { 10, 20, 15, 40 }, backend.clips.get(0), "the nested clip, intersected");
                 assertEquals(128 / 255f, backend.lastVertices[7], 1e-6f, "the painter keeps its half fade");
+                assertEquals(clears + 1, backend.clipClears, "the clip of the painter ends with it");
             }
 
-            final int clears = backend.clipClears;
+            backend.clips.clear();
+            canvas.pushClip(0, 0, 200, 100);
             canvas.fill(0, 0, 1, 1, Color.WHITE);
-            CanvasLiveTest.this.engine.clearClip();
+            canvas.popClip();
+            assertArrayEquals(new int[] { 0, 0, 200, 100 }, backend.clips.get(0), "a later clip is not cut by the painter's");
             assertEquals(1f, backend.lastVertices[7], "the fade ends with the painter");
-            assertEquals(1, backend.clips.size(), "the clip ends with the painter");
-            assertEquals(clears + 1, backend.clipClears);
         }
     }
 }

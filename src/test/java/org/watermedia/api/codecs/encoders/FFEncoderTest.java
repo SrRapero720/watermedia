@@ -52,8 +52,9 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
  * Verifies {@link FFEncoder} through {@link CodecsAPI#encoder}: track and argument checks, then audio and video
- * encodes of every FFmpeg container probed back with libavformat, odd sizes, resampling, quality and playback
- * through {@code PlayerAPI}. Native cases skip when the FFmpeg binaries are absent.
+ * encodes of every FFmpeg container probed back with libavformat (codecs, size, frames and length), odd sizes,
+ * resampling, file and stream targets, quality and playback through {@code PlayerAPI}. Native cases skip when the
+ * FFmpeg binaries are absent.
  */
 @DisplayName("FFEncoder")
 public class FFEncoderTest {
@@ -98,7 +99,7 @@ public class FFEncoderTest {
         return pcm.flip();
     }
 
-    // READS THE STREAMS, THEIR PACKETS AND WHERE EACH ONE ENDS (LAST PTS PLUS DURATION) BACK WITH LIBAVFORMAT
+    // READS THE STREAMS, THEIR PACKETS, WHERE EACH ONE ENDS (LAST PTS PLUS DURATION) AND ITS LONGEST PACKET BACK WITH LIBAVFORMAT
     private static Probe probe(final Path file) throws IOException {
         final AVFormatContext context = new AVFormatContext(null);
         final int opened = avformat.avformat_open_input(context, file.toAbsolutePath().toString(), null, null);
@@ -109,18 +110,20 @@ public class FFEncoderTest {
             final int streams = context.nb_streams();
             final int[] packets = new int[streams];
             final long[] ends = new long[streams];
+            final long[] longest = new long[streams];
             while (avformat.av_read_frame(context, packet) >= 0) {
                 final int index = packet.stream_index();
                 final AVRational base = context.streams(index).time_base();
                 packets[index]++;
                 ends[index] = Math.max(ends[index], (packet.pts() + packet.duration()) * 1_000_000L * base.num() / base.den());
+                longest[index] = Math.max(longest[index], packet.duration() * 1_000_000L * base.num() / base.den());
                 avcodec.av_packet_unref(packet);
             }
             final List<Track> tracks = new ArrayList<>();
             for (int i = 0; i < streams; i++) {
                 final AVCodecParameters parameters = context.streams(i).codecpar();
-                tracks.add(new Track(parameters.codec_type(), parameters.width(), parameters.height(),
-                        parameters.sample_rate(), parameters.ch_layout().nb_channels(), packets[i], ends[i]));
+                tracks.add(new Track(parameters.codec_type(), parameters.codec_id(), parameters.width(), parameters.height(),
+                        parameters.sample_rate(), parameters.ch_layout().nb_channels(), packets[i], ends[i], longest[i]));
             }
             return new Probe(context.duration(), tracks);
         } finally {
@@ -139,13 +142,13 @@ public class FFEncoderTest {
         @Test
         @DisplayName("Tracks validate their own ranges and refuse block-compressed frames")
         void tracks() {
-            assertThrows(IllegalArgumentException.class, () -> new Encoder.Video(VideoCodec.VP9, 16, 16, PixelFormat.BC7, 30));
-            assertThrows(IllegalArgumentException.class, () -> new Encoder.Video(VideoCodec.VP9, 0, 16, PixelFormat.BGRA, 30));
-            assertThrows(IllegalArgumentException.class, () -> new Encoder.Video(VideoCodec.VP9, 16, 16, PixelFormat.BGRA, 0));
-            assertThrows(IllegalArgumentException.class, () -> new Encoder.Video(VideoCodec.VP9, 16, 16, PixelFormat.BGRA, 30, 101, 0));
-            assertThrows(IllegalArgumentException.class, () -> new Encoder.Audio(AudioCodec.OPUS, 1_000, 2, SampleType.S16));
-            assertThrows(IllegalArgumentException.class, () -> new Encoder.Audio(AudioCodec.OPUS, RATE_HZ, 9, SampleType.S16));
-            assertThrows(IllegalArgumentException.class, () -> new Encoder.Audio(AudioCodec.OPUS, RATE_HZ, 2, SampleType.S16, -1));
+            assertThrows(IllegalArgumentException.class, () -> new Encoder.Video(VideoCodec.VP9, 16, 16, PixelFormat.BC7, 30), "a block-compressed format is refused");
+            assertThrows(IllegalArgumentException.class, () -> new Encoder.Video(VideoCodec.VP9, 0, 16, PixelFormat.BGRA, 30), "a zero width is refused");
+            assertThrows(IllegalArgumentException.class, () -> new Encoder.Video(VideoCodec.VP9, 16, 16, PixelFormat.BGRA, 0), "a zero frame rate is refused");
+            assertThrows(IllegalArgumentException.class, () -> new Encoder.Video(VideoCodec.VP9, 16, 16, PixelFormat.BGRA, 30, 101, 0), "a quality above 100 is refused");
+            assertThrows(IllegalArgumentException.class, () -> new Encoder.Audio(AudioCodec.OPUS, 1_000, 2, SampleType.S16), "a sample rate below 4 kHz is refused");
+            assertThrows(IllegalArgumentException.class, () -> new Encoder.Audio(AudioCodec.OPUS, RATE_HZ, 9, SampleType.S16), "nine channels are refused");
+            assertThrows(IllegalArgumentException.class, () -> new Encoder.Audio(AudioCodec.OPUS, RATE_HZ, 2, SampleType.S16, -1), "a negative bitrate is refused");
         }
 
         @Test
@@ -155,12 +158,12 @@ public class FFEncoderTest {
             final Path file = DIRECTORY.resolve("refused.mp4");
             Files.deleteIfExists(file);
             final Encoder.Video h264 = new Encoder.Video(VideoCodec.H264, WIDTH, HEIGHT, PixelFormat.BGRA, FPS);
-            assertThrows(IllegalArgumentException.class, () -> CodecsAPI.encoder(Container.WEBM, file, h264, null));
-            assertThrows(IllegalArgumentException.class, () -> CodecsAPI.encoder(Container.OGG, file, h264, null));
-            assertThrows(IllegalArgumentException.class, () -> CodecsAPI.encoder(Container.WEBP, file, h264, null));
-            assertThrows(IllegalArgumentException.class, () -> CodecsAPI.encoder(Container.MP4, file, null, null));
+            assertThrows(IllegalArgumentException.class, () -> CodecsAPI.encoder(Container.WEBM, file, h264, null), "WebM cannot carry H.264");
+            assertThrows(IllegalArgumentException.class, () -> CodecsAPI.encoder(Container.OGG, file, h264, null), "Ogg carries no video");
+            assertThrows(IllegalArgumentException.class, () -> CodecsAPI.encoder(Container.WEBP, file, h264, null), "WebP is only decoded");
+            assertThrows(IllegalArgumentException.class, () -> CodecsAPI.encoder(Container.MP4, file, null, null), "an encode needs a track");
             assertThrows(IllegalArgumentException.class, () -> CodecsAPI.encoder(Container.MP4, file, h264,
-                    new Encoder.Audio(AudioCodec.PCM, RATE_HZ, 2, SampleType.S16)));
+                    new Encoder.Audio(AudioCodec.PCM, RATE_HZ, 2, SampleType.S16)), "MP4 cannot carry PCM");
             assertFalse(Files.exists(file), "a refused encode must not create its target");
         }
 
@@ -172,20 +175,20 @@ public class FFEncoderTest {
                     new Encoder.Video(VideoCodec.VP9, 16, 16, PixelFormat.BGRA, FPS), new Encoder.Audio(AudioCodec.OPUS, RATE_HZ, 2, SampleType.S16));
             final ByteBuffer frame = ByteBuffer.allocateDirect(16 * 16 * 4);
             try (encoder) {
-                assertThrows(IllegalArgumentException.class, () -> encoder.video(ByteBuffer.allocateDirect(16 * 16 * 4 - 1), 0));
-                assertThrows(IllegalArgumentException.class, () -> encoder.video(null, 0));
-                assertThrows(IllegalArgumentException.class, () -> encoder.video(frame.duplicate(), -1));
+                assertThrows(IllegalArgumentException.class, () -> encoder.video(ByteBuffer.allocateDirect(16 * 16 * 4 - 1), 0), "a frame one byte short is refused");
+                assertThrows(IllegalArgumentException.class, () -> encoder.video(null, 0), "a null frame is refused");
+                assertThrows(IllegalArgumentException.class, () -> encoder.video(frame.duplicate(), -1), "a negative timestamp is refused");
                 encoder.video(frame.duplicate(), 0);
-                assertThrows(IllegalArgumentException.class, () -> encoder.video(frame.duplicate(), 0));
-                assertThrows(IllegalArgumentException.class, () -> encoder.audio(ByteBuffer.allocate(3)));
-                encoder.audio(ByteBuffer.allocate(0));
+                assertThrows(IllegalArgumentException.class, () -> encoder.video(frame.duplicate(), 0), "a repeated timestamp is refused");
+                assertThrows(IllegalArgumentException.class, () -> encoder.audio(ByteBuffer.allocate(3)), "3 bytes split a 4-byte sample frame");
+                encoder.audio(ByteBuffer.allocate(0)); // NO SAMPLES ARE NO MISUSE
             }
-            assertThrows(IllegalStateException.class, () -> encoder.video(frame.duplicate(), 1_000_000));
-            assertThrows(IllegalStateException.class, () -> encoder.audio(ByteBuffer.allocate(4)));
+            assertThrows(IllegalStateException.class, () -> encoder.video(frame.duplicate(), 1_000_000), "a closed encoder refuses frames");
+            assertThrows(IllegalStateException.class, () -> encoder.audio(ByteBuffer.allocate(4)), "a closed encoder refuses samples");
 
             try (final Encoder silent = CodecsAPI.encoder(Container.WEBM, new ByteArrayOutputStream(),
                     new Encoder.Video(VideoCodec.VP9, 16, 16, PixelFormat.BGRA, FPS), null)) {
-                assertThrows(IllegalStateException.class, () -> silent.audio(ByteBuffer.allocate(4)));
+                assertThrows(IllegalStateException.class, () -> silent.audio(ByteBuffer.allocate(4)), "an encode without audio refuses samples");
                 silent.video(frame.duplicate(), 0);
             }
         }
@@ -195,8 +198,8 @@ public class FFEncoderTest {
         void channels() {
             assumeTrue(MediaBootstrap.ffmpegAvailable(), "FFmpeg natives unavailable");
             final IllegalArgumentException refused = assertThrows(IllegalArgumentException.class, () -> CodecsAPI.encoder(Container.MKV,
-                    new ByteArrayOutputStream(), null, new Encoder.Audio(AudioCodec.MP3, RATE_HZ, 6, SampleType.S16)));
-            assertTrue(refused.getMessage().contains("MP3"), refused.getMessage());
+                    new ByteArrayOutputStream(), null, new Encoder.Audio(AudioCodec.MP3, RATE_HZ, 6, SampleType.S16)), "MP3 refuses six channels");
+            assertEquals("(wm_err:4674) Failed to create the audio encoder due to unsupported channels, MP3 encodes 1, 2 channels, not 6", refused.getMessage());
         }
     }
 
@@ -232,8 +235,17 @@ public class FFEncoderTest {
             if (video != null) {
                 final Track picture = probe.track(avutil.AVMEDIA_TYPE_VIDEO);
                 assertNotNull(picture, "video stream");
-                assertEquals(WIDTH, picture.width());
-                assertEquals(HEIGHT, picture.height());
+                assertEquals(switch (videoCodec) {
+                    case H264 -> avcodec.AV_CODEC_ID_H264;
+                    case HEVC -> avcodec.AV_CODEC_ID_HEVC;
+                    case AV1 -> avcodec.AV_CODEC_ID_AV1;
+                    case VP8 -> avcodec.AV_CODEC_ID_VP8;
+                    case VP9 -> avcodec.AV_CODEC_ID_VP9;
+                    case PRORES -> avcodec.AV_CODEC_ID_PRORES;
+                    case PNG, GIF -> avcodec.AV_CODEC_ID_NONE;
+                }, picture.codec(), "the video stream is " + videoCodec);
+                assertEquals(WIDTH, picture.width(), "video width");
+                assertEquals(HEIGHT, picture.height(), "video height");
                 // EVERY FRAME COMES BACK AND THE LAST ONE LASTS 1 / fps, SO THE TRACK ENDS AT EXACTLY ONE SECOND
                 assertEquals(SECONDS * FPS, picture.packets(), "frames read back");
                 assertTrue(Math.abs(picture.endUs() - SECONDS * 1_000_000L) <= 1_000L, "video ends at " + picture.endUs() + " us");
@@ -241,8 +253,19 @@ public class FFEncoderTest {
             if (audio != null) {
                 final Track sound = probe.track(avutil.AVMEDIA_TYPE_AUDIO);
                 assertNotNull(sound, "audio stream");
-                assertEquals(2, sound.channels());
-                assertEquals(RATE_HZ, sound.sampleRate());
+                assertEquals(switch (audioCodec) {
+                    case PCM -> avcodec.AV_CODEC_ID_PCM_S16LE;
+                    case OPUS -> avcodec.AV_CODEC_ID_OPUS;
+                    case AAC -> avcodec.AV_CODEC_ID_AAC;
+                    case MP3 -> avcodec.AV_CODEC_ID_MP3;
+                    case FLAC -> avcodec.AV_CODEC_ID_FLAC;
+                }, sound.codec(), "the audio stream is " + audioCodec);
+                assertEquals(2, sound.channels(), "audio channels");
+                assertEquals(RATE_HZ, sound.sampleRate(), "audio sample rate");
+                // EVERY CONTAINER KEEPS THE PRIMING BEFORE ZERO, SO EVERY SAMPLE SENT ENDS THE TRACK AT ONE SECOND (LESS THE
+                // MILLISECOND MATROSKA ROUNDS AWAY) AND ONLY THE PADDING OF A LAST FULL FRAME MAY RUN PAST IT
+                assertTrue(sound.endUs() >= SECONDS * 1_000_000L - 1_000L && sound.endUs() <= SECONDS * 1_000_000L + sound.frameUs(),
+                        "audio ends at " + sound.endUs() + " us, its frames last up to " + sound.frameUs() + " us");
             }
         }
 
@@ -255,11 +278,13 @@ public class FFEncoderTest {
             encode(CodecsAPI.encoder(Container.WEBM, file, video, audio), video, audio);
             final Probe probe = probe(file);
             final Track picture = probe.track(avutil.AVMEDIA_TYPE_VIDEO);
-            assertEquals(98, picture.width());
-            assertEquals(64, picture.height());
+            assertNotNull(picture, "video stream");
+            assertEquals(98, picture.width(), "the odd width grows by a pixel");
+            assertEquals(64, picture.height(), "the odd height grows by a pixel");
             final Track sound = probe.track(avutil.AVMEDIA_TYPE_AUDIO);
-            assertEquals(48_000, sound.sampleRate());
-            assertEquals(1, sound.channels());
+            assertNotNull(sound, "audio stream");
+            assertEquals(48_000, sound.sampleRate(), "Opus resamples to 48 kHz");
+            assertEquals(1, sound.channels(), "the mono track stays mono");
         }
 
         @Test
@@ -275,14 +300,14 @@ public class FFEncoderTest {
                 assertFalse(Files.exists(file), "the target waits for the finished file");
                 assertTrue(Files.exists(part), "the encode runs next to the target");
             }
-            assertTrue(Files.size(file) > 0);
+            assertTrue(Files.size(file) > 0, "the finished file holds the encode");
             assertFalse(Files.exists(part), "the finished file replaces the target");
 
             final Path empty = DIRECTORY.resolve("empty.mkv");
             Files.deleteIfExists(empty);
-            assertThrows(IllegalStateException.class, CodecsAPI.encoder(Container.MKV, empty, video, null)::close);
-            assertFalse(Files.exists(empty));
-            assertFalse(Files.exists(DIRECTORY.resolve("empty.mkv.part")));
+            assertThrows(IllegalStateException.class, CodecsAPI.encoder(Container.MKV, empty, video, null)::close, "closing without data throws");
+            assertFalse(Files.exists(empty), "an empty encode writes no target");
+            assertFalse(Files.exists(DIRECTORY.resolve("empty.mkv.part")), "an empty encode leaves no temporary file");
         }
 
         @Test
@@ -292,8 +317,8 @@ public class FFEncoderTest {
             final Encoder.Video video = new Encoder.Video(VideoCodec.VP9, WIDTH, HEIGHT, PixelFormat.YUV420P, FPS);
             encode(CodecsAPI.encoder(Container.WEBM, out, video, null), video, null);
             final byte[] webm = out.toByteArray();
-            assertArrayEquals(new byte[] { 0x1A, 0x45, (byte) 0xDF, (byte) 0xA3 }, Arrays.copyOf(webm, 4));
-            assertEquals(MediaType.VIDEO, CodecsAPI.sniff(ByteBuffer.wrap(webm)));
+            assertArrayEquals(new byte[] { 0x1A, 0x45, (byte) 0xDF, (byte) 0xA3 }, Arrays.copyOf(webm, 4), "the stream starts with the EBML header");
+            assertEquals(MediaType.VIDEO, CodecsAPI.sniff(ByteBuffer.wrap(webm)), "the stream sniffs as video");
         }
 
         @Test
@@ -318,17 +343,17 @@ public class FFEncoderTest {
             encode(CodecsAPI.encoder(Container.MP4, file, video, audio), video, audio);
 
             final MRL mrl = PlayerAPI.mrl(Fixtures.fileUri(file));
-            assertTrue(mrl.await(3_000L));
+            assertTrue(mrl.await(3_000L), "the MRL of the file must load");
             final HeadlessGFXEngine gfx = PlayerAPI.headlessEngine();
             final MediaPlayer player = PlayerAPI.player(mrl, () -> gfx, () -> null);
             try {
                 player.start();
-                assertTrue(PlayerWait.awaitCondition(player::canPlay, 15_000L));
-                assertTrue(PlayerWait.awaitStatus(player, 15_000L, Status.PLAYING, Status.BUFFERING, Status.PAUSED, Status.ENDED));
+                assertTrue(PlayerWait.awaitCondition(player::canPlay, 15_000L), "the player must open the file");
+                assertTrue(PlayerWait.awaitStatus(player, 15_000L, Status.PLAYING, Status.BUFFERING, Status.PAUSED, Status.ENDED), "the player must start playing");
                 assertTrue(Math.abs(player.duration() - SECONDS * 1_000L) <= 150L, "duration " + player.duration() + " ms");
                 assertTrue(PlayerWait.awaitCondition(() -> gfx.uploadCount() > 0, 8_000L), "decoded frames reach the engine");
-                assertEquals(WIDTH, player.sourceWidth());
-                assertEquals(HEIGHT, player.sourceHeight());
+                assertEquals(WIDTH, player.sourceWidth(), "source width");
+                assertEquals(HEIGHT, player.sourceHeight(), "source height");
             } finally {
                 player.stop();
                 player.release();
@@ -336,7 +361,7 @@ public class FFEncoderTest {
         }
     }
 
-    private record Track(int type, int width, int height, int sampleRate, int channels, int packets, long endUs) {}
+    private record Track(int type, int codec, int width, int height, int sampleRate, int channels, int packets, long endUs, long frameUs) {}
 
     private record Probe(long durationUs, List<Track> tracks) {
         Track track(final int type) {

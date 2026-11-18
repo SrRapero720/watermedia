@@ -1,7 +1,9 @@
 package org.watermedia.api.codecs;
 
+import org.apache.logging.log4j.core.LogEvent;
 import org.bytedeco.ffmpeg.avutil.AVDictionary;
 import org.watermedia.WaterMedia;
+import org.watermedia.test.support.LogCapture;
 import org.watermedia.tools.FFTool;
 
 import javax.net.ssl.TrustManagerFactory;
@@ -14,6 +16,7 @@ import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.List;
 
 import static org.bytedeco.ffmpeg.global.avutil.av_dict_count;
 import static org.bytedeco.ffmpeg.global.avutil.av_dict_free;
@@ -21,7 +24,11 @@ import static org.bytedeco.ffmpeg.global.avutil.av_dict_get;
 import static org.bytedeco.ffmpeg.global.avutil.av_dict_parse_string;
 import static org.bytedeco.ffmpeg.global.avutil.av_dict_set;
 
-/** Verifies the native TLS bundle built from the JVM truststore, trusted and empty, in a fresh JVM each. */
+/**
+ * Verifies the native TLS bundle built from the JVM truststore in a fresh JVM per scenario: a trusted store yields one
+ * deduplicated PEM bundle every connection reuses with verification forced on, and an empty store refuses the natives
+ * for its missing anchors while the load completes.
+ */
 public final class TLSLifecycleProbe {
     private TLSLifecycleProbe() {}
 
@@ -53,18 +60,32 @@ public final class TLSLifecycleProbe {
             System.setProperty("javax.net.ssl.trustStoreType", "PKCS12");
             System.setProperty("javax.net.ssl.trustStorePassword", new String(password));
             System.setProperty("javax.net.ssl.trustStore", store.toString());
-            WaterMedia.start("TLS_TEST", root.resolve("tls"), root, true);
+            final List<LogEvent> startup;
+            try (final LogCapture capture = new LogCapture(WaterMedia.ID)) {
+                WaterMedia.start("TLS_TEST", root.resolve("tls"), root, true);
+                startup = capture.events();
+            }
             final var options = new AVDictionary(null);
             try {
                 if (empty) {
                     if (CodecsAPI.ffmpegLoaded() || !CodecsAPI.ffmpegError())
                         throw new AssertionError("An empty truststore did not refuse native HTTPS initialization");
+                    // ANY NATIVE FAILURE SETS ffmpegError(), SO THE LOGGED CAUSE PROVES THE EMPTY TRUSTSTORE REFUSED IT; THE
+                    // REDACTING LOGGER MAY TURN THE TRACE INTO TEXT, SO THE CODE IS LOOKED FOR IN THE MESSAGE TOO
+                    boolean noAnchors = false;
+                    for (final LogEvent event: startup) {
+                        final String text = event.getMessage().getFormattedMessage() + (event.getThrown() == null ? "" : event.getThrown().getMessage());
+                        noAnchors |= text.startsWith("(wm_err:4020) Failed to load FFMPEG") && text.contains("(wm_err:0124) Failed to export the trust anchors");
+                    }
+                    if (!noAnchors) throw new AssertionError("FFmpeg failed to load for another reason than the empty truststore");
                     // FFMPEG IS OPTIONAL: THE CODECS MODULE LOGS THE NATIVE FAILURE AND THE LOAD COMPLETES
                     if (!WaterMedia.loaded()) throw new AssertionError("The native failure ended the load");
                     try {
                         FFTool.configureTLS(options);
                         throw new AssertionError("A failed TLS initialization still configured a native connection");
-                    } catch (final IllegalStateException expected) {}
+                    } catch (final IllegalStateException expected) {
+                        if (!expected.getMessage().startsWith("(wm_err:0127)")) throw new AssertionError("The refused configuration failed for another reason", expected);
+                    }
                     return;
                 }
                 if (!CodecsAPI.ffmpegLoaded()) throw new AssertionError("Patched FFmpeg did not load");

@@ -5,7 +5,6 @@ import javafx.scene.image.Image;
 import javafx.scene.image.PixelFormat.Type;
 import javafx.scene.image.PixelReader;
 import javafx.scene.image.WritablePixelFormat;
-import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -22,12 +21,18 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.abort;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
-/** Verifies that {@link JFXEngine} lands frames premultiplied in its {@code PixelBuffer} image; skips without a JavaFX toolkit. */
+/** Verifies that {@link JFXEngine} lands frames premultiplied in its {@code PixelBuffer} image, leaves the caller's buffer untouched and drops the image on release; skips without a JavaFX toolkit. */
 @DisplayName("JFXEngine")
 public class JFXEngineTest {
 
     private static final long FX_TIMEOUT_MS = 5_000L;
+
+    // ==========================================================================
+    // INTERNAL API
+    // ==========================================================================
 
     @BeforeAll
     static void boot() throws InterruptedException {
@@ -40,9 +45,9 @@ public class JFXEngineTest {
         } catch (final IllegalStateException running) {
             started.countDown();
         } catch (final RuntimeException | Error unavailable) {
-            Assumptions.abort("JavaFX toolkit unavailable: " + unavailable);
+            abort("JavaFX toolkit unavailable: " + unavailable);
         }
-        Assumptions.assumeTrue(started.await(FX_TIMEOUT_MS, TimeUnit.MILLISECONDS), "JavaFX toolkit did not start");
+        assumeTrue(started.await(FX_TIMEOUT_MS, TimeUnit.MILLISECONDS), "JavaFX toolkit did not start");
         Platform.setImplicitExit(false);
     }
 
@@ -61,7 +66,7 @@ public class JFXEngineTest {
             assertEquals(2, image.getWidth());
             assertEquals(1, image.getHeight());
             assertEquals(Type.BYTE_BGRA_PRE, image.getPixelReader().getPixelFormat().getType(), "PixelBuffer only takes premultiplied BGRA");
-            assertArrayEquals(premultiplied, pixels(image));
+            assertArrayEquals(premultiplied, pixels(image), "the image shows the premultiplied frame");
             assertEquals(0, frame.position(), "the frame keeps its position");
             assertEquals(40, frame.get(4), "the caller's frame is never premultiplied in place");
 

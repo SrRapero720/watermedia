@@ -102,4 +102,4 @@ jobs:
 
       - name: Verify Java 17 server, audio and network compatibility
         if: ${{ matrix.compatibility }}
-        run: gradle test -Prequire_natives=true --tests 'org.watermedia.Bootstrap*Test' --tests 'org.watermedia.api.network.*' --tests 'org.watermedia.api.player.ALCapabilitiesTest' --tests 'org.watermedia.api.player.AWTEngineTest' --tests 'org.watermedia.api.player.SFXEngineTest' --tests 'org.watermedia.api.player.SpatialAudioTest' --tests 'org.watermedia.api.util.NetRequestTest' --warning-mode fail
+        run: gradle test -Prequire_natives=true --tests 'org.watermedia.Bootstrap*Test' --tests 'org.watermedia.api.network.*' --tests 'org.watermedia.api.player.AWTEngineTest' --tests 'org.watermedia.api.player.SFXEngineTest' --tests 'org.watermedia.api.player.SpatialAudioTest' --tests 'org.watermedia.api.util.NetRequestTest' --warning-mode fail

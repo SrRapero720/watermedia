@@ -12,6 +12,7 @@ import java.nio.ByteOrder;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /**
@@ -109,13 +110,17 @@ public class AlphaDecoderTest {
         @Test
         @DisplayName("A truncated raw plane is malformed")
         void truncated() {
-            assertThrows(CodecException.class, () -> AlphaDecoder.decode(alph(0x00), 4, 4));
+            final CodecException e = assertThrows(CodecException.class, () -> AlphaDecoder.decode(alph(0x00), 4, 4));
+            assertFalse(e instanceof UnsupportedFormatException, "malformed input reported as unsupported: " + e.getMessage());
+            assertEquals("(wm_err:5111) Failed to decode ALPH due to truncated data: declared 16 bytes, 0 available", e.getMessage());
         }
 
         @Test
         @DisplayName("An empty chunk is malformed")
         void empty() {
-            assertThrows(CodecException.class, () -> AlphaDecoder.decode(ByteBuffer.allocate(0), 4, 4));
+            final CodecException e = assertThrows(CodecException.class, () -> AlphaDecoder.decode(ByteBuffer.allocate(0), 4, 4));
+            assertFalse(e instanceof UnsupportedFormatException, "malformed input reported as unsupported: " + e.getMessage());
+            assertEquals("(wm_err:5110) Failed to decode ALPH due to small chunk", e.getMessage());
         }
 
         @Test

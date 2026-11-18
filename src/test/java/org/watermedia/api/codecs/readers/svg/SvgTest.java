@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestFactory;
 import org.watermedia.WaterMediaConfig;
+import org.watermedia.api.codecs.CodecException;
 import org.watermedia.api.codecs.CodecsAPI;
 import org.watermedia.api.codecs.ImageData;
 import org.watermedia.api.codecs.ImageReader;
@@ -37,9 +38,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.DynamicTest.dynamicTest;
 
 /**
- * Verifies the pure-Java SVG decoder: the reader contract over the SVGs under {@code src/test/resources/svg}, their
- * renders against the reference PNGs under {@code svg/png}, then paint, geometry, visibility and robustness on
- * hand-written documents.
+ * Verifies the pure-Java SVG decoder: the reader contract over the SVGs under {@code src/test/resources/svg} and their
+ * renders against the reference PNGs under {@code svg/png}, then colour parsing, gradients, transforms, paths, strokes,
+ * sizing, visibility, {@code <switch>} and robustness on hand-written documents.
  *
  * <p>Exact pixel parity with the browser or Illustrator renders behind the references is not expected from a
  * from-scratch anti-aliased rasterizer, so the reference match bounds the mean and the share of clearly different values.
@@ -51,90 +52,6 @@ public class SvgTest {
     private static final int REFERENCE_SMALL_DIFF = 16;
     private static final double REFERENCE_MAX_MEAN_DIFF = 4.0;
     private static final double REFERENCE_MAX_PERCENT = 6.0;
-
-    // ==========================================================================
-    // INTERNAL API
-    // ==========================================================================
-    @TestFactory
-    @DisplayName("Decode contract")
-    Iterable<DynamicTest> contract() throws IOException {
-        final List<DynamicTest> tests = new ArrayList<>();
-        final int cap = WaterMediaConfig.codecs.svg.maxSize;
-        final List<Path> files;
-        try (final Stream<Path> entries = Files.list(Fixtures.SVG_DIR)) {
-            files = entries.filter(p -> p.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(".svg")).sorted().toList();
-        }
-        assertFalse(files.isEmpty(), "No SVG fixtures under " + Fixtures.SVG_DIR);
-        for (final Path svg: files) {
-            final String name = svg.getFileName().toString();
-            tests.add(dynamicTest("SVG contract [" + name + "]", () -> {
-                final ByteBuffer bb = ByteBuffer.wrap(Fixtures.readAll(svg));
-                try (final ImageReader reader = CodecsAPI.reader(bb)) {
-                    assertEquals("SVG", reader.name());
-                    assertEquals(0, bb.position(), "SVG is its own body: position must not advance");
-                    assertTrue(reader.width() > 0 && reader.height() > 0, "positive dimensions");
-                    assertTrue(reader.width() <= cap && reader.height() <= cap, "max side capped to " + cap);
-                    assertEquals(PixelFormat.BGRA, reader.pixelFormat());
-                    assertEquals(1, reader.frameCount(), "SVG is a single static frame");
-
-                    assertTrue(reader.hasNext());
-                    final ByteBuffer frame = reader.next();
-                    assertTrue(frame.isDirect(), "frame must be a direct buffer");
-                    assertEquals(reader.width() * reader.height() * 4, frame.remaining(), "BGRA buffer size");
-                    assertFalse(reader.hasNext(), "only one frame");
-                    assertTrue(reader.reset(), "reset must be supported");
-                    assertTrue(reader.hasNext(), "reset re-arms the frame");
-                }
-            }));
-        }
-        return tests;
-    }
-
-    @TestFactory
-    @DisplayName("Reference match")
-    Iterable<DynamicTest> referenceMatch() throws IOException {
-        final List<DynamicTest> tests = new ArrayList<>();
-        final List<Path> references;
-        try (final Stream<Path> entries = Files.list(Fixtures.SVG_DIR.resolve("png"))) {
-            references = entries.sorted().toList();
-        }
-        assertFalse(references.isEmpty(), "No SVG reference renders under " + Fixtures.SVG_DIR.resolve("png"));
-        for (final Path png: references) {
-            final String name = png.getFileName().toString();
-            // A "-hd" OR "-sd" SUFFIX NAMES A REFERENCE RENDERED BELOW THE INTRINSIC SIZE OF THE SAME SVG
-            final String base = name.replaceFirst("(-hd|-sd)?\\.png$", "");
-            tests.add(dynamicTest("SVG reference match [" + name + "]", () -> {
-                final BufferedImage reference = ImageIO.read(png.toFile());
-                final int w = reference.getWidth(), h = reference.getHeight();
-                // THE SIZE CAP SCALES THE RENDER DOWN TO THE REFERENCE'S LARGER SIDE
-                final int previous = WaterMediaConfig.codecs.svg.maxSize;
-                final ImageData img;
-                try {
-                    WaterMediaConfig.codecs.svg.maxSize = Math.max(w, h);
-                    img = CodecsAPI.decode(Fixtures.readAll(Fixtures.SVG_DIR.resolve(base + ".svg")));
-                } finally {
-                    WaterMediaConfig.codecs.svg.maxSize = previous;
-                }
-                assertEquals(w, img.width(), name + " width");
-                assertEquals(h, img.height(), name + " height");
-                final byte[] expected = new byte[w * h * 4];
-                for (int i = 0; i < w * h; i++) {
-                    final int argb = reference.getRGB(i % w, i / w);
-                    expected[i * 4] = (byte) (argb >> 16);
-                    expected[i * 4 + 1] = (byte) (argb >> 8);
-                    expected[i * 4 + 2] = (byte) argb;
-                    expected[i * 4 + 3] = (byte) (argb >>> 24);
-                }
-                // ANTI-ALIASED EDGES LEGITIMATELY DIFFER, SO ONLY THE MEAN AND THE SHARE OF CLEARLY DIFFERENT VALUES ARE BOUNDED
-                final PixelDiff diff = PixelDiff.compare(expected, PamImage.bgraToRgba(img.frames()[0], w, h), REFERENCE_SMALL_DIFF);
-                assertTrue(diff.meanDiff() <= REFERENCE_MAX_MEAN_DIFF, String.format(Locale.ROOT, "%s mean diff %.3f exceeds %.1f",
-                        name, diff.meanDiff(), REFERENCE_MAX_MEAN_DIFF));
-                assertTrue(diff.percentAboveSmall() <= REFERENCE_MAX_PERCENT, String.format(Locale.ROOT, "%s has %.3f%% values off by more than %d (limit %.1f%%)",
-                        name, diff.percentAboveSmall(), REFERENCE_SMALL_DIFF, REFERENCE_MAX_PERCENT));
-            }));
-        }
-        return tests;
-    }
 
     // ==========================================================================
     // UTILITY
@@ -155,6 +72,92 @@ public class SvgTest {
     // NESTED TYPES
     // ==========================================================================
     @Nested
+    @DisplayName("Fixture files")
+    class Corpus {
+
+        @TestFactory
+        @DisplayName("Every fixture keeps the reader contract: its own body, a capped size, one direct BGRA frame and a reset()")
+        Iterable<DynamicTest> contract() throws IOException {
+            final List<DynamicTest> tests = new ArrayList<>();
+            final int cap = WaterMediaConfig.codecs.svg.maxSize;
+            final List<Path> files;
+            try (final Stream<Path> entries = Files.list(Fixtures.SVG_DIR)) {
+                files = entries.filter(p -> p.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(".svg")).sorted().toList();
+            }
+            assertFalse(files.isEmpty(), "no SVG fixtures under " + Fixtures.SVG_DIR);
+            for (final Path svg: files) {
+                final String name = svg.getFileName().toString();
+                tests.add(dynamicTest("SVG contract [" + name + "]", () -> {
+                    final ByteBuffer bb = ByteBuffer.wrap(Fixtures.readAll(svg));
+                    try (final ImageReader reader = CodecsAPI.reader(bb)) {
+                        assertEquals("SVG", reader.name());
+                        assertEquals(0, bb.position(), "SVG is its own body: position must not advance");
+                        assertTrue(reader.width() > 0 && reader.height() > 0, "positive dimensions");
+                        assertTrue(reader.width() <= cap && reader.height() <= cap, "max side capped to " + cap);
+                        assertEquals(PixelFormat.BGRA, reader.pixelFormat());
+                        assertEquals(1, reader.frameCount(), "SVG is a single static frame");
+
+                        assertTrue(reader.hasNext(), "the frame is pending");
+                        final ByteBuffer frame = reader.next();
+                        assertTrue(frame.isDirect(), "frame must be a direct buffer");
+                        assertEquals(reader.width() * reader.height() * 4, frame.remaining(), "BGRA buffer size");
+                        assertFalse(reader.hasNext(), "only one frame");
+                        assertTrue(reader.reset(), "reset must be supported");
+                        assertTrue(reader.hasNext(), "reset re-arms the frame");
+                    }
+                }));
+            }
+            return tests;
+        }
+
+        @TestFactory
+        @DisplayName("Every reference render is matched within the mean and share bounds at its own size")
+        Iterable<DynamicTest> referenceMatch() throws IOException {
+            final List<DynamicTest> tests = new ArrayList<>();
+            final List<Path> references;
+            try (final Stream<Path> entries = Files.list(Fixtures.SVG_DIR.resolve("png"))) {
+                references = entries.sorted().toList();
+            }
+            assertFalse(references.isEmpty(), "no SVG reference renders under " + Fixtures.SVG_DIR.resolve("png"));
+            for (final Path png: references) {
+                final String name = png.getFileName().toString();
+                // A "-hd" OR "-sd" SUFFIX NAMES A REFERENCE RENDERED BELOW THE INTRINSIC SIZE OF THE SAME SVG
+                final String base = name.replaceFirst("(-hd|-sd)?\\.png$", "");
+                tests.add(dynamicTest("SVG reference match [" + name + "]", () -> {
+                    final BufferedImage reference = ImageIO.read(png.toFile());
+                    final int w = reference.getWidth(), h = reference.getHeight();
+                    // THE SIZE CAP SCALES THE RENDER DOWN TO THE REFERENCE'S LARGER SIDE
+                    final int previous = WaterMediaConfig.codecs.svg.maxSize;
+                    final ImageData img;
+                    try {
+                        WaterMediaConfig.codecs.svg.maxSize = Math.max(w, h);
+                        img = CodecsAPI.decode(Fixtures.readAll(Fixtures.SVG_DIR.resolve(base + ".svg")));
+                    } finally {
+                        WaterMediaConfig.codecs.svg.maxSize = previous;
+                    }
+                    assertEquals(w, img.width(), name + " width");
+                    assertEquals(h, img.height(), name + " height");
+                    final byte[] expected = new byte[w * h * 4];
+                    for (int i = 0; i < w * h; i++) {
+                        final int argb = reference.getRGB(i % w, i / w);
+                        expected[i * 4] = (byte) (argb >> 16);
+                        expected[i * 4 + 1] = (byte) (argb >> 8);
+                        expected[i * 4 + 2] = (byte) argb;
+                        expected[i * 4 + 3] = (byte) (argb >>> 24);
+                    }
+                    // ANTI-ALIASED EDGES LEGITIMATELY DIFFER, SO ONLY THE MEAN AND THE SHARE OF CLEARLY DIFFERENT VALUES ARE BOUNDED
+                    final PixelDiff diff = new PamImage(w, h, 4, expected).diff(img.frames()[0], REFERENCE_SMALL_DIFF);
+                    assertTrue(diff.meanDiff() <= REFERENCE_MAX_MEAN_DIFF, String.format(Locale.ROOT, "%s mean diff %.3f exceeds %.1f",
+                            name, diff.meanDiff(), REFERENCE_MAX_MEAN_DIFF));
+                    assertTrue(diff.percentAboveSmall() <= REFERENCE_MAX_PERCENT, String.format(Locale.ROOT, "%s has %.3f%% values off by more than %d (limit %.1f%%)",
+                            name, diff.percentAboveSmall(), REFERENCE_SMALL_DIFF, REFERENCE_MAX_PERCENT));
+                }));
+            }
+            return tests;
+        }
+    }
+
+    @Nested
     @DisplayName("Paint and colour")
     class Paint {
 
@@ -168,22 +171,24 @@ public class SvgTest {
         }
 
         @Test
-        @DisplayName("hsl() parses to the expected colour")
+        @DisplayName("hsl(120, 100%, 50%) parses to green")
         void hslColor() throws IOException {
             final int[] c = rgba(CodecsAPI.decode(svg("0 0 10 10", "<rect width=\"10\" height=\"10\" fill=\"hsl(120, 100%, 50%)\"/>")), 5, 5);
             assertTrue(c[1] > 200 && c[0] < 60 && c[2] < 60, "hsl(120,100%,50%) is green, got " + Arrays.toString(c));
         }
 
         @Test
-        @DisplayName("Linear gradient interpolates red to blue across the shape")
+        @DisplayName("Linear gradient runs from red through a red-blue blend at the centre to blue")
         void linearGradientInterpolates() throws IOException {
             final ImageData img = CodecsAPI.decode(svg("0 0 100 100",
                     "<defs><linearGradient id=\"g\" x1=\"0\" y1=\"0\" x2=\"1\" y2=\"0\">"
                             + "<stop offset=\"0\" stop-color=\"#ff0000\"/>"
                             + "<stop offset=\"1\" stop-color=\"#0000ff\"/></linearGradient></defs>"
                             + "<rect width=\"100\" height=\"100\" fill=\"url(#g)\"/>"));
-            final int[] left = rgba(img, 5, 50), right = rgba(img, 94, 50);
+            final int[] left = rgba(img, 5, 50), centre = rgba(img, 50, 50), right = rgba(img, 94, 50);
             assertTrue(left[0] > 150 && left[2] < 100, "left edge should be red, got " + Arrays.toString(left));
+            // THE CENTRE PIXEL SITS AT t = 0.505, ABOUT 126 RED AND 129 BLUE: A STEP INSTEAD OF A BLEND LANDS ON AN END COLOUR
+            assertTrue(centre[0] > 96 && centre[0] < 160 && centre[2] > 96 && centre[2] < 160, "centre should blend red and blue, got " + Arrays.toString(centre));
             assertTrue(right[2] > 150 && right[0] < 100, "right edge should be blue, got " + Arrays.toString(right));
         }
 
@@ -205,7 +210,7 @@ public class SvgTest {
         }
 
         @Test
-        @DisplayName("A RGBA request is honoured with a channel swizzle")
+        @DisplayName("An RGBA request is honoured with a channel swizzle")
         void requestedRgbaIsHonoured() throws IOException {
             try (final ImageReader reader = CodecsAPI.reader(ByteBuffer.wrap(svg("0 0 10 10", "<rect width=\"10\" height=\"10\" fill=\"#ff0000\"/>")), PixelFormat.RGBA)) {
                 assertEquals(PixelFormat.RGBA, reader.pixelFormat(), "reader must report the honoured format");
@@ -371,10 +376,13 @@ public class SvgTest {
         }
 
         @Test
-        @DisplayName("Pathologically deep nesting fails with IOException, not StackOverflowError/hang")
+        @DisplayName("Nesting past 512 levels is malformed, never a StackOverflowError or a hang")
         void deepNestingIsBounded() {
             final byte[] svg = svg("0 0 100 100", "<g>".repeat(4_000) + "<rect width=\"10\" height=\"10\"/>" + "</g>".repeat(4_000));
-            assertTimeoutPreemptively(Duration.ofSeconds(10), () -> assertThrows(IOException.class, () -> CodecsAPI.decode(svg)));
+            final CodecException e = assertTimeoutPreemptively(Duration.ofSeconds(10), () -> assertThrows(CodecException.class, () -> CodecsAPI.decode(svg)));
+            assertFalse(e instanceof UnsupportedFormatException, "malformed input reported as unsupported: " + e.getMessage());
+            // THE GRADIENT INDEX AND THE RENDER WALK SHARE THE DEPTH GATE AND ITS WORDING
+            assertTrue(e.getMessage().endsWith("due to excessive nesting (max 512 levels)"), e.getMessage());
         }
 
         @Test

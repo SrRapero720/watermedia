@@ -11,7 +11,10 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.watermedia.test.support.MediaBootstrap.runProbe;
 
-/** Verifies that the launcher and the app spec share {@code config/app.properties}, and how the interface scale snaps. */
+/**
+ * Verifies that the launcher and the app spec share {@code config/app.properties} (one child JVM per case), and how the
+ * interface scale snaps, what the settings offer for it and how it reads.
+ */
 @DisplayName("App preferences")
 public class AppConfigTest {
 
@@ -21,13 +24,13 @@ public class AppConfigTest {
         @TempDir Path directory;
 
         @Test
-        @DisplayName("a fresh directory runs on Vulkan with an automatic scale")
+        @DisplayName("a fresh directory runs on Vulkan with the default preferences, and the spec uses the file the launcher reads")
         void defaults() throws Exception {
             runProbe(AppConfigProbe.class, this.directory, "defaults", false);
         }
 
         @Test
-        @DisplayName("the launcher reads the engine the spec wrote")
+        @DisplayName("the spec saves its four keys and the launcher reads the engine it wrote")
         void shared() throws Exception {
             runProbe(AppConfigProbe.class, this.directory, "shared", false);
         }
@@ -49,7 +52,7 @@ public class AppConfigTest {
     @DisplayName("Interface scale")
     class Scale {
         @Test
-        @DisplayName("zero and negative values mean automatic")
+        @DisplayName("zero, negative and NaN values mean automatic")
         void automatic() {
             assertEquals(0f, AppConfig.scaleFactor(0f));
             assertEquals(0f, AppConfig.scaleFactor(-1f));
@@ -57,7 +60,7 @@ public class AppConfigTest {
         }
 
         @Test
-        @DisplayName("factors snap to quarter steps between 1 and 3")
+        @DisplayName("factors snap to quarter steps and clamp between 1 and 3")
         void snaps() {
             assertEquals(1.25f, AppConfig.scaleFactor(1.3f));
             assertEquals(1.5f, AppConfig.scaleFactor(1.4f));
@@ -66,7 +69,7 @@ public class AppConfigTest {
         }
 
         @Test
-        @DisplayName("the settings stops run from automatic through every factor")
+        @DisplayName("the settings seekbar offers automatic, then every factor in order")
         void stops() {
             assertArrayEquals(new double[] { 0, 1, 1.25, 1.5, 1.75, 2, 2.25, 2.5, 2.75, 3 }, AppConfig.scales());
         }

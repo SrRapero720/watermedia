@@ -9,6 +9,7 @@ import java.io.OutputStream;
 import java.io.UncheckedIOException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
+import java.net.ServerSocket;
 import java.net.URI;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -39,6 +40,12 @@ public final class LocalHttp implements AutoCloseable {
         } catch (final IOException e) {
             throw new UncheckedIOException("Failed to start local HTTP server", e);
         }
+    }
+
+    /** Returns a loopback port nobody listens on: the system just handed it out and it was closed again. */
+    public static int freePort() {
+        try (final ServerSocket socket = new ServerSocket(0, 50, InetAddress.getLoopbackAddress())) { return socket.getLocalPort(); }
+        catch (final IOException e) { throw new UncheckedIOException("Failed to find a free port", e); }
     }
 
     /** Returns the absolute URI of a path served by this server. */

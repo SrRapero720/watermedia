@@ -21,7 +21,6 @@ import org.watermedia.test.support.PixelDiff;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -46,59 +45,13 @@ import static org.watermedia.test.support.ImageBytes.png;
 import static org.watermedia.test.support.ImageBytes.pngChunk;
 
 /**
- * Verifies the PNG decoder against the fixtures and the reader contract with synthetic streams.
- *
- * <p>Every PNG fixture under {@code src/test/resources/png} decodes into tightly packed BGRA frames whose first frame
- * matches a pre-generated PAM reference under {@code png/raw} exactly (PNG is lossless), and replays byte for byte
- * through {@link ImageReader#reset()}.
+ * Verifies the PNG decoder: every fixture under {@code src/test/resources/png} decodes into tightly packed BGRA frames
+ * whose first frame equals its PAM reference under {@code png/raw} (PNG is lossless) and replays byte for byte through
+ * {@link ImageReader#reset()}; synthetic streams cover the APNG default image and still animations, text metadata and
+ * its budget, the ancillary chunk policy, bKGD presentation, grayscale transparency keys and the requested layouts.
  */
 @DisplayName("PNG decoder")
 public class PngTest {
-
-    // ==========================================================================
-    // INTERNAL API
-    // ==========================================================================
-    @TestFactory
-    @DisplayName("Decode and pixel match")
-    Iterable<DynamicTest> testPNG() {
-        final List<DynamicTest> tests = new ArrayList<>();
-        for (final Path imageFile: fixtures()) {
-            final String name = imageFile.getFileName().toString();
-            tests.add(dynamicTest("PNG decode and match [" + name + "]", () -> {
-                final ImageData decoded = CodecsAPI.decode(Fixtures.readAll(imageFile));
-                assertEquals(PixelFormat.BGRA, decoded.format(), name + " decodes natively to BGRA");
-                for (int i = 0; i < decoded.frames().length; i++)
-                    assertEquals(decoded.width() * decoded.height() * 4, decoded.frames()[i].remaining(), "Frame " + i + " size of " + name);
-
-                final Path pamPath = Fixtures.PNG_DIR.resolve("raw").resolve(name.replace(".png", ".pam"));
-                assertTrue(Files.exists(pamPath), "Reference PAM file not found: " + pamPath.toAbsolutePath()
-                        + " - generate it with src/test/tools/GeneratePngReference.java");
-                final PamImage reference = PamImage.read(pamPath);
-                final byte[] actualRgba = PamImage.bgraToRgba(decoded.frames()[0], decoded.width(), decoded.height());
-                assertEquals(reference.pixels().length, actualRgba.length, "Pixel data size mismatch for " + name);
-                final PixelDiff diff = PixelDiff.compare(reference.pixels(), actualRgba, 0);
-                assertEquals(0, diff.maxDiff(), String.format(Locale.ROOT, "Pixel data mismatch for %s - max diff: %d, %d values differ (%.2f%%)",
-                        name, diff.maxDiff(), diff.valuesAboveSmall(), diff.percentAboveSmall()));
-            }));
-        }
-        return tests;
-    }
-
-    @TestFactory
-    @DisplayName("reset() replay")
-    Iterable<DynamicTest> testPNGReset() {
-        final List<DynamicTest> tests = new ArrayList<>();
-        // COVERS BOTH STATIC PNG AND APNG: reset() MUST REPLAY EITHER ONE IDENTICALLY
-        for (final Path imageFile: fixtures()) {
-            final String name = imageFile.getFileName().toString();
-            tests.add(dynamicTest("PNG reset replay [" + name + "]", () -> {
-                try (final ImageReader reader = CodecsAPI.reader(ByteBuffer.wrap(Fixtures.readAll(imageFile)))) {
-                    FrameReplay.verify(reader, name);
-                }
-            }));
-        }
-        return tests;
-    }
 
     // ==========================================================================
     // UTILITY
@@ -122,25 +75,64 @@ public class PngTest {
         return text.getBytes(StandardCharsets.ISO_8859_1);
     }
 
-    private static int[] pixels(final ImageData image, final int frame) {
-        final int[] pixels = new int[image.width() * image.height()];
-        image.frames()[frame].duplicate().order(ByteOrder.LITTLE_ENDIAN).asIntBuffer().get(pixels);
-        return pixels;
-    }
-
-    private static List<Path> fixtures() {
-        try (final Stream<Path> entries = Files.list(Fixtures.PNG_DIR)) {
-            final List<Path> images = entries.filter(p -> p.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(".png")).sorted().toList();
-            assertFalse(images.isEmpty(), "Test folder is empty: " + Fixtures.PNG_DIR);
-            return images;
-        } catch (final IOException e) {
-            throw new UncheckedIOException("Failed to enumerate PNG fixtures", e);
-        }
-    }
-
     // ==========================================================================
     // NESTED TYPES
     // ==========================================================================
+    @Nested
+    @DisplayName("Fixture files")
+    class Corpus {
+
+        @TestFactory
+        @DisplayName("Every fixture decodes natively to tightly packed BGRA frames whose first one equals its PAM reference")
+        Iterable<DynamicTest> referenceMatch() {
+            final List<DynamicTest> tests = new ArrayList<>();
+            for (final Path imageFile: this.fixtures()) {
+                final String name = imageFile.getFileName().toString();
+                tests.add(dynamicTest("PNG decode and match [" + name + "]", () -> {
+                    final ImageData decoded = CodecsAPI.decode(Fixtures.readAll(imageFile));
+                    assertEquals(PixelFormat.BGRA, decoded.format(), name + " decodes natively to BGRA");
+                    for (int i = 0; i < decoded.frames().length; i++)
+                        assertEquals(decoded.width() * decoded.height() * 4, decoded.frames()[i].remaining(), "frame " + i + " bytes of " + name);
+
+                    final Path pamPath = Fixtures.PNG_DIR.resolve("raw").resolve(name.replace(".png", ".pam"));
+                    assertTrue(Files.exists(pamPath), "reference " + pamPath.toAbsolutePath() + " is missing: generate it with src/test/tools/GeneratePngReference.java");
+                    final PamImage reference = PamImage.read(pamPath);
+                    assertEquals(reference.width(), decoded.width(), name + " width");
+                    assertEquals(reference.height(), decoded.height(), name + " height");
+                    final PixelDiff diff = reference.diff(decoded.frames()[0], 0);
+                    assertEquals(0, diff.maxDiff(), String.format(Locale.ROOT, "%s differs from its reference: max diff %d, %d values differ (%.2f%%)",
+                            name, diff.maxDiff(), diff.valuesAboveSmall(), diff.percentAboveSmall()));
+                }));
+            }
+            return tests;
+        }
+
+        @TestFactory
+        @DisplayName("Every fixture, static or animated, replays byte for byte through reset()")
+        Iterable<DynamicTest> resetReplays() {
+            final List<DynamicTest> tests = new ArrayList<>();
+            for (final Path imageFile: this.fixtures()) {
+                final String name = imageFile.getFileName().toString();
+                tests.add(dynamicTest("PNG reset replay [" + name + "]", () -> {
+                    try (final ImageReader reader = CodecsAPI.reader(ByteBuffer.wrap(Fixtures.readAll(imageFile)))) {
+                        FrameReplay.verify(reader, name);
+                    }
+                }));
+            }
+            return tests;
+        }
+
+        private List<Path> fixtures() {
+            try (final Stream<Path> entries = Files.list(Fixtures.PNG_DIR)) {
+                final List<Path> images = entries.filter(p -> p.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(".png")).sorted().toList();
+                assertFalse(images.isEmpty(), "no PNG fixtures under " + Fixtures.PNG_DIR);
+                return images;
+            } catch (final IOException e) {
+                throw new UncheckedIOException("Failed to list the PNG fixtures", e);
+            }
+        }
+    }
+
     @Nested
     @DisplayName("Animation")
     class Animation {
@@ -157,8 +149,8 @@ public class PngTest {
             assertEquals(2, image.frames().length, "the default image is not part of the animation");
             assertArrayEquals(new long[] { 100L, 100L }, image.delays());
             assertEquals(ImageData.REPEAT_FOREVER, image.repeat());
-            assertEquals(0xFF00FF00, pixels(image, 0)[0], "the first frame is the green animation frame, not the red default image");
-            assertEquals(0xFF0000FF, pixels(image, 1)[0]);
+            assertEquals(0xFF00FF00, PamImage.argb(image, 0)[0], "the first frame is the green animation frame, not the red default image");
+            assertEquals(0xFF0000FF, PamImage.argb(image, 1)[0], "the second frame is the blue one");
         }
 
         @Test
@@ -178,7 +170,7 @@ public class PngTest {
         }
 
         @Test
-        @DisplayName("A one-frame animation still skips its default image and compressed text obeys a byte budget")
+        @DisplayName("A one-frame animation still skips its default image, and compressed text obeys its 4 MiB budget")
         void singleFrameDefaultImageAndTextBudget() throws IOException {
             // THREE zTXt CHUNKS OF 2 MiB EACH: THE 4 MiB TEXT BUDGET KEEPS TWO AND SKIPS THE THIRD WITHOUT FAILING
             final byte[] ztxt = new ImageBytes().ascii("Comment").u8(0).u8(0).raw(deflate(new byte[2 << 20], 9)).bytes();
@@ -188,12 +180,12 @@ public class PngTest {
                     idat(0, 255, 0, 0, 255),
                     pngChunk("fcTL", fctl(0)), fdat(1, 0, 0, 255, 0, 255));
             try (final ImageReader reader = CodecsAPI.reader(ByteBuffer.wrap(bytes))) {
-                assertEquals(1, reader.frameCount());
+                assertEquals(1, reader.frameCount(), "frames scanned");
                 final ImageData image = reader.readAll();
                 assertEquals(1, image.frames().length, "the default image is not a frame even with one fcTL");
-                assertEquals(0xFF00FF00, pixels(image, 0)[0]);
-                final Map<?, ?> texts = (Map<?, ?>) reader.metadata().value(CodecsAPI.PNG_METAKEY_COMPRESSED_TEXT);
-                assertEquals(2, ((List<?>) texts.get("Comment")).size(), "the third 2 MiB text exceeds the budget and is skipped");
+                assertEquals(0xFF00FF00, PamImage.argb(image, 0)[0], "the frame is the green fdAT one");
+                final Map<?, ?> texts = assertInstanceOf(Map.class, reader.metadata().value(CodecsAPI.PNG_METAKEY_COMPRESSED_TEXT));
+                assertEquals(2, assertInstanceOf(List.class, texts.get("Comment")).size(), "the third 2 MiB text exceeds the budget and is skipped");
             }
         }
     }
@@ -210,13 +202,14 @@ public class PngTest {
                 final ImageMetadata metadata = reader.metadata();
                 assertEquals("WaterMedia", metadata.title());
                 assertEquals(List.of("J-RAP"), metadata.authors());
-                assertNull(metadata.description());
-                assertInstanceOf(Map.class, metadata.value(CodecsAPI.PNG_METAKEY_TEXT));
+                assertNull(metadata.description(), "no Description keyword");
+                final Map<?, ?> text = assertInstanceOf(Map.class, metadata.value(CodecsAPI.PNG_METAKEY_TEXT));
+                assertEquals(Map.of("Title", List.of("WaterMedia"), "Author", List.of("J-RAP")), text, "the raw tEXt entries");
             }
         }
 
         @Test
-        @DisplayName("Metadata met between frames is stored once, however many replays")
+        @DisplayName("Metadata met between frames is stored once, however many replays, in read-only snapshots")
         void metadataIsStableAcrossReplays() throws IOException {
             final byte[] bytes = png(ihdr(1, 1, 8, 6),
                     pngChunk("acTL", new ImageBytes().be32(2).be32(1).bytes()),
@@ -228,7 +221,7 @@ public class PngTest {
                 for (int pass = 0; pass < 3; pass++) {
                     while (reader.hasNext()) reader.next();
                     assertEquals(List.of("between frames"), reader.metadata().comments(), "pass " + pass);
-                    assertTrue(reader.reset());
+                    assertTrue(reader.reset(), "pass " + pass + " rewinds");
                 }
                 assertTrue(early.comments().isEmpty(), "a snapshot never changes under the consumer");
                 assertEquals(1, reader.repeat(), "one declared play");
@@ -265,7 +258,7 @@ public class PngTest {
     class Pixels {
 
         @Test
-        @DisplayName("useBKGDChunk presents the picture against its bKGD colour")
+        @DisplayName("useBKGDChunk presents the picture against its bKGD colour, and transparency stays without it")
         void bkgdPresentation() throws IOException {
             // 2x1 RGBA: A HALF-COVERING RED PIXEL AND A FULLY TRANSPARENT GREEN ONE, OVER A BLUE bKGD
             final byte[] bytes = png(ihdr(2, 1, 8, 6), pngChunk("bKGD", new byte[] { 0, 0, 0, 0, 0, (byte) 255 }),
@@ -273,9 +266,9 @@ public class PngTest {
             final boolean previous = WaterMediaConfig.codecs.png.useBKGDChunk;
             try {
                 WaterMediaConfig.codecs.png.useBKGDChunk = false;
-                assertArrayEquals(new int[] { 0x80FF0000, 0x0000FF00 }, pixels(CodecsAPI.decode(bytes), 0), "transparency kept");
+                assertArrayEquals(new int[] { 0x80FF0000, 0x0000FF00 }, PamImage.argb(CodecsAPI.decode(bytes), 0), "transparency kept");
                 WaterMediaConfig.codecs.png.useBKGDChunk = true;
-                assertArrayEquals(new int[] { 0xFF80007F, 0xFF0000FF }, pixels(CodecsAPI.decode(bytes), 0), "flattened onto bKGD");
+                assertArrayEquals(new int[] { 0xFF80007F, 0xFF0000FF }, PamImage.argb(CodecsAPI.decode(bytes), 0), "flattened onto bKGD");
             } finally {
                 WaterMediaConfig.codecs.png.useBKGDChunk = previous;
             }
@@ -286,11 +279,11 @@ public class PngTest {
         void grayscaleTransparencyKey() throws IOException {
             // 4-BIT SAMPLES 0, 5, 10, 15 KEYED ON 5: ONLY THE SECOND PIXEL IS TRANSPARENT, ITS 8-BIT GRAY 85 NEVER COMPARED
             final byte[] four = png(ihdr(4, 1, 4, 0), pngChunk("tRNS", new byte[] { 0, 5 }), idat(0, 0x05, 0xAF));
-            assertArrayEquals(new int[] { 0xFF000000, 0x00555555, 0xFFAAAAAA, 0xFFFFFFFF }, pixels(CodecsAPI.decode(four), 0));
+            assertArrayEquals(new int[] { 0xFF000000, 0x00555555, 0xFFAAAAAA, 0xFFFFFFFF }, PamImage.argb(CodecsAPI.decode(four), 0));
             // 16-BIT SAMPLES 0x0012, 0x1200, 0xFFFF KEYED ON 0x0012: THE KEY IS THE FIRST PIXEL, WHILE THE SECOND ONLY
             // SHARES ITS 8-BIT SCALED VALUE 0x12 AND STAYS OPAQUE
             final byte[] sixteen = png(ihdr(3, 1, 16, 0), pngChunk("tRNS", new byte[] { 0x00, 0x12 }), idat(0, 0x00, 0x12, 0x12, 0x00, 0xFF, 0xFF));
-            assertArrayEquals(new int[] { 0x00000000, 0xFF121212, 0xFFFFFFFF }, pixels(CodecsAPI.decode(sixteen), 0));
+            assertArrayEquals(new int[] { 0x00000000, 0xFF121212, 0xFFFFFFFF }, PamImage.argb(CodecsAPI.decode(sixteen), 0));
         }
 
         @Test
@@ -299,10 +292,10 @@ public class PngTest {
             final byte[] bytes = png(ihdr(1, 1, 8, 6), idat(0, 255, 0, 0, 255));
             final ImageData rgba = CodecsAPI.decode(bytes, PixelFormat.RGBA);
             assertEquals(PixelFormat.RGBA, rgba.format());
-            assertEquals(0xFF0000FF, pixels(rgba, 0)[0], "red lands in the first byte under RGBA");
+            assertEquals(0xFF0000FF, PamImage.argb(rgba, 0)[0], "red lands in the first byte under RGBA");
             final ImageData gray = CodecsAPI.decode(bytes, PixelFormat.GRAY);
             assertEquals(PixelFormat.GRAY, gray.format());
-            assertEquals(1, gray.frames()[0].remaining());
+            assertEquals(1, gray.frames()[0].remaining(), "one byte per pixel");
             assertEquals(77, gray.frames()[0].get(0) & 0xFF, "BT.601 luma of pure red");
         }
     }

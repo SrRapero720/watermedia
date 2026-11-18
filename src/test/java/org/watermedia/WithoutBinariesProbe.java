@@ -12,7 +12,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 
-/** Verifies client and server bootstrap without the optional binaries module. */
+/** Exercises the client and server load without the optional Binaries module, behind a class loader that hides it. */
 public final class WithoutBinariesProbe {
     private WithoutBinariesProbe() {}
 

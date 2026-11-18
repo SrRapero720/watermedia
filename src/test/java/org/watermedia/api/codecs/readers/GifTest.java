@@ -11,11 +11,11 @@ import org.watermedia.api.codecs.ImageMetadata;
 import org.watermedia.api.codecs.ImageReader;
 import org.watermedia.test.support.Fixtures;
 import org.watermedia.test.support.FrameReplay;
+import org.watermedia.test.support.PamImage;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
@@ -30,49 +30,41 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.DynamicTest.dynamicTest;
 
 /**
- * Verifies the GIF decoder: the three bundled animated fixtures (scanned shape, tightly packed BGRA frames and
- * byte-identical reset() replays), plus hand-built streams for clipping, stray bytes, delays, loop counts and
- * metadata collection.
+ * Verifies the GIF decoder: the three bundled animations (scanned shape, tightly packed frames and byte-identical
+ * reset() replays with stable metadata), plus hand-built streams for clipping and off-canvas disposal, stray bytes,
+ * still images, delays, loop counts and the metadata records with their cap.
  */
 @DisplayName("GIF decoder")
 public class GifTest {
 
     // ==========================================================================
-    // INTERNAL API
-    // ==========================================================================
-    @TestFactory
-    @DisplayName("reset() replay")
-    Iterable<DynamicTest> testGIFReset() {
-        final List<DynamicTest> tests = new ArrayList<>();
-        for (final String name: List.of("1.gif", "2.gif", "3.gif")) {
-            tests.add(dynamicTest("GIF reset replay [" + name + "]", () -> {
-                try (final ImageReader reader = CodecsAPI.reader(ByteBuffer.wrap(Fixtures.readAll(Fixtures.GIF_DIR.resolve(name))))) {
-                    final ImageMetadata metadata = reader.metadata();
-                    assertTrue(reader.duration() > 0, "Animation duration must be positive for " + name);
-                    final List<byte[]> first = FrameReplay.verify(reader, name);
-                    assertTrue(first.size() > 1, "Fixture should be animated: " + name);
-                    assertEquals(reader.frameCount(), first.size(), "scan() and the decoder disagree on " + name);
-                    assertEquals(metadata.comments(), reader.metadata().comments(), "Comments changed after replays for " + name);
-                    assertEquals(metadata.values().keySet(), reader.metadata().values().keySet(), "Metadata changed after replays for " + name);
-                }
-            }));
-        }
-        return tests;
-    }
-
-    // ==========================================================================
-    // UTILITY
-    // ==========================================================================
-    // DECODED BGRA READ AS LITTLE-ENDIAN INTS, WHICH IS ARGB
-    private static int[] pixels(final ImageData image, final int frame) {
-        final int[] pixels = new int[image.width() * image.height()];
-        image.frames()[frame].duplicate().order(ByteOrder.LITTLE_ENDIAN).asIntBuffer().get(pixels);
-        return pixels;
-    }
-
-    // ==========================================================================
     // NESTED TYPES
     // ==========================================================================
+    @Nested
+    @DisplayName("Fixture files")
+    class Corpus {
+
+        @TestFactory
+        @DisplayName("Every bundled animation scans the frames it decodes and replays them byte for byte through reset()")
+        Iterable<DynamicTest> resetReplays() {
+            final List<DynamicTest> tests = new ArrayList<>();
+            for (final String name: List.of("1.gif", "2.gif", "3.gif")) {
+                tests.add(dynamicTest("GIF reset replay [" + name + "]", () -> {
+                    try (final ImageReader reader = CodecsAPI.reader(ByteBuffer.wrap(Fixtures.readAll(Fixtures.GIF_DIR.resolve(name))))) {
+                        final ImageMetadata metadata = reader.metadata();
+                        assertTrue(reader.duration() > 0, name + " has a positive duration");
+                        final List<byte[]> first = FrameReplay.verify(reader, name);
+                        assertTrue(first.size() > 1, name + " is animated");
+                        assertEquals(reader.frameCount(), first.size(), "scan() and the decoder disagree on " + name);
+                        assertEquals(metadata.comments(), reader.metadata().comments(), "comments changed after the replays of " + name);
+                        assertEquals(metadata.values().keySet(), reader.metadata().values().keySet(), "metadata keys changed after the replays of " + name);
+                    }
+                }));
+            }
+            return tests;
+        }
+    }
+
     @Nested
     @DisplayName("Composition")
     class Composition {
@@ -86,7 +78,7 @@ public class GifTest {
             final int[] expected = new int[16];
             for (int y = 0; y < 4; y++)
                 for (int x = 0; x < 4; x++) expected[y * 4 + x] = x >= 2 && y >= 2 ? 0xFFFF0000 : 0xFF000000;
-            assertArrayEquals(expected, pixels(image, 0));
+            assertArrayEquals(expected, PamImage.argb(image, 0));
         }
 
         @Test
@@ -96,7 +88,7 @@ public class GifTest {
                 final ImageData image = CodecsAPI.decode(new Gif(2, 2).frame(0, 0, 2, 2)
                         .gce(0, disposal).frame(5, 0, 1, 1).frame(0, 0, 1, 1).bytes());
                 assertEquals(3, image.frames().length, "disposal " + disposal);
-                assertArrayEquals(pixels(image, 0), pixels(image, 2), "disposal " + disposal);
+                assertArrayEquals(PamImage.argb(image, 0), PamImage.argb(image, 2), "disposal " + disposal);
             }
         }
     }
@@ -110,8 +102,8 @@ public class GifTest {
         void strayBytesAreSkipped() throws IOException {
             final byte[] gif = new Gif(2, 2).frame(0, 0, 2, 2).raw(0x00, 0x99).frame(0, 0, 2, 2).raw(0x42).frame(0, 0, 2, 2).bytes();
             try (final ImageReader reader = CodecsAPI.reader(ByteBuffer.wrap(gif))) {
-                assertEquals(3, reader.frameCount());
-                assertEquals(3, reader.readAll().frames().length);
+                assertEquals(3, reader.frameCount(), "frames scanned");
+                assertEquals(3, reader.readAll().frames().length, "frames decoded");
             }
         }
 
@@ -123,12 +115,12 @@ public class GifTest {
                 assertArrayEquals(new long[] { 0L }, reader.delays());
                 assertEquals(0L, reader.duration());
                 assertEquals(1, reader.repeat());
-                assertFalse(reader.variableFrameRate());
+                assertFalse(reader.variableFrameRate(), "a still has one frame rate");
                 reader.next();
-                assertEquals(0L, reader.delay());
+                assertEquals(0L, reader.delay(), "the streamed delay agrees with the scan");
             }
             final ImageData image = CodecsAPI.decode(gif);
-            assertArrayEquals(new long[] { 0L }, image.delays());
+            assertArrayEquals(new long[] { 0L }, image.delays(), "readAll() agrees with the scan");
             assertEquals(1, image.repeat());
         }
 
@@ -140,7 +132,7 @@ public class GifTest {
                     .gce(1, 0).frame(0, 0, 1, 1).gce(2, 0).frame(0, 0, 1, 1).bytes();
             try (final ImageReader reader = CodecsAPI.reader(ByteBuffer.wrap(gif))) {
                 assertArrayEquals(new long[] { 300L, 100L, 100L, 100L, 20L }, reader.delays());
-                assertTrue(reader.variableFrameRate());
+                assertTrue(reader.variableFrameRate(), "the delays differ");
                 assertArrayEquals(reader.delays(), reader.readAll().delays(), "scan() and the decoder disagree on delays");
             }
         }
@@ -152,8 +144,8 @@ public class GifTest {
                 final byte[] gif = new Gif(1, 1).netscape(loop[0]).frame(0, 0, 1, 1).frame(0, 0, 1, 1).bytes();
                 try (final ImageReader reader = CodecsAPI.reader(ByteBuffer.wrap(gif))) {
                     assertEquals(loop[1], reader.repeat(), "loop count " + loop[0]);
-                    assertEquals(loop[0], reader.metadata().value(CodecsAPI.METAKEY_LOOP_COUNT));
-                    assertEquals(loop[1], reader.readAll().repeat(), "loop count " + loop[0]);
+                    assertEquals(loop[0], reader.metadata().value(CodecsAPI.METAKEY_LOOP_COUNT), "metadata of loop count " + loop[0]);
+                    assertEquals(loop[1], reader.readAll().repeat(), "decoded repeat of loop count " + loop[0]);
                 }
             }
             try (final ImageReader reader = CodecsAPI.reader(ByteBuffer.wrap(new Gif(1, 1).frame(0, 0, 1, 1).frame(0, 0, 1, 1).bytes()))) {
@@ -178,25 +170,25 @@ public class GifTest {
             try (final ImageReader reader = CodecsAPI.reader(ByteBuffer.wrap(gif))) {
                 for (int pass = 0; pass < 3; pass++) {
                     while (reader.hasNext()) reader.next();
-                    assertTrue(reader.reset());
+                    assertTrue(reader.reset(), "pass " + pass + " rewinds");
                 }
                 final ImageMetadata metadata = reader.metadata();
                 assertEquals(List.of("first", "second"), metadata.comments());
                 final Map<?, ?> extensions = assertInstanceOf(Map.class, metadata.value(CodecsAPI.GIF_METAKEY_APPLICATION_EXTENSION));
                 final List<?> payloads = assertInstanceOf(List.class, extensions.get("WATERMDA1.0"));
-                assertEquals(2, payloads.size());
+                assertEquals(2, payloads.size(), "payloads of WATERMDA1.0");
                 assertArrayEquals(early, (byte[]) payloads.get(0));
                 assertArrayEquals(late, (byte[]) payloads.get(1), "a payload split over sub-blocks is joined");
             }
         }
 
         @Test
-        @DisplayName("Records past the cap are skipped instead of failing the decode")
+        @DisplayName("Comments past the record cap of 1024 are skipped instead of failing the decode")
         void recordCap() throws IOException {
             final Gif gif = new Gif(1, 1);
             for (int i = 0; i < 1_100; i++) gif.comment("c" + i);
             try (final ImageReader reader = CodecsAPI.reader(ByteBuffer.wrap(gif.frame(0, 0, 1, 1).bytes()))) {
-                assertEquals(1_024, reader.metadata().comments().size());
+                assertEquals(1_024, reader.metadata().comments().size(), "comments kept");
                 assertEquals("c0", reader.metadata().comments().get(0));
                 assertEquals(1, reader.readAll().frames().length);
             }

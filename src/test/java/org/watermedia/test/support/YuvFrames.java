@@ -10,8 +10,7 @@ import static org.junit.jupiter.api.Assertions.fail;
 
 /** Builds raw frame planes for the engine tests and computes their expected colors from the standard formulas, never from shader constants. */
 public final class YuvFrames {
-    /** Nits of SDR white (BT.2408); HDR at this level shows as full white before the highlight knee. */
-    public static final double SDR_WHITE_NITS = 203.0;
+    private static final double SDR_WHITE_NITS = 203.0; // BT.2408: AN HDR GRAY AT THIS LEVEL SHOWS AS FULL SDR WHITE
 
     private YuvFrames() {}
 

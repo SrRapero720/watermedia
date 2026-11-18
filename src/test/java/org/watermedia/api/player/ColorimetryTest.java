@@ -22,6 +22,7 @@ import java.lang.reflect.Method;
 import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Arrays;
 
 import static org.bytedeco.ffmpeg.global.avutil.*;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
@@ -37,19 +38,32 @@ public class ColorimetryTest {
 
     private static final float EPSILON = 1e-4f;
 
+    // ==========================================================================
+    // UTILITY
+    // ==========================================================================
+
+    // ONE vec4 OF THE 16 SHADER CONSTANTS: RANGE FROM 0, MATRIX FROM 4, CHROMA COORDINATES FROM 8, DISPLAY FROM 12
+    private static float[] slice(final float[] constants, final int from) {
+        return Arrays.copyOfRange(constants, from, from + 4);
+    }
+
+    // ==========================================================================
+    // NESTED TYPES
+    // ==========================================================================
+
     @Nested
     @DisplayName("Untagged guess")
-    class GuessTests {
+    class Guess {
 
         @Test
         @DisplayName("SD sizes guess BT.601 and HD sizes BT.709, limited range with MPEG-2 siting except full-range gray")
         void guessesBySize() {
-            assertEquals(Matrix.BT601, Colorimetry.guess(PixelFormat.YUV420P, 720, 576).matrix());
-            assertEquals(Matrix.BT601, Colorimetry.guess(PixelFormat.YUV420P, 853, 480).matrix());
-            assertEquals(Matrix.BT709, Colorimetry.guess(PixelFormat.YUV420P, 1_280, 720).matrix());
+            assertEquals(Matrix.BT601, Colorimetry.guess(PixelFormat.YUV420P, 720, 576).matrix(), "576 lines is SD");
+            assertEquals(Matrix.BT601, Colorimetry.guess(PixelFormat.YUV420P, 853, 480).matrix(), "fewer than 1280 columns is SD");
+            assertEquals(Matrix.BT709, Colorimetry.guess(PixelFormat.YUV420P, 1_280, 720).matrix(), "1280 columns is HD");
             assertEquals(Matrix.BT709, Colorimetry.guess(PixelFormat.YUV420P, 1_024, 768).matrix(), "more than 576 lines is HD");
             final Colorimetry yuv = Colorimetry.guess(PixelFormat.NV12, 1_920, 1_080);
-            assertEquals(new Colorimetry(Matrix.BT709, false, true, false, Transfer.SDR, false), yuv);
+            assertEquals(new Colorimetry(Matrix.BT709, false, true, false, Transfer.SDR, false), yuv, "HD YUV is limited, MPEG-2 sited SDR");
             assertTrue(Colorimetry.guess(PixelFormat.GRAY, 640, 480).full(), "gray is full range");
             assertEquals(Matrix.BT601, Colorimetry.guess(null, 640, 480).matrix(), "an unmapped format still gets a guess");
         }
@@ -57,26 +71,36 @@ public class ColorimetryTest {
 
     @Nested
     @DisplayName("Shader constants")
-    class ConstantTests {
+    class Constants {
 
         @Test
         @DisplayName("Limited and full range scale every depth from its own code range")
         void rangeConstants() {
             final Colorimetry limited = new Colorimetry(Matrix.BT709, false, true, false, Transfer.SDR, false);
             final Colorimetry full = new Colorimetry(Matrix.BT709, true, true, false, Transfer.SDR, false);
-            assertRange(new float[] { 255f / 219f, 16f / 219f, 255f / 224f, 128f / 224f }, limited.constants(PixelFormat.YUV420P, 4, 4, 8));
-            assertRange(new float[] { 1_023f / 876f, 16f / 219f, 1_023f / 896f, 128f / 224f }, limited.constants(PixelFormat.YUV420P, 4, 4, 10));
-            assertRange(new float[] { 65_535f / 56_064f, 16f / 219f, 65_535f / 57_344f, 128f / 224f }, limited.constants(PixelFormat.NV12, 4, 4, 16));
-            assertRange(new float[] { 1f, 0f, 1f, 128f / 255f }, full.constants(PixelFormat.YUV420P, 4, 4, 8));
-            assertRange(new float[] { 1f, 0f, 1f, 512f / 1_023f }, full.constants(PixelFormat.YUV420P, 4, 4, 10));
+            assertArrayEquals(new float[] { 255f / 219f, 16f / 219f, 255f / 224f, 128f / 224f },
+                    slice(limited.constants(PixelFormat.YUV420P, 4, 4, 8), 0), EPSILON, "limited 8-bit");
+            assertArrayEquals(new float[] { 1_023f / 876f, 16f / 219f, 1_023f / 896f, 128f / 224f },
+                    slice(limited.constants(PixelFormat.YUV420P, 4, 4, 10), 0), EPSILON, "limited 10-bit");
+            assertArrayEquals(new float[] { 65_535f / 56_064f, 16f / 219f, 65_535f / 57_344f, 128f / 224f },
+                    slice(limited.constants(PixelFormat.NV12, 4, 4, 16), 0), EPSILON, "limited 16-bit");
+            assertArrayEquals(new float[] { 1f, 0f, 1f, 128f / 255f }, slice(full.constants(PixelFormat.YUV420P, 4, 4, 8), 0), EPSILON, "full 8-bit");
+            assertArrayEquals(new float[] { 1f, 0f, 1f, 512f / 1_023f }, slice(full.constants(PixelFormat.YUV420P, 4, 4, 10), 0), EPSILON, "full 10-bit");
         }
 
         @Test
         @DisplayName("Matrix constants are the standard BT.601, BT.709 and BT.2020 coefficients")
         void matrixConstants() {
-            assertMatrix(new float[] { 1.402f, 0.34414f, 0.71414f, 1.772f }, Matrix.BT601);
-            assertMatrix(new float[] { 1.5748f, 0.18732f, 0.46812f, 1.8556f }, Matrix.BT709);
-            assertMatrix(new float[] { 1.4746f, 0.16455f, 0.57135f, 1.8814f }, Matrix.BT2020);
+            for (final Matrix matrix: Matrix.values()) {
+                // Cr TO R, Cb TO G, Cr TO G AND Cb TO B AS EACH STANDARD PUBLISHES THEM
+                final float[] expected = switch (matrix) {
+                    case BT601 -> new float[] { 1.402f, 0.34414f, 0.71414f, 1.772f };
+                    case BT709 -> new float[] { 1.5748f, 0.18732f, 0.46812f, 1.8556f };
+                    case BT2020 -> new float[] { 1.4746f, 0.16455f, 0.57135f, 1.8814f };
+                };
+                final Colorimetry color = new Colorimetry(matrix, false, true, false, Transfer.SDR, false);
+                assertArrayEquals(expected, slice(color.constants(PixelFormat.YUV420P, 4, 4, 8), 4), EPSILON, matrix.name());
+            }
         }
 
         @Test
@@ -85,11 +109,13 @@ public class ColorimetryTest {
             final Colorimetry cosited = new Colorimetry(Matrix.BT709, false, true, true, Transfer.SDR, false);
             final Colorimetry centered = new Colorimetry(Matrix.BT709, false, false, false, Transfer.SDR, false);
             assertArrayEquals(new float[] { 853f / 854f, 481f / 482f, 0.25f / 427f, 0.25f / 241f },
-                    slice(cosited.constants(PixelFormat.YUV420P, 853, 481, 8), 8), EPSILON);
-            assertArrayEquals(new float[] { 1f, 1f, 0f, 0f }, slice(centered.constants(PixelFormat.NV12, 4, 4, 8), 8), EPSILON);
+                    slice(cosited.constants(PixelFormat.YUV420P, 853, 481, 8), 8), EPSILON, "an odd 4:2:0 frame scales to its rounded-up chroma");
+            assertArrayEquals(new float[] { 1f, 1f, 0f, 0f }, slice(centered.constants(PixelFormat.NV12, 4, 4, 8), 8), EPSILON,
+                    "centered chroma needs no offset");
             assertArrayEquals(new float[] { 1f, 1f, 0.25f / 2f, 0f }, slice(cosited.constants(PixelFormat.YUV422P, 4, 4, 8), 8), EPSILON,
                     "4:2:2 subsamples only horizontally");
-            assertArrayEquals(new float[] { 1f, 1f, 0f, 0f }, slice(cosited.constants(PixelFormat.YUV444P, 5, 3, 8), 8), EPSILON);
+            assertArrayEquals(new float[] { 1f, 1f, 0f, 0f }, slice(cosited.constants(PixelFormat.YUV444P, 5, 3, 8), 8), EPSILON,
+                    "4:4:4 has no subsampled chroma");
             assertArrayEquals(new float[] { 1f, 1f, 0f, 0f }, slice(cosited.constants(PixelFormat.YUYV, 5, 3, 8), 8), EPSILON,
                     "packed pairs fetch their own chroma");
         }
@@ -97,32 +123,18 @@ public class ColorimetryTest {
         @Test
         @DisplayName("Display constants carry the transfer and the BT.2020 primaries")
         void displayConstants() {
-            assertArrayEquals(new float[] { 0f, 0f, 0f, 0f }, slice(Colorimetry.guess(PixelFormat.YUV420P, 4, 4).constants(PixelFormat.YUV420P, 4, 4, 8), 12));
+            assertArrayEquals(new float[] { 0f, 0f, 0f, 0f }, slice(Colorimetry.guess(PixelFormat.YUV420P, 4, 4).constants(PixelFormat.YUV420P, 4, 4, 8), 12),
+                    "an untagged frame is SDR without BT.2020 primaries");
             final Colorimetry pq = new Colorimetry(Matrix.BT2020, false, true, false, Transfer.PQ, true);
-            assertArrayEquals(new float[] { 1f, 1f, 0f, 0f }, slice(pq.constants(PixelFormat.YUV420P, 4, 4, 10), 12));
+            assertArrayEquals(new float[] { 1f, 1f, 0f, 0f }, slice(pq.constants(PixelFormat.YUV420P, 4, 4, 10), 12), "PQ with BT.2020 primaries");
             final Colorimetry hlg = new Colorimetry(Matrix.BT2020, false, true, false, Transfer.HLG, false);
-            assertArrayEquals(new float[] { 2f, 0f, 0f, 0f }, slice(hlg.constants(PixelFormat.YUV420P, 4, 4, 10), 12));
-        }
-
-        private static void assertRange(final float[] expected, final float[] constants) {
-            assertArrayEquals(expected, slice(constants, 0), EPSILON);
-        }
-
-        private static void assertMatrix(final float[] expected, final Matrix matrix) {
-            final Colorimetry color = new Colorimetry(matrix, false, true, false, Transfer.SDR, false);
-            assertArrayEquals(expected, slice(color.constants(PixelFormat.YUV420P, 4, 4, 8), 4), EPSILON, matrix.name());
-        }
-
-        private static float[] slice(final float[] constants, final int from) {
-            final float[] out = new float[4];
-            System.arraycopy(constants, from, out, 0, 4);
-            return out;
+            assertArrayEquals(new float[] { 2f, 0f, 0f, 0f }, slice(hlg.constants(PixelFormat.YUV420P, 4, 4, 10), 12), "HLG without BT.2020 primaries");
         }
     }
 
     @Nested
     @DisplayName("FFmpeg tags")
-    class StreamTests {
+    class Tags {
 
         @Test
         @DisplayName("Tags map to matrix, range, siting, curve and primaries; untagged gray and YUVJ frames are full range")
@@ -132,7 +144,7 @@ public class ColorimetryTest {
             map.setAccessible(true);
             final Colorimetry hdr = (Colorimetry) map.invoke(null, AV_PIX_FMT_YUV420P10LE, 3_840, 2_160, AVCOL_SPC_BT2020_NCL, AVCOL_RANGE_MPEG,
                     AVCHROMA_LOC_TOPLEFT, AVCOL_TRC_SMPTE2084, AVCOL_PRI_BT2020);
-            assertEquals(new Colorimetry(Matrix.BT2020, false, true, true, Transfer.PQ, true), hdr);
+            assertEquals(new Colorimetry(Matrix.BT2020, false, true, true, Transfer.PQ, true), hdr, "an HDR10 frame");
             final Colorimetry sd = (Colorimetry) map.invoke(null, AV_PIX_FMT_YUV420P, 1_920, 1_080, AVCOL_SPC_SMPTE170M, AVCOL_RANGE_UNSPECIFIED,
                     AVCHROMA_LOC_CENTER, AVCOL_TRC_ARIB_STD_B67, AVCOL_PRI_UNSPECIFIED);
             assertEquals(new Colorimetry(Matrix.BT601, false, false, false, Transfer.HLG, false), sd, "tags beat the HD guess");
@@ -167,15 +179,16 @@ public class ColorimetryTest {
             Files.write(file, out.toByteArray());
 
             final MRL mrl = PlayerAPI.mrl(Fixtures.fileUri(file));
-            assertTrue(mrl.await(3_000L));
+            assertTrue(mrl.await(3_000L), "the file MRL resolved");
             final HeadlessGFXEngine gfx = PlayerAPI.headlessEngine();
             final MediaPlayer player = PlayerAPI.player(mrl, () -> gfx, () -> null);
+            assertNotNull(player, "a player was built for the WebM");
             try {
                 player.start();
-                assertTrue(PlayerWait.awaitStatus(player, 15_000L, Status.PLAYING, Status.BUFFERING, Status.PAUSED, Status.ENDED));
+                assertTrue(PlayerWait.awaitStatus(player, 15_000L, Status.PLAYING, Status.BUFFERING, Status.PAUSED, Status.ENDED), "the player started");
                 assertTrue(PlayerWait.awaitCondition(() -> gfx.uploadCount() > 0, 8_000L), "decoded frames reach the engine");
                 final Colorimetry color = gfx.color;
-                assertNotNull(color);
+                assertNotNull(color, "the engine received a colorimetry");
                 assertEquals(Matrix.BT709, color.matrix(), "the tag wins over the BT.601 guess for 256x160");
                 assertFalse(color.full(), "tagged limited range");
                 assertEquals(Transfer.SDR, color.transfer());

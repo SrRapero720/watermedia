@@ -39,7 +39,10 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.SplittableRandom;
 
-/** Catalog of on-disk test fixtures, resolved against the working directory (Gradle runs tests from the module root). */
+/**
+ * Catalog of the on-disk test fixtures, resolved against the working directory (Gradle runs tests from the module
+ * root), and writers of the media no file can hold: WAV tones and the Matroska, WebM and MPEG-TS clips FFmpeg muxes.
+ */
 public final class Fixtures {
 
     public static final Path RESOURCES = Path.of("src", "test", "resources");
@@ -64,8 +67,11 @@ public final class Fixtures {
     public static final Path GIF_ANIMATED = GIF_DIR.resolve("1.gif");
     public static final Path WEBP_ANIMATED = WEBP_ANIMATED_DIR.resolve("1.webp");
     public static final Path WEBP_LOSSLESS = WEBP_LOSSLESS_DIR.resolve("1.webp");
-    public static final Path JPEG_BASELINE = JPEG_DIR.resolve("1.jpg");
+    /** Progressive 600x800 JPEG with one component (grayscale). */
+    public static final Path JPEG_GRAY = JPEG_DIR.resolve("1.jpg");
     public static final Path NETPBM_PPM = NETPBM_DIR.resolve("test.ppm");
+    /** IPTV playlist of three channels with logos and groups. */
+    public static final Path M3U_IPTV = RESOURCES.resolve("m3u").resolve("iptv_sample.m3u8");
 
     private Fixtures() {}
 

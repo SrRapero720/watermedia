@@ -14,20 +14,26 @@ import java.util.List;
 import java.util.concurrent.Executor;
 import java.util.function.Supplier;
 
-/** GPU-less {@link RenderBackend} recording the render engine's layer, clip and draw calls; it can stand behind {@link RenderSystem}. */
+/**
+ * GPU-less {@link RenderBackend} recording the render engine's layer, texture, projection, line width, clip and draw
+ * calls; it can stand behind {@link RenderSystem}.
+ */
 public final class RecordingBackend implements RenderBackend {
     public final List<Integer> begun = new ArrayList<>();
     public final List<Integer> bound = new ArrayList<>();
     public final List<Integer> textures = new ArrayList<>();
-    // EVERY clip(x, y, width, height) IN PHYSICAL PIXELS, IN CALL ORDER
+    // EVERY clip(x, y, width, height) AND EVERY lineWidth(width) IN PHYSICAL PIXELS, IN CALL ORDER
     public final List<int[]> clips = new ArrayList<>();
+    public final List<Float> lineWidths = new ArrayList<>();
     public boolean accept = true;
     public boolean flipped;
     public int epoch;
     public int ended;
     public int releases;
+    public int projections;
     public int draws;
     public int clipClears;
+    public int lastCanvasHeight;
     public int lastVertexCount;
     public boolean lastTextured;
     public float[] lastVertices = new float[0];
@@ -69,16 +75,17 @@ public final class RecordingBackend implements RenderBackend {
     @Override public TextureHandle createTexture(final int width, final int height, final ByteBuffer rgba) { return new TextureHandle(1, width, height); }
     @Override public void deleteTexture(final TextureHandle texture) {}
     @Override public void bindTexture(final int textureId) { this.textures.add(textureId); }
-    @Override public void useProjection(final Matrix4f projection) {}
+    @Override public void useProjection(final Matrix4f projection) { this.projections++; }
     @Override public void draw(final DrawMode mode, final float[] vertices, final int vertexCount, final boolean textured) {
         this.draws++;
         this.lastVertexCount = vertexCount;
         this.lastTextured = textured;
         this.lastVertices = Arrays.copyOf(vertices, vertexCount * 8);
     }
-    @Override public void lineWidth(final float width) {}
+    @Override public void lineWidth(final float width) { this.lineWidths.add(width); }
     @Override public void clip(final int x, final int y, final int width, final int height, final int canvasHeight) {
         this.clips.add(new int[] {x, y, width, height});
+        this.lastCanvasHeight = canvasHeight;
     }
     @Override public void clearClip() { this.clipClears++; }
     @Override public Supplier<GFXEngine> mediaEngineSupplier(final Thread renderThread, final Executor renderExecutor) { return () -> null; }

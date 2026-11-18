@@ -8,30 +8,32 @@ import java.util.Locale;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
-/** Verifies the pure helpers in {@link MathUtil}: clamping, unit conversion and byte formatting. */
+/** Verifies the helpers of {@link MathUtil}: clamping on every numeric type, minutes to milliseconds and locale-free byte formatting. */
 @DisplayName("MathUtil")
 public class MathUtilTest {
+
     // ==========================================================================
     // NESTED TYPES
     // ==========================================================================
+
     @Nested
-    @DisplayName("clamp / clip255")
-    class ClampTests {
+    @DisplayName("Clamping")
+    class Clamping {
 
         @Test
-        @DisplayName("clamp returns the value when inside range")
+        @DisplayName("clamp returns the value when inside the range")
         void clampInside() {
             assertEquals(5, MathUtil.clamp(5, 0, 10));
         }
 
         @Test
-        @DisplayName("clamp returns lower bound when below")
+        @DisplayName("clamp returns the lower bound when below")
         void clampLower() {
             assertEquals(0, MathUtil.clamp(-3, 0, 10));
         }
 
         @Test
-        @DisplayName("clamp returns upper bound when above")
+        @DisplayName("clamp returns the upper bound when above")
         void clampUpper() {
             assertEquals(10, MathUtil.clamp(20, 0, 10));
         }
@@ -39,9 +41,8 @@ public class MathUtilTest {
         @Test
         @DisplayName("clamp with inverted bounds always returns max")
         void clampInverted() {
-            for (final int value: new int[] { Integer.MIN_VALUE, -5, 0, 5, 10, 20, Integer.MAX_VALUE }) {
+            for (final int value: new int[] { Integer.MIN_VALUE, -5, 0, 5, 10, 20, Integer.MAX_VALUE })
                 assertEquals(0, MathUtil.clamp(value, 10, 0), "value " + value);
-            }
         }
 
         @Test
@@ -55,6 +56,15 @@ public class MathUtilTest {
         }
 
         @Test
+        @DisplayName("clamp limits floats and doubles too, and returns max on inverted bounds")
+        void clampFloating() {
+            assertEquals(0.5f, MathUtil.clamp(0.5f, 0f, 1f), "float inside");
+            assertEquals(1f, MathUtil.clamp(7f, 0f, 1f), "float above");
+            assertEquals(0d, MathUtil.clamp(-3d, 0d, 1d), "double below");
+            assertEquals(1d, MathUtil.clamp(0.5d, 2d, 1d), "inverted bounds return max");
+        }
+
+        @Test
         @DisplayName("clip255 caps at 255")
         void clip255Upper() {
             assertEquals(255, MathUtil.clip255(300));
@@ -65,20 +75,11 @@ public class MathUtilTest {
         void clip255Lower() {
             assertEquals(0, MathUtil.clip255(-1));
         }
-
-        @Test
-        @DisplayName("clamp works on floats and doubles with the same inverted-bounds rule")
-        void clampFloating() {
-            assertEquals(0.5f, MathUtil.clamp(0.5f, 0f, 1f));
-            assertEquals(1f, MathUtil.clamp(7f, 0f, 1f));
-            assertEquals(0d, MathUtil.clamp(-3d, 0d, 1d));
-            assertEquals(1d, MathUtil.clamp(0.5d, 2d, 1d), "inverted bounds return max");
-        }
     }
 
     @Nested
     @DisplayName("Unit conversion")
-    class ConversionTests {
+    class Conversion {
 
         @Test
         @DisplayName("minutesToMs keeps fractional minutes down to the millisecond")
@@ -91,16 +92,16 @@ public class MathUtilTest {
 
     @Nested
     @DisplayName("Byte formatting")
-    class ByteTests {
+    class Formatting {
 
         @Test
-        @DisplayName("displayBytes(0) == '0 B'")
+        @DisplayName("displayBytes writes zero as 0 B")
         void displayBytesZero() {
             assertEquals("0 B", MathUtil.displayBytes(0L));
         }
 
         @Test
-        @DisplayName("displayBytes scales to KB, MB and GB")
+        @DisplayName("displayBytes scales to KB, MB and GB at 1024 boundaries")
         void displayBytesUnits() {
             assertEquals("1.0 KB", MathUtil.displayBytes(1_024L));
             assertEquals("1.5 MB", MathUtil.displayBytes(1_024L * 1_024L * 3 / 2));
@@ -110,12 +111,17 @@ public class MathUtilTest {
         @Test
         @DisplayName("displayBytes keeps a dot separator under a comma locale")
         void displayBytesIgnoresLocale() {
+            // THE DEFAULT LOCALE IS PROCESS-WIDE; setDefault(Locale) ALSO RESETS BOTH CATEGORIES, SO EACH ONE GOES BACK
             final Locale previous = Locale.getDefault();
+            final Locale format = Locale.getDefault(Locale.Category.FORMAT);
+            final Locale display = Locale.getDefault(Locale.Category.DISPLAY);
             try {
                 Locale.setDefault(Locale.forLanguageTag("es-ES"));
                 assertEquals("1.5 KB", MathUtil.displayBytes(1_536L));
             } finally {
                 Locale.setDefault(previous);
+                Locale.setDefault(Locale.Category.FORMAT, format);
+                Locale.setDefault(Locale.Category.DISPLAY, display);
             }
         }
     }

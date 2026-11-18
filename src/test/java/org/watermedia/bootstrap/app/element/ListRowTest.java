@@ -38,10 +38,10 @@ public class ListRowTest {
             final ListRow row = new ListRow().place(left, 12, ListRow.CENTER).place(right, -44, 14).size(300, 56);
             row.measure(300, 56);
             row.layout(100, 20);
-            assertEquals(112, left.left());
+            assertEquals(112, left.left(), "12 px from the left edge");
             assertEquals(20 + 23, left.top(), "a 10 px child centers in a 56 px row");
-            assertEquals(100 + 300 - 44, right.left());
-            assertEquals(34, right.top());
+            assertEquals(100 + 300 - 44, right.left(), "44 px from the right edge");
+            assertEquals(20 + 14, right.top(), "14 px under the top edge");
         }
     }
 
@@ -53,16 +53,16 @@ public class ListRowTest {
         @DisplayName("a picked supplier overrides the list's selection stamp")
         void picked() {
             final ListRow listed = new ListRow();
-            assertFalse(listed.isPicked());
+            assertFalse(listed.isPicked(), "a fresh row is not picked");
             listed.selected(true);
-            assertTrue(listed.isPicked());
+            assertTrue(listed.isPicked(), "a list row follows the stamp");
 
-            final boolean[] lod = { false };
-            final ListRow free = new ListRow().picked(() -> lod[0]);
+            final boolean[] pick = { false };
+            final ListRow free = new ListRow().picked(() -> pick[0]);
             free.selected(true);
             assertFalse(free.isPicked(), "a row outside a list ignores a stale stamp");
-            lod[0] = true;
-            assertTrue(free.isPicked());
+            pick[0] = true;
+            assertTrue(free.isPicked(), "the supplier decides");
         }
     }
 
@@ -74,6 +74,7 @@ public class ListRowTest {
         private TextRenderer text;
         private Canvas canvas;
 
+        // DRAWING BUILDS THE GLYPH ATLAS THROUGH RenderSystem, SO A RECORDING ENGINE STANDS IN FOR THE GPU
         @BeforeEach
         void setup() {
             new RecordingBackend().install();
@@ -89,9 +90,10 @@ public class ListRowTest {
         @Test
         @DisplayName("a title past its budget ends in an ellipsis inside the row; a short one draws whole")
         void truncates() {
+            // THE 200 PX ROW LESS THE 10 PX INSET AND THE 60 PX RIGHT SIDE LEAVES THE TITLE 130 PX
             final ListRow row = this.drawn(new ListRow().title(LONG).textAt(10, ListRow.CENTER).textRight(60, 20));
             final String shown = this.text.truncateToWidth(LONG, 130, AppTheme.TEXT_BODY, Font.PLAIN);
-            assertTrue(shown.endsWith("...") && shown.length() < LONG.length());
+            assertTrue(shown.endsWith("...") && shown.length() < LONG.length(), "the long title overflows 130 px");
             assertEquals(row.left() + 10 + this.text.width(shown, AppTheme.TEXT_BODY, Font.PLAIN), row.titleEnd());
             assertTrue(row.titleEnd() <= row.left() + 200 - 60, "the title stops before the reserved right side");
 
@@ -107,12 +109,13 @@ public class ListRowTest {
             final int preW = this.text.width("#12", AppTheme.TEXT_BODY, Font.BOLD);
             final String shown = this.text.truncateToWidth(LONG, 130 - preW - 6, AppTheme.TEXT_BODY, Font.PLAIN);
             assertEquals(row.left() + 10 + preW + 6 + this.text.width(shown, AppTheme.TEXT_BODY, Font.PLAIN), row.titleEnd());
-            assertTrue(row.titleEnd() <= row.left() + 200 - 60);
+            assertTrue(row.titleEnd() <= row.left() + 200 - 60, "the title stops before the reserved right side");
         }
 
         @Test
         @DisplayName("a squeezed row still gives the title its minimum width")
         void minimum() {
+            // A 195 PX RIGHT SIDE LEAVES THE TITLE NOTHING, SO THE 40 PX MINIMUM APPLIES
             final ListRow row = this.drawn(new ListRow().title(LONG).textAt(10, ListRow.CENTER).textRight(195, 40));
             final String shown = this.text.truncateToWidth(LONG, 40, AppTheme.TEXT_BODY, Font.PLAIN);
             assertEquals(row.left() + 10 + this.text.width(shown, AppTheme.TEXT_BODY, Font.PLAIN), row.titleEnd());

@@ -1,28 +1,55 @@
 package org.watermedia.api.player;
 
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.watermedia.api.player.MediaPlayer.AudioTrack;
 import org.watermedia.api.player.MediaPlayer.LodLevel;
 import org.watermedia.api.player.MediaPlayer.Status;
+import org.watermedia.api.util.SampleType;
+import org.watermedia.test.support.Fixtures;
+import org.watermedia.test.support.MediaBootstrap;
+
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
-/** Verifies the control surface every {@link MediaPlayer} shares, through {@link ServerMediaPlayer} since the sealed class allows no stub. */
+/**
+ * Verifies the control surface every {@link MediaPlayer} shares: volume and mute with the gain they leave on the audio
+ * engine, the speed bounds, repeat, scale and LOD with their sizing rule, the audio preference of a clock, the
+ * {@link Status} rules and the release failure merging. A {@link ServerMediaPlayer} stands in for the sealed class, which
+ * allows no stub; the gain needs an audio engine, so that case drives an unstarted {@link FFMediaPlayer} over Java Sound.
+ */
 @DisplayName("MediaPlayer base surface")
 public class MediaPlayerBaseTest {
+
+    private static final long MRL_TIMEOUT_MS = 3_000L;
+    private static final int RATE_HZ = 48_000;
+
+    // ==========================================================================
+    // INTERNAL API
+    // ==========================================================================
+
+    @BeforeAll
+    static void boot() {
+        // THE AUDIO ENGINE AND THE FF PLAYER ARE CLIENT-ONLY
+        MediaBootstrap.client();
+    }
 
     // ==========================================================================
     // NESTED TYPES
     // ==========================================================================
 
     @Nested
-    @DisplayName("volume")
-    class VolumeTests {
+    @DisplayName("Volume")
+    class Volume {
 
         @Test
         @DisplayName("volume round-trips for every 0..100 value")
@@ -47,11 +74,11 @@ public class MediaPlayerBaseTest {
     }
 
     @Nested
-    @DisplayName("mute")
-    class MuteTests {
+    @DisplayName("Mute")
+    class Mute {
 
         @Test
-        @DisplayName("mute is independent from volume")
+        @DisplayName("mute and volume are independent settings")
         void muteIsOrthogonal() {
             final ServerMediaPlayer player = new ServerMediaPlayer();
             player.volume(50);
@@ -60,11 +87,36 @@ public class MediaPlayerBaseTest {
 
             // CHANGING VOLUME MUST NOT CLEAR THE MUTE FLAG
             player.volume(80);
-            assertTrue(player.mute());
+            assertTrue(player.mute(), "a volume change keeps the mute");
             assertEquals(80, player.volume());
 
             player.mute(false);
             assertFalse(player.mute());
+        }
+
+        @Test
+        @DisplayName("Muting silences the audio engine, a volume change keeps it silent and unmuting plays at the latest volume")
+        void muteGatesTheEngineGain() {
+            final MRL mrl = PlayerAPI.mrl(Fixtures.fileUri(Fixtures.MP4_H264));
+            assertTrue(mrl.await(MRL_TIMEOUT_MS), "the MRL resolves");
+            final JSEngine engine = PlayerAPI.jsEngine();
+            final boolean opened = engine.format(SampleType.S16, 2, RATE_HZ);
+            if (!opened) engine.release();
+            assumeTrue(opened, "no Java Sound output line for S16 stereo");
+            // NEVER STARTED: THE BASE CONTROLS DRIVE THE ENGINE GAIN THEMSELVES
+            final FFMediaPlayer player = new FFMediaPlayer(mrl, 0, null, engine);
+            try {
+                player.volume(50);
+                assertEquals(0.5f, engine.volume(), "an unmuted volume reaches the engine");
+                player.mute(true);
+                assertEquals(0f, engine.volume(), "muting silences the engine");
+                player.volume(80);
+                assertEquals(0f, engine.volume(), "a volume change while muted keeps the engine silent");
+                player.mute(false);
+                assertEquals(0.8f, engine.volume(), "unmuting plays at the latest volume");
+            } finally {
+                player.release();
+            }
         }
 
         @Test
@@ -77,11 +129,11 @@ public class MediaPlayerBaseTest {
     }
 
     @Nested
-    @DisplayName("speed")
-    class SpeedTests {
+    @DisplayName("Speed")
+    class Speed {
 
         @Test
-        @DisplayName("live source cannot change speed")
+        @DisplayName("A live source refuses a new speed but accepts its current one")
         void liveLocksSpeed() {
             // AN UNKNOWN DURATION ONLY HOLDS THE CLOCK; ONLY AN EXPLICIT LIVE FLAG LOCKS THE RATE
             final ServerMediaPlayer player = new ServerMediaPlayer();
@@ -95,7 +147,7 @@ public class MediaPlayerBaseTest {
         }
 
         @Test
-        @DisplayName("bounded speed changes apply on a non-live source")
+        @DisplayName("Speeds within (0, 4] apply on a non-live source and the rest, NaN included, are refused")
         void speedBounds() {
             final ServerMediaPlayer player = new ServerMediaPlayer();
             assertTrue(player.speed(2.0f));
@@ -106,13 +158,14 @@ public class MediaPlayerBaseTest {
             assertFalse(player.speed(0f));
             assertFalse(player.speed(-1f));
             assertFalse(player.speed(4.1f));
+            assertFalse(player.speed(Float.NaN), "NaN never reaches the clocks");
             assertEquals(4.0f, player.speed());
         }
     }
 
     @Nested
-    @DisplayName("repeat / scale / lod")
-    class StateTests {
+    @DisplayName("Settings: repeat, scale, LOD and audio")
+    class Settings {
 
         @Test
         @DisplayName("repeat toggles and reports the new state")
@@ -165,18 +218,34 @@ public class MediaPlayerBaseTest {
             assertEquals(2, MediaPlayer.scaled(100, 0, 1));
             assertEquals(360, MediaPlayer.scaled(1_080, 720, 50), "the percentage applies to the capped size");
         }
+
+        @Test
+        @DisplayName("A server clock keeps the audio language preference but lists and switches no track")
+        void audioLanguageWithoutTracks() {
+            final ServerMediaPlayer clock = PlayerAPI.serverPlayer();
+            try {
+                clock.audioLanguage("es-MX");
+                assertEquals("es-MX", clock.audioLanguage());
+                clock.audioLanguage("  ");
+                assertNull(clock.audioLanguage(), "a blank tag is no preference");
+                assertEquals(List.of(), clock.audioTracks());
+                assertNull(clock.audioTrack());
+                assertFalse(clock.audioTrack(new AudioTrack(AudioTrack.MAIN, 0, null, null)));
+                assertThrows(IllegalArgumentException.class, () -> clock.audioTrack(null));
+            } finally {
+                clock.release();
+            }
+        }
     }
 
     @Nested
-    @DisplayName("Status")
-    class StatusTests {
+    @DisplayName("Status ordinals and direct transitions")
+    class States {
 
         @Test
         @DisplayName("of maps every ordinal and rejects the ones outside the enum")
         void ofCoversFullRange() {
-            for (final Status s: Status.values()) {
-                assertEquals(s, Status.of(s.ordinal()));
-            }
+            for (final Status s: Status.values()) assertEquals(s, Status.of(s.ordinal()));
             assertThrows(IllegalArgumentException.class, () -> Status.of(-1));
             assertThrows(IllegalArgumentException.class, () -> Status.of(Status.values().length));
         }
@@ -195,14 +264,14 @@ public class MediaPlayerBaseTest {
             assertTrue(Status.ERROR.allows(Status.STOPPED));
             assertFalse(Status.LOADING.allows(Status.PLAYING), "LOADING leaves only through a start");
             assertFalse(Status.PLAYING.allows(Status.LOADING), "a source switch takes its own path");
-            assertFalse(Status.ENDED.allows(Status.PAUSED), "a seek past the end restarts the player");
+            assertFalse(Status.ENDED.allows(Status.PAUSED), "a seek out of ENDED takes its own path");
             assertFalse(Status.ERROR.allows(Status.PLAYING), "only a stop leaves a failure");
         }
     }
 
     @Nested
     @DisplayName("Release failure merging")
-    class FailureTests {
+    class Failure {
 
         @Test
         @DisplayName("Preserves the first ordinary cause and avoids self-suppression")

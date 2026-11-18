@@ -16,6 +16,10 @@ import java.util.Set;
 /** Runs the launcher and the app spec against one {@code config/app.properties} in a fresh working directory. */
 public final class AppConfigProbe {
 
+    // ==========================================================================
+    // INTERNAL API
+    // ==========================================================================
+    // ONE SCENARIO PER JVM: THE LAUNCHER, WATERCONFIG AND THE SPEC FIELDS ARE PROCESS-WIDE, AND override SETS A PROPERTY
     public static void main(final String[] arguments) throws Exception {
         final String scenario = arguments[0];
         final Field preferences = AppBootstrap.class.getDeclaredField("PREFERENCES");

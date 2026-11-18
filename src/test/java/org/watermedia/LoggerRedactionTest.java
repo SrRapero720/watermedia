@@ -39,7 +39,7 @@ public class LoggerRedactionTest {
     // ==========================================================================
     @Nested
     @DisplayName("Events")
-    class EventTests {
+    class Events {
         @Test
         @DisplayName("Redacts both project loggers before events reach appenders")
         void redactsProjectLoggers() {
@@ -75,7 +75,7 @@ public class LoggerRedactionTest {
                 assertTrue(text.contains("https://user:********@api.test/media"), text);
                 assertNull(event.getThrown());
                 assertSame(cause, failure.getCause());
-                assertTrue(cause.getMessage().contains("private-cause"));
+                assertTrue(cause.getMessage().contains("private-cause"), "the original cause keeps its message");
             }
         }
 
@@ -95,14 +95,17 @@ public class LoggerRedactionTest {
         }
 
         @Test
-        @DisplayName("Redacts throwables embedded in messages and bare tokens in parameters")
+        @DisplayName("Redacts throwables embedded in messages into their trace text and bearer values in parameters")
         void redactsEmbeddedThrowables() {
             final IOException failure = new IOException("Rejected apiKey=embedded-secret");
             try (final LogCapture capture = new LogCapture(WaterMedia.ID)) {
                 WaterMedia.LOGGER.error(IT, new ParameterizedMessage("Failure in {}", new Object[] { "decoder" }, failure));
                 WaterMedia.LOGGER.warn(IT, "Header {}", "Authorization: Bearer private-bearer");
                 final var event = capture.events().get(0);
-                assertFalse(event.getMessage().getFormattedMessage().contains("embedded-secret"));
+                final String text = event.getMessage().getFormattedMessage();
+                assertFalse(text.contains("embedded-secret"), text);
+                // THE UNSAFE TRACE STAYS READABLE AS REDACTED TEXT INSTEAD OF REACHING THE APPENDERS AS A THROWABLE
+                assertTrue(text.startsWith("Failure in decoder") && text.contains("java.io.IOException: Rejected apiKey=********"), text);
                 assertNull(event.getThrown());
                 assertNull(event.getMessage().getThrowable());
                 assertEquals("Header Authorization: Bearer ********", capture.events().get(1).getMessage().getFormattedMessage());
@@ -122,7 +125,7 @@ public class LoggerRedactionTest {
 
     @Nested
     @DisplayName("Sources")
-    class SourceTests {
+    class Sources {
         @Test
         @DisplayName("Source diagnostics omit header values without changing wire headers")
         void omitsHeaderValues() {
@@ -136,9 +139,9 @@ public class LoggerRedactionTest {
                 assertFalse(text.contains("private-"), text);
                 assertTrue(text.contains("Cookie"), text);
                 assertTrue(text.contains("Authorization"), text);
-                assertTrue(headers.toRawString().contains("Cookie: session=private-cookie\r\n"));
+                assertTrue(headers.toRawString().contains("Cookie: session=private-cookie\r\n"), "the wire headers keep their values");
                 assertEquals("Bearer private-auth", headers.value("Authorization"));
-                assertFalse(headers.entries().toString().contains("private-"));
+                assertFalse(headers.entries().toString().contains("private-"), "the header entries print without values");
             }
         }
     }

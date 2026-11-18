@@ -39,7 +39,7 @@ public class TwitterPlatformTest {
         }
 
         @Test
-        @DisplayName("A missing or broken range keeps the whole text")
+        @DisplayName("A missing or broken range keeps the whole text, and a missing text is empty")
         void brokenRange() {
             assertEquals("a & b", TwitterPlatform.text("a &amp; b", null));
             assertEquals("a & b", TwitterPlatform.text("a &amp; b", new int[] { 0, 99 }));

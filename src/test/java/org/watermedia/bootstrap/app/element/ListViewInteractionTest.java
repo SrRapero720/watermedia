@@ -16,11 +16,14 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.lwjgl.glfw.GLFW.GLFW_KEY_A;
+import static org.lwjgl.glfw.GLFW.GLFW_PRESS;
 
 /**
- * Verifies how a {@link ListView} turns hover, click and keyboard input into selection and
- * activation: hover selects without activating, clicks activate, the keyboard scrolls the selection
- * into view, and hidden, disabled or clipped rows never receive events.
+ * Verifies how a {@link ListView} turns hover, click and keyboard input into selection and activation: hover selects
+ * without activating, clicks activate, the keyboard scrolls the selection into view, only the rows near the viewport
+ * are children, overflowing rows stay clear of the scrollbar, a focused row keeps its input out of view, and hidden,
+ * disabled or clipped rows never receive events.
  */
 @DisplayName("ListView interaction")
 public class ListViewInteractionTest {
@@ -29,6 +32,7 @@ public class ListViewInteractionTest {
     // UTILITY
     // ==========================================================================
 
+    // THREE 40 PX ROWS IN A 200 x 80 LIST AT (10, 10): THE THIRD ONE STARTS BELOW THE VIEWPORT
     private static ListView<String> list(final List<String> activations) {
         final ListView<String> list = new ListView<String>().rowHeight(40)
                 .rowFactory((item, index) -> new Box())
@@ -54,19 +58,19 @@ public class ListViewInteractionTest {
             final List<String> activations = new ArrayList<>();
             final ListView<String> list = list(activations).selectOnHover(true);
 
-            assertTrue(list.dispatchHover(20, 20));
+            assertTrue(list.dispatchHover(20, 20), "the first row takes the hover");
             assertEquals("first", list.selectedItem());
-            assertTrue(list.children().get(0).hovered());
-            assertTrue(list.dispatchHover(20, 60));
+            assertTrue(list.children().get(0).hovered(), "the first row is lit");
+            assertTrue(list.dispatchHover(20, 60), "the second row takes the hover");
             assertEquals("second", list.selectedItem());
-            assertFalse(list.children().get(0).hovered());
-            assertTrue(list.children().get(1).hovered());
+            assertFalse(list.children().get(0).hovered(), "the first row goes dark");
+            assertTrue(list.children().get(1).hovered(), "the second row is lit");
             list.dispatchHover(20, 60);
             list.dispatchHover(20, 20);
-            assertEquals(List.of(), activations);
+            assertEquals(List.of(), activations, "hover activates nothing");
 
-            assertTrue(list.dispatchClick(20, 20));
-            assertTrue(list.dispatchClick(20, 20));
+            assertTrue(list.dispatchClick(20, 20), "the hovered row takes the click");
+            assertTrue(list.dispatchClick(20, 20), "the selected row takes a second click");
             assertEquals(List.of("first", "first"), activations);
         }
 
@@ -76,23 +80,24 @@ public class ListViewInteractionTest {
             final List<String> activations = new ArrayList<>();
             final ListView<String> list = list(activations).selection(0);
 
-            assertTrue(list.dispatchHover(20, 60));
-            assertTrue(list.children().get(1).hovered());
+            assertTrue(list.dispatchHover(20, 60), "the second row takes the hover");
+            assertTrue(list.children().get(1).hovered(), "the second row is lit");
             assertEquals("first", list.selectedItem());
             assertEquals(List.of(), activations);
         }
 
         @Test
-        @DisplayName("hovering the controls inside a row does not change their values, clicking does")
-        void hoveringSettingsControlsDoesNotChangeTheirValues() {
+        @DisplayName("controls in a row change only on a click, which reaches them alone; a click beside them activates the row")
+        void rowControlsChangeOnlyOnClick() {
             final List<String> changes = new ArrayList<>();
             final Switch toggle = new Switch().size(40, 20).gravity(Gravity.RIGHT)
-                    .onChange(value -> changes.add("toggle"));
+                    .onChange(value -> changes.add("switch"));
             final SegmentedControl options = new SegmentedControl().segments(new String[] { "A", "B", "C" })
-                    .size(120, 20).gravity(Gravity.RIGHT).onSelect(index -> changes.add("option"));
+                    .size(120, 20).gravity(Gravity.RIGHT).onSelect(index -> changes.add("segment " + index));
+            // AN ACTIVATED ROW RECORDS ITS ITEM AND CYCLES ITS CONTROL, SO A CLICK THE ROW TOOK FROM A CONTROL SHOWS
             final ListView<String> list = new ListView<String>().rowHeight(40).selectOnHover(true)
                     .rowFactory((item, index) -> new ParentFrame().add(index == 0 ? toggle : options))
-                    .items(List.of("toggle", "option"))
+                    .items(List.of("switch row", "segments row"))
                     .onSelect((item, index) -> {
                         changes.add(item);
                         if (index == 0) toggle.on(!toggle.on());
@@ -101,21 +106,22 @@ public class ListViewInteractionTest {
             list.measure(200, 80);
             list.layout(10, 10);
 
+            // THE SWITCH SPANS X 170 TO 210 OF THE FIRST ROW; THE THREE 40 PX SEGMENTS START AT X 90 OF THE SECOND
             list.dispatchHover(180, 30);
-            list.dispatchHover(150, 70);
-            assertFalse(toggle.on());
-            assertEquals(0, options.selectedIndex());
+            list.dispatchHover(190, 70);
+            assertFalse(toggle.on(), "hover leaves the switch off");
+            assertEquals(0, options.selectedIndex(), "hover leaves the first segment picked");
             assertEquals(List.of(), changes);
 
-            assertTrue(list.dispatchClick(180, 30));
-            assertTrue(toggle.on());
-            assertTrue(list.dispatchClick(150, 70));
-            assertEquals(1, options.selectedIndex());
-            assertEquals(List.of("toggle", "option"), changes);
+            assertTrue(list.dispatchClick(180, 30), "the switch takes the click");
+            assertTrue(toggle.on(), "the click turned the switch on");
+            assertTrue(list.dispatchClick(190, 70), "the third segment takes the click");
+            assertEquals(2, options.selectedIndex(), "the click picked the segment under it, not the next one");
+            assertEquals(List.of("switch", "segment 2"), changes, "no row was activated");
 
-            assertTrue(list.dispatchClick(20, 70));
-            assertEquals(2, options.selectedIndex());
-            assertEquals(List.of("toggle", "option", "option"), changes);
+            assertTrue(list.dispatchClick(20, 70), "the row takes a click beside its control");
+            assertEquals(0, options.selectedIndex(), "the row cycled its control");
+            assertEquals(List.of("switch", "segment 2", "segments row"), changes);
         }
     }
 
@@ -124,7 +130,7 @@ public class ListViewInteractionTest {
     class Keyboard {
 
         @Test
-        @DisplayName("keyboard selection scrolls the row into view without activating it")
+        @DisplayName("keyboard selection scrolls the row into view, stops at the last row and activates nothing")
         void keyboardSelectionScrollsWithoutActivatingRows() {
             final List<String> activations = new ArrayList<>();
             final ListView<String> list = list(activations).selection(0);
@@ -132,14 +138,14 @@ public class ListViewInteractionTest {
             list.moveSelection(2);
             list.layout(10, 10);
             assertEquals("third", list.selectedItem());
-            assertTrue(list.children().get(2).top() >= list.innerTop());
-            assertTrue(list.children().get(2).top() + list.children().get(2).measuredHeight()
-                    <= list.innerTop() + list.innerHeight());
+            final Element<?> third = list.children().get(2);
+            assertTrue(third.top() >= list.innerTop(), "the third row starts in view");
+            assertTrue(third.top() + third.measuredHeight() <= list.innerTop() + list.innerHeight(), "the third row ends in view");
             list.moveSelection(1);
-            assertEquals("third", list.selectedItem());
+            assertEquals("third", list.selectedItem(), "the selection stops at the last row");
             assertEquals(List.of(), activations);
 
-            assertTrue(list.dispatchClick(20, 60));
+            assertTrue(list.dispatchClick(20, 60), "the scrolled third row takes the click");
             assertEquals(List.of("third"), activations);
         }
     }
@@ -151,39 +157,38 @@ public class ListViewInteractionTest {
         @Test
         @DisplayName("leaving the viewport clears the hover without sending events to clipped rows")
         void leavingViewportClearsHoverWithoutSendingEventsToClippedRows() {
-            final List<String> activations = new ArrayList<>();
             final List<String> hovered = new ArrayList<>();
-            final ListView<String> list = list(activations).selectOnHover(true);
+            final ListView<String> list = list(new ArrayList<>()).selectOnHover(true);
             list.rowFactory((item, index) -> new Box().onHover(row -> hovered.add(item)));
             list.measure(200, 80);
+            // THE SELECTION SCROLLS THE LIST 40 PX, SO THE FIRST ROW SITS CLIPPED ABOVE THE VIEWPORT
             list.moveSelection(2);
             list.layout(-10, 0);
             list.dispatchHover(20, 20);
-            assertTrue(list.children().get(1).hovered());
+            assertTrue(list.children().get(1).hovered(), "the second row sits under the pointer");
             hovered.clear();
 
-            assertFalse(list.dispatchHover(300, 300));
-            assertEquals(List.of(), hovered);
-            assertTrue(list.children().stream().noneMatch(Element::hovered));
-            assertFalse(list.dispatchClick(20, -10));
+            assertFalse(list.dispatchHover(300, 300), "a point outside the list takes no hover");
+            assertEquals(List.of(), hovered, "no row heard the hover outside");
+            assertTrue(list.children().stream().noneMatch(Element::hovered), "the hover is cleared");
+            assertFalse(list.dispatchClick(20, -10), "the clipped first row takes no click");
         }
 
-        @ParameterizedTest(name = "hidden={0}")
-        @ValueSource(booleans = { true, false })
-        @DisplayName("hidden and disabled lists ignore hover and click")
-        void inactiveListsIgnoreHoverAndClick(final boolean hidden) {
+        @ParameterizedTest(name = "{displayName}: {0}")
+        @ValueSource(strings = { "hidden", "disabled" })
+        @DisplayName("an inactive list ignores hover and click and clears the hover it had")
+        void inactiveListsIgnoreHoverAndClick(final String state) {
             final List<String> activations = new ArrayList<>();
             final ListView<String> list = list(activations).selectOnHover(true);
             list.dispatchHover(20, 20);
             list.selection(1);
-            activations.clear();
-            if (hidden) list.visible(false);
+            if ("hidden".equals(state)) list.visible(false);
             else list.enabled(false);
 
-            assertFalse(list.dispatchHover(20, 20));
-            assertFalse(list.dispatchClick(20, 20));
-            assertEquals("second", list.selectedItem());
-            assertTrue(list.children().stream().noneMatch(Element::hovered));
+            assertFalse(list.dispatchHover(20, 20), "the list takes no hover");
+            assertFalse(list.dispatchClick(20, 20), "the list takes no click");
+            assertEquals("second", list.selectedItem(), "the hover did not move the selection");
+            assertTrue(list.children().stream().noneMatch(Element::hovered), "the earlier hover is cleared");
             assertEquals(List.of(), activations);
         }
     }
@@ -213,12 +218,12 @@ public class ListViewInteractionTest {
             list.layout(0, 0);
             final Element<?> selected = list.children().stream().filter(row -> row.top() >= 0 && row.top() < 80)
                     .reduce((first, second) -> second).orElseThrow();
-            assertTrue(selected.top() + selected.measuredHeight() <= 80);
+            assertTrue(selected.top() + selected.measuredHeight() <= 80, "the last row in view ends inside it");
             assertTrue(list.children().size() <= 5, "children: " + list.children().size());
 
             final List<String> activations = new ArrayList<>();
             list.onSelect((item, index) -> activations.add(item));
-            assertTrue(list.dispatchClick(20, 60));
+            assertTrue(list.dispatchClick(20, 60), "the selected row takes the click");
             assertEquals(List.of("item300"), activations);
         }
     }
@@ -237,16 +242,16 @@ public class ListViewInteractionTest {
             list.measure(200, 80);
             list.layout(10, 10);
             final List<Element<?>> first = new ArrayList<>(list.children());
-            assertFalse(first.isEmpty());
+            assertFalse(first.isEmpty(), "the first window holds rows");
             for (final Element<?> row: first) assertEquals(192, row.measuredWidth(), "the 4 px bar and 4 px of air come off");
 
             // THE LAYOUT, NOT THE MEASURE, SIZES THE ROWS THAT ENTER THE WINDOW AFTER THE SCROLL
             list.selection(0).moveSelection(19);
             list.layout(10, 10);
-            assertFalse(list.children().isEmpty());
+            assertFalse(list.children().isEmpty(), "the scrolled window holds rows");
             for (final Element<?> row: list.children()) {
                 assertFalse(first.contains(row), "a row of the first window is still a child");
-                assertEquals(192, row.measuredWidth());
+                assertEquals(192, row.measuredWidth(), "a joining row leaves the channel too");
             }
         }
 
@@ -257,7 +262,7 @@ public class ListViewInteractionTest {
                     .items(List.of("first", "second")).size(200, 80);
             fits.measure(200, 80);
             fits.layout(0, 0);
-            for (final Element<?> row: fits.children()) assertEquals(200, row.measuredWidth());
+            for (final Element<?> row: fits.children()) assertEquals(200, row.measuredWidth(), "two rows fit the 80 px viewport");
 
             final ListView<String> padded = list(new ArrayList<>()).padding(new Spacing(0, 6, 0, 0));
             padded.measure(200, 80);
@@ -277,12 +282,12 @@ public class ListViewInteractionTest {
                     .items(List.of("first", "second", "third")).size(200, 80);
             list.measure(200, 80);
             list.layout(0, 0);
-            for (final Element<?> row: list.children()) assertEquals(190, row.measuredWidth());
+            for (final Element<?> row: list.children()) assertEquals(190, row.measuredWidth(), "three 40 px rows overflow 80 px");
 
             list.height(120);
             list.measure(200, 120);
             list.layout(0, 0);
-            for (final Element<?> row: list.children()) assertEquals(200, row.measuredWidth());
+            for (final Element<?> row: list.children()) assertEquals(200, row.measuredWidth(), "the same rows fit 120 px");
         }
     }
 
@@ -300,11 +305,11 @@ public class ListViewInteractionTest {
             list.measure(200, 80);
             list.layout(0, 0);
             assertEquals(0, list.children().size());
-            assertFalse(list.dispatchHover(20, 20));
-            assertFalse(list.dispatchClick(20, 20));
-            assertNull(list.dispatchPress(20, 20));
+            assertFalse(list.dispatchHover(20, 20), "no row takes the hover");
+            assertFalse(list.dispatchClick(20, 20), "no row takes the click");
+            assertNull(list.dispatchPress(20, 20), "no row takes the press");
             list.moveSelection(1);
-            assertEquals(-1, list.selectedIndex());
+            assertEquals(-1, list.selectedIndex(), "the keyboard selects nothing");
             assertEquals(List.of(), activations);
         }
 
@@ -317,7 +322,7 @@ public class ListViewInteractionTest {
             list.measure(200, 0);
             list.layout(10, 10);
             assertTrue(list.children().size() <= 1, "children: " + list.children().size());
-            assertFalse(list.dispatchClick(20, 10));
+            assertFalse(list.dispatchClick(20, 10), "a list with no height takes no click");
             assertEquals(List.of(), activations);
         }
 
@@ -363,15 +368,15 @@ public class ListViewInteractionTest {
             list.layout(0, 0);
             assertTrue(list.children().contains(focused), "the focused row left the window");
             assertTrue(focused.top() + focused.measuredHeight() <= 0, "the focused row is laid out where it really sits");
-            assertTrue(list.textInputActive());
+            assertTrue(list.textInputActive(), "the list reports the focused input");
 
-            assertTrue(list.dispatchKey(65, 1));
-            assertTrue(list.dispatchChar('x'));
+            assertTrue(list.dispatchKey(GLFW_KEY_A, GLFW_PRESS), "the focused row takes the key");
+            assertTrue(list.dispatchChar('x'), "the focused row takes the character");
             assertEquals(List.of("key", "char"), focused.events);
             assertFalse(list.dispatchClick(20, -20), "a point above the viewport must not reach the out-of-view row");
             list.clearFocus();
-            assertFalse(focused.focused());
-            assertFalse(list.textInputActive());
+            assertFalse(focused.focused(), "the blur reaches the out-of-view row");
+            assertFalse(list.textInputActive(), "no input is focused any more");
 
             list.update();
             list.measure(200, 80);
@@ -382,17 +387,15 @@ public class ListViewInteractionTest {
         @Test
         @DisplayName("rows past the viewport edges never capture a press")
         void pressOutsideTheViewport() {
-            final List<String> activations = new ArrayList<>();
             final ListView<String> list = new ListView<String>().rowHeight(40)
                     .rowFactory((item, index) -> new PressRow())
-                    .items(List.of("first", "second", "third", "fourth"))
-                    .onSelect((item, index) -> activations.add(item)).size(200, 80);
+                    .items(List.of("first", "second", "third", "fourth")).size(200, 80);
             list.update();
             list.measure(200, 80);
             list.layout(10, 10);
             assertTrue(list.children().size() > 2, "the window holds a margin row below the viewport");
-            assertNull(list.dispatchPress(20, 100));
-            assertNotNull(list.dispatchPress(20, 20));
+            assertNull(list.dispatchPress(20, 100), "the margin row takes no press");
+            assertNotNull(list.dispatchPress(20, 20), "a row in view takes the press");
         }
     }
 

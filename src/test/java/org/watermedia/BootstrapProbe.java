@@ -21,6 +21,11 @@ import java.util.function.Supplier;
 
 /** Exercises one WaterMedia load per process: the load is final, so every scenario gets its own JVM. */
 public final class BootstrapProbe {
+    private BootstrapProbe() {}
+
+    // ==========================================================================
+    // INTERNAL API
+    // ==========================================================================
     public static void main(final String[] arguments) throws Exception {
         final String scenario = arguments[0];
         final Path root = Path.of("").toAbsolutePath();
@@ -46,6 +51,7 @@ public final class BootstrapProbe {
     // ==========================================================================
     // AN INSTALLED BINARIES MODULE THAT CANNOT PROVISION ITS NATIVES ENDS THE LOAD BEFORE THE MODULES BEHIND IT
     private static void nativeFailure(final Path root) throws Exception {
+        // A FILE WHERE THE INSTALL DIRECTORY MUST GO MAKES THE FFMPEG INSTALL FAIL
         Files.createDirectories(root.resolve("temp"));
         Files.writeString(root.resolve("temp/ffmpeg"), "untrusted native base");
         try {
@@ -97,11 +103,13 @@ public final class BootstrapProbe {
             PlayerAPI.mrl("https://example.invalid/clip.mp4");
             throw new AssertionError("A server resolved media");
         } catch (final IllegalStateException expected) {}
+        // THE SYNC CLOCK IS THE ONE PLAYER A SERVER HOSTS
         final ServerMediaPlayer player = PlayerAPI.serverPlayer();
         player.release();
         requireFinal(root);
     }
 
+    // THE BUNDLED FFMPEG INSTALLS INTO ITS VERIFIED GENERATION AND THE EXECUTABLES GET THEIR CACHE PATHS
     private static void nativeLoad(final Path root) {
         WaterMedia.start("PROBE", root.resolve("temp"), root, true);
         if (!WaterMedia.loaded() || !CodecsAPI.ffmpegLoaded() || CodecsAPI.ffmpegError()) throw new AssertionError("Required FFmpeg did not load");

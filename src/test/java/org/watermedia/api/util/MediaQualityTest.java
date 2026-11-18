@@ -12,37 +12,39 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
-/** Verifies {@link MediaQuality} classification from dimensions and the closest-available lookup. */
+/** Verifies {@link MediaQuality}: the bucket of a size by its smallest known side and the closest available quality to a preferred one. */
 @DisplayName("MediaQuality")
 public class MediaQualityTest {
+
     // ==========================================================================
     // NESTED TYPES
     // ==========================================================================
+
     @Nested
     @DisplayName("of(width, height)")
-    class OfDimensionsTests {
+    class OfDimensions {
 
         @Test
         @DisplayName("1920x1080 maps to HIGH")
-        void hd1080() {
+        void fullHdIsHigh() {
             assertSame(MediaQuality.HIGH, MediaQuality.of(1920, 1080));
         }
 
         @Test
         @DisplayName("3840x2160 maps to HIGHEST")
-        void uhd2160() {
+        void uhdIsHighest() {
             assertSame(MediaQuality.HIGHEST, MediaQuality.of(3840, 2160));
         }
 
         @Test
         @DisplayName("640x360 maps to LOW")
-        void sd360() {
+        void nhdIsLow() {
             assertSame(MediaQuality.LOW, MediaQuality.of(640, 360));
         }
 
         @Test
-        @DisplayName("0x0 maps to UNKNOWN")
-        void allZero() {
+        @DisplayName("a size without a known side, 0x0 or -1x-1, maps to UNKNOWN")
+        void unknownSizes() {
             assertSame(MediaQuality.UNKNOWN, MediaQuality.of(0, 0));
             assertSame(MediaQuality.UNKNOWN, MediaQuality.of(-1, -1));
         }
@@ -58,76 +60,74 @@ public class MediaQualityTest {
         }
 
         @Test
-        @DisplayName("negative width is treated as missing dimension")
+        @DisplayName("a negative width counts as unknown, so the height decides")
         void negativeWidthFallsBackToHeight() {
-            // WIDTH <= 0 SO HEIGHT IS USED DIRECTLY
             assertSame(MediaQuality.HIGH, MediaQuality.of(-5, 1080));
         }
 
         @Test
-        @DisplayName("zero height falls back to width")
+        @DisplayName("a zero height counts as unknown, so the width decides")
         void zeroHeightFallsBackToWidth() {
             assertSame(MediaQuality.MEDIUM, MediaQuality.of(720, 0));
         }
 
         @Test
-        @DisplayName("portrait uses the smaller dimension")
+        @DisplayName("portrait uses the smaller side")
         void portraitUsesSmallerSide() {
-            // THE SMALLER SIDE, 1080, DECIDES: HIGH
             assertSame(MediaQuality.HIGH, MediaQuality.of(1080, 1920));
         }
 
         @Test
-        @DisplayName("of(int) delegates to of(int, int) with same width/height")
-        void singleResolution() {
-            assertEquals(MediaQuality.of(1080, 1080), MediaQuality.of(1080));
+        @DisplayName("of(resolution) buckets a single side: 1080 is HIGH and 500 is LOWISH")
+        void singleSide() {
+            assertSame(MediaQuality.HIGH, MediaQuality.of(1080));
+            assertSame(MediaQuality.LOWISH, MediaQuality.of(500));
         }
     }
 
     @Nested
-    @DisplayName("closest(set, preferred)")
-    class ClosestTests {
+    @DisplayName("closest(available, preferred)")
+    class Closest {
 
         @Test
-        @DisplayName("returns preferred when available")
-        void exactMatch() {
+        @DisplayName("returns the preferred quality when it is available")
+        void preferredAvailable() {
             final Set<MediaQuality> available = EnumSet.of(MediaQuality.LOWISH, MediaQuality.HIGH, MediaQuality.MEDIUM);
             assertSame(MediaQuality.HIGH, MediaQuality.closest(available, MediaQuality.HIGH));
         }
 
         @Test
-        @DisplayName("returns closest available when preferred is missing")
+        @DisplayName("a missing preferred quality picks the nearest available one, the lower on a tie")
         void picksClosestNeighbour() {
+            // PREFERRED HIGH: MEDIUM AND HIGHER ARE BOTH ONE STEP AWAY
             final Set<MediaQuality> available = EnumSet.of(MediaQuality.MEDIUM, MediaQuality.HIGHER);
-            // PREFERRED HIGH: MEDIUM AND HIGHER ARE BOTH ONE STEP AWAY, AND A TIE BREAKS TOWARD THE LOWER QUALITY
             assertSame(MediaQuality.MEDIUM, MediaQuality.closest(available, MediaQuality.HIGH));
-        }
-
-        @Test
-        @DisplayName("empty set returns null")
-        void emptyReturnsNull() {
-            assertNull(MediaQuality.closest(EnumSet.noneOf(MediaQuality.class), MediaQuality.HIGH));
-        }
-
-        @Test
-        @DisplayName("null set returns null")
-        void nullReturnsNull() {
-            assertNull(MediaQuality.closest(null, MediaQuality.HIGH));
-        }
-
-        @Test
-        @DisplayName("null preferred quality is rejected")
-        void nullPreferredRejected() {
-            final IllegalArgumentException failure = assertThrows(IllegalArgumentException.class,
-                    () -> MediaQuality.closest(EnumSet.of(MediaQuality.MEDIUM), null));
-            assertEquals("(wm_err:0410) Failed to pick the quality due to null preferred quality", failure.getMessage());
         }
 
         @Test
         @DisplayName("the only available quality is picked however far it sits from the preferred one")
         void farthestNeighbour() {
-            final Set<MediaQuality> available = EnumSet.of(MediaQuality.LOWEST);
-            assertSame(MediaQuality.LOWEST, MediaQuality.closest(available, MediaQuality.ULTRA_8K));
+            assertSame(MediaQuality.LOWEST, MediaQuality.closest(EnumSet.of(MediaQuality.LOWEST), MediaQuality.ULTRA_8K));
+        }
+
+        @Test
+        @DisplayName("an empty set returns null")
+        void emptySetReturnsNull() {
+            assertNull(MediaQuality.closest(EnumSet.noneOf(MediaQuality.class), MediaQuality.HIGH));
+        }
+
+        @Test
+        @DisplayName("a null set returns null")
+        void nullSetReturnsNull() {
+            assertNull(MediaQuality.closest(null, MediaQuality.HIGH));
+        }
+
+        @Test
+        @DisplayName("a null preferred quality is rejected")
+        void nullPreferredRejected() {
+            final IllegalArgumentException failure = assertThrows(IllegalArgumentException.class,
+                    () -> MediaQuality.closest(EnumSet.of(MediaQuality.MEDIUM), null));
+            assertEquals("(wm_err:0410) Failed to pick the quality due to null preferred quality", failure.getMessage());
         }
     }
 }

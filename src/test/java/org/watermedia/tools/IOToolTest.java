@@ -27,24 +27,35 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.abort;
 
-/** Verifies {@link IOTool}'s platform identification, verified native files, bounded stream reads and resource helpers. */
+/**
+ * Verifies {@link IOTool}: the operating system token, verified native files (digests, symbolic links, generation
+ * pointers), bounded stream reads (cap, preallocation, total deadline), quiet closing and the bundled resources
+ * (jar reads, web schemes, shader includes, jar versions).
+ */
 @DisplayName("IOTool")
 public class IOToolTest {
+
+    private static final long DEADLINE_MS = 300L;
+    private static final long TRICKLE_STEP_MS = 20L;
+    private static final int TRICKLE_BYTES = 200;
+
     // ==========================================================================
     // NESTED TYPES
     // ==========================================================================
+
     @Nested
     @DisplayName("Platform")
     class Platform {
 
         @Test
-        @DisplayName("os() maps Darwin and Mac OS X to macos and leaves unsupported kernels unclassified")
-        void nativeOperatingSystemsDoNotMisclassifyDarwinOrUnsupportedKernels() {
+        @DisplayName("os() names macos for Darwin and Mac OS X, windows and linux for theirs, and null for any other kernel")
+        void osMapsKnownKernelsOnly() {
+            // os.name IS PROCESS-WIDE, SO THE finally PUTS IT BACK WHATEVER FAILS
             final String previous = System.getProperty("os.name");
             try {
                 for (final String name: new String[] { "Darwin", "Mac OS X" }) {
                     System.setProperty("os.name", name);
-                    assertEquals("macos", IOTool.os());
+                    assertEquals("macos", IOTool.os(), name);
                 }
                 System.setProperty("os.name", "Windows 10");
                 assertEquals("windows", IOTool.os());
@@ -52,11 +63,10 @@ public class IOToolTest {
                 assertEquals("linux", IOTool.os());
                 for (final String name: new String[] { "AIX", "FreeBSD", "Unix", "unknown" }) {
                     System.setProperty("os.name", name);
-                    assertNull(IOTool.os());
+                    assertNull(IOTool.os(), name);
                 }
             } finally {
-                if (previous == null) System.clearProperty("os.name");
-                else System.setProperty("os.name", previous);
+                System.setProperty("os.name", previous);
             }
         }
     }
@@ -66,14 +76,15 @@ public class IOToolTest {
     class NativeFiles {
 
         @Test
-        @DisplayName("hash verification accepts any case and keeps a mismatched file for its owner")
+        @DisplayName("verifySha256 accepts a digest in any case, keeps a mismatched file for its owner and rejects a malformed digest")
         void hashVerificationKeepsMismatchedFilesForTheirOwner(@TempDir final Path directory) throws IOException {
             final Path file = Files.writeString(directory.resolve("binary"), "original");
-            final String hash = IOTool.sha256(file);
-            IOTool.verifySha256(file, hash.toUpperCase(Locale.ROOT));
-            assertThrows(IOException.class, () -> IOTool.verifySha256(file, "0".repeat(64)));
-            assertEquals("original", Files.readString(file));
-            assertThrows(IOException.class, () -> IOTool.verifySha256(file, "invalid"));
+            IOTool.verifySha256(file, IOTool.sha256(file).toUpperCase(Locale.ROOT));
+            assertEquals("(wm_err:0149) Failed to verify the file due to SHA-256 mismatch: binary",
+                    assertThrows(IOException.class, () -> IOTool.verifySha256(file, "0".repeat(64))).getMessage());
+            assertEquals("original", Files.readString(file), "a mismatched file stays as it was");
+            assertEquals("(wm_err:0148) Failed to read the SHA-256 digest due to missing or invalid value",
+                    assertThrows(IOException.class, () -> IOTool.verifySha256(file, "invalid")).getMessage());
         }
 
         @Test
@@ -91,21 +102,19 @@ public class IOToolTest {
         }
 
         @Test
-        @DisplayName("generation pointers stay inside the storage directory")
+        @DisplayName("generation pointers name only a direct child of the storage directory")
         void generationPointersStayInsideTheStorageDirectory(@TempDir final Path directory) throws IOException {
-            final Path generation = Files.createDirectory(directory.resolve("fresh"));
-            IOTool.publishGeneration(directory, generation);
-            assertEquals(generation, IOTool.currentGeneration(directory));
-            Files.writeString(directory.resolve("current"), "../outside");
-            assertNull(IOTool.currentGeneration(directory));
-            Files.writeString(directory.resolve("current"), directory.toAbsolutePath().toString());
-            assertNull(IOTool.currentGeneration(directory), "an absolute path is no generation name");
-            final Path outside = Files.createDirectory(directory.getParent().resolve("outside-" + System.nanoTime()));
-            try {
-                assertThrows(IOException.class, () -> IOTool.publishGeneration(directory, outside));
-            } finally {
-                Files.delete(outside);
-            }
+            // THE STORAGE SITS ONE LEVEL DOWN, SO A REAL DIRECTORY WAITS RIGHT OUTSIDE IT
+            final Path storage = Files.createDirectory(directory.resolve("storage"));
+            final Path outside = Files.createDirectory(directory.resolve("outside"));
+            final Path generation = Files.createDirectory(storage.resolve("fresh"));
+            IOTool.publishGeneration(storage, generation);
+            assertEquals(generation, IOTool.currentGeneration(storage));
+            Files.writeString(storage.resolve("current"), "../outside");
+            assertNull(IOTool.currentGeneration(storage), "a relative path climbing out is no generation name");
+            Files.writeString(storage.resolve("current"), outside.toAbsolutePath().toString());
+            assertNull(IOTool.currentGeneration(storage), "an absolute path is no generation name");
+            assertThrows(IOException.class, () -> IOTool.publishGeneration(storage, outside), "a directory outside the storage is never published");
         }
     }
 
@@ -118,7 +127,8 @@ public class IOToolTest {
         void readLimitedCap() throws IOException {
             final byte[] data = "hello".getBytes(StandardCharsets.UTF_8);
             assertArrayEquals(data, IOTool.readLimited(new ByteArrayInputStream(data), 100, -1L, 0L));
-            assertThrows(IOException.class, () -> IOTool.readLimited(new ByteArrayInputStream(new byte[100]), 10, -1L, 0L));
+            assertEquals("(wm_err:0142) Failed to read input due to exceeded limit: 100 > 10 bytes",
+                    assertThrows(IOException.class, () -> IOTool.readLimited(new ByteArrayInputStream(new byte[100]), 10, -1L, 0L)).getMessage());
         }
 
         @Test
@@ -133,33 +143,13 @@ public class IOToolTest {
         @Test
         @DisplayName("readLimited stops a slow stream at its total deadline")
         void readLimitedDeadline() throws IOException {
-            // EACH READ RETURNS ONE BYTE AFTER 20 MS: NEVER STUCK, BUT 200 BYTES WOULD TAKE FOUR SECONDS
-            final class Trickle extends InputStream {
-                private int left = 200;
-
-                @Override
-                public int read() throws IOException {
-                    if (this.left-- <= 0) return -1;
-                    try { Thread.sleep(20); }
-                    catch (final InterruptedException e) { throw new InterruptedIOException(); }
-                    return 'x';
-                }
-
-                @Override
-                public int read(final byte[] b, final int off, final int len) throws IOException {
-                    final int value = this.read();
-                    if (value < 0) return -1;
-                    b[off] = (byte) value;
-                    return 1;
-                }
-            }
             try (final Trickle slow = new Trickle()) {
                 final long start = System.nanoTime();
-                final IOException failure = assertThrows(IOException.class, () -> IOTool.readLimited(slow, 1_024, -1L, 300L));
+                final IOException failure = assertThrows(IOException.class, () -> IOTool.readLimited(slow, 1_024, -1L, DEADLINE_MS));
                 final long elapsedMs = (System.nanoTime() - start) / 1_000_000L;
-                assertTrue(failure.getMessage().contains("deadline"), failure.getMessage());
-                assertTrue(elapsedMs >= 300L, "Stopped before the deadline: " + elapsedMs + " ms");
-                assertTrue(slow.left > 0, "The whole stream was read instead of stopping at the deadline");
+                assertTrue(failure.getMessage().startsWith("(wm_err:0141) Failed to read input due to exceeded deadline: " + DEADLINE_MS + " ms after "), failure.getMessage());
+                assertTrue(elapsedMs >= DEADLINE_MS, "stopped before the deadline: " + elapsedMs + " ms");
+                assertTrue(slow.left > 0, "the whole stream was read instead of stopping at the deadline");
             }
         }
 
@@ -168,7 +158,7 @@ public class IOToolTest {
         void closeQuietly() {
             final boolean[] closed = new boolean[1];
             IOTool.closeQuietly(() -> closed[0] = true);
-            assertTrue(closed[0]);
+            assertTrue(closed[0], "the closeable was closed");
             IOTool.closeQuietly(() -> { throw new IOException("ignored"); });
             IOTool.closeQuietly(null);
         }
@@ -182,7 +172,7 @@ public class IOToolTest {
         @DisplayName("jarRead throws for a missing resource and web accepts only http and https")
         void jarReadAndWeb() throws IOException {
             assertThrows(FileNotFoundException.class, () -> IOTool.jarRead("missing/" + System.nanoTime() + ".json"));
-            assertFalse(IOTool.jarRead("org/watermedia/tools/IOTool.class").isEmpty());
+            assertFalse(IOTool.jarRead("org/watermedia/tools/IOTool.class").isEmpty(), "a bundled class reads back");
             assertTrue(IOTool.web(URI.create("http://a.test/")));
             assertTrue(IOTool.web(URI.create("HTTPS://a.test/")));
             assertFalse(IOTool.web(URI.create("file:///x")));
@@ -214,6 +204,27 @@ public class IOToolTest {
         void jarVersionPerAnchor() {
             assertEquals("unknown", IOTool.jarVersion(IOToolTest.class), "a classes-dir run ships no manifest");
             assertNotEquals("unknown", IOTool.jarVersion(Test.class), "a class from a jar reports that jar's version");
+        }
+    }
+
+    // EACH READ RETURNS ONE BYTE AFTER A SHORT PAUSE: NEVER STUCK, BUT THE WHOLE STREAM TAKES FOUR SECONDS
+    private static final class Trickle extends InputStream {
+        private int left = TRICKLE_BYTES;
+
+        @Override
+        public int read() throws IOException {
+            if (this.left-- <= 0) return -1;
+            try { Thread.sleep(TRICKLE_STEP_MS); }
+            catch (final InterruptedException e) { throw new InterruptedIOException(); }
+            return 'x';
+        }
+
+        @Override
+        public int read(final byte[] b, final int off, final int len) throws IOException {
+            final int value = this.read();
+            if (value < 0) return -1;
+            b[off] = (byte) value;
+            return 1;
         }
     }
 }

@@ -144,8 +144,8 @@ public class ChunkContractTest {
             assertArrayEquals(hist.frequencies(), HIST.read(envelope(hist), 3).frequencies());
 
             // SAME BYTES UNDER ANOTHER COLOR TYPE OR PALETTE: THE LENGTH RULE FOLLOWS THE FORWARDED ARGUMENT
-            assertThrows(CodecException.class, () -> BKGD.read(envelope(gray), 2));
-            assertThrows(CodecException.class, () -> HIST.read(envelope(hist), 4));
+            assertThrows(CodecException.class, () -> BKGD.read(envelope(gray), 2), "a gray bKGD under truecolor");
+            assertThrows(CodecException.class, () -> HIST.read(envelope(hist), 4), "a 3-entry hIST for a 4-entry palette");
         }
 
         @Test
@@ -204,25 +204,25 @@ public class ChunkContractTest {
         @Test
         @DisplayName("Rejects empty keywords and names")
         void rejectsEmptyNames() {
-            assertThrows(CodecException.class, () -> TEXT.read(envelope(TEXT.SIGNATURE, latin1("\0value"))));
-            assertThrows(CodecException.class, () -> ZTXT.read(envelope(ZTXT.SIGNATURE, latin1("\0\0x"))));
-            assertThrows(CodecException.class, () -> ITXT.read(envelope(ITXT.SIGNATURE, latin1("\0\0\0\0\0text"))));
-            assertThrows(CodecException.class, () -> ICCP.read(envelope(ICCP.SIGNATURE, latin1("\0\0x"))));
-            assertThrows(CodecException.class, () -> SPLT.read(envelope(SPLT.SIGNATURE, latin1("\0\b"))));
+            assertThrows(CodecException.class, () -> TEXT.read(envelope(TEXT.SIGNATURE, latin1("\0value"))), "tEXt");
+            assertThrows(CodecException.class, () -> ZTXT.read(envelope(ZTXT.SIGNATURE, latin1("\0\0x"))), "zTXt");
+            assertThrows(CodecException.class, () -> ITXT.read(envelope(ITXT.SIGNATURE, latin1("\0\0\0\0\0text"))), "iTXt");
+            assertThrows(CodecException.class, () -> ICCP.read(envelope(ICCP.SIGNATURE, latin1("\0\0x"))), "iCCP");
+            assertThrows(CodecException.class, () -> SPLT.read(envelope(SPLT.SIGNATURE, latin1("\0\b"))), "sPLT");
         }
 
         @Test
         @DisplayName("Rejects an unknown zTXt or iCCP compression method")
         void rejectsUnknownCompressionMethod() {
-            assertThrows(CodecException.class, () -> ZTXT.read(envelope(ZTXT.SIGNATURE, latin1("Comment\0\1x"))));
-            assertThrows(CodecException.class, () -> ICCP.read(envelope(ICCP.SIGNATURE, latin1("sRGB\0\1x"))));
+            assertThrows(CodecException.class, () -> ZTXT.read(envelope(ZTXT.SIGNATURE, latin1("Comment\0\1x"))), "zTXt");
+            assertThrows(CodecException.class, () -> ICCP.read(envelope(ICCP.SIGNATURE, latin1("sRGB\0\1x"))), "iCCP");
         }
 
         @Test
         @DisplayName("Requires the iTXt language tag and translated keyword terminators")
         void requiresItxtTerminators() {
-            assertThrows(CodecException.class, () -> ITXT.read(envelope(ITXT.SIGNATURE, latin1("Title\0\0\0en"))));
-            assertThrows(CodecException.class, () -> ITXT.read(envelope(ITXT.SIGNATURE, latin1("Title\0\0\0en\0kw"))));
+            assertThrows(CodecException.class, () -> ITXT.read(envelope(ITXT.SIGNATURE, latin1("Title\0\0\0en"))), "no language tag terminator");
+            assertThrows(CodecException.class, () -> ITXT.read(envelope(ITXT.SIGNATURE, latin1("Title\0\0\0en\0kw"))), "no translated keyword terminator");
         }
 
         @Test
@@ -234,9 +234,9 @@ public class ChunkContractTest {
         @Test
         @DisplayName("Rejects fixed-layout chunks with a wrong length or value")
         void rejectsWrongFixedLayout() {
-            assertThrows(CodecException.class, () -> IHDR.read(envelope(IHDR.SIGNATURE, new byte[IHDR.LENGTH - 1])));
-            assertThrows(CodecException.class, () -> GAMA.read(envelope(GAMA.SIGNATURE, new byte[GAMA.LENGTH])));
-            assertThrows(CodecException.class, () -> FCTL.read(envelope(new FCTL(1, 1, 1, 0, 0, (short) 0, (short) 0, (byte) 0, (byte) 2))));
+            assertThrows(CodecException.class, () -> IHDR.read(envelope(IHDR.SIGNATURE, new byte[IHDR.LENGTH - 1])), "a short IHDR");
+            assertThrows(CodecException.class, () -> GAMA.read(envelope(GAMA.SIGNATURE, new byte[GAMA.LENGTH])), "a zero gamma");
+            assertThrows(CodecException.class, () -> FCTL.read(envelope(new FCTL(1, 1, 1, 0, 0, (short) 0, (short) 0, (byte) 0, (byte) 2))), "fcTL blend op 2");
         }
 
         @Test
@@ -258,21 +258,21 @@ public class ChunkContractTest {
             final TEXT text = new TEXT(TEXT.KEYWORD_TITLE, "value");
             final CodecException failure = assertThrows(CodecException.class, () -> ZTXT.read(envelope(text)));
             assertEquals("(wm_err:4444) Failed to read the chunk due to unexpected type: expected zTXt, got tEXt", failure.getMessage());
-            assertThrows(CodecException.class, () -> ITXT.read(envelope(text)));
-            assertThrows(CodecException.class, () -> ICCP.read(envelope(text)));
-            assertThrows(CodecException.class, () -> SRGB.read(envelope(text)));
-            assertThrows(CodecException.class, () -> BKGD.read(envelope(text), 0));
-            assertThrows(CodecException.class, () -> HIST.read(envelope(text), 1));
+            assertThrows(CodecException.class, () -> ITXT.read(envelope(text)), "iTXt");
+            assertThrows(CodecException.class, () -> ICCP.read(envelope(text)), "iCCP");
+            assertThrows(CodecException.class, () -> SRGB.read(envelope(text)), "sRGB");
+            assertThrows(CodecException.class, () -> BKGD.read(envelope(text), 0), "bKGD");
+            assertThrows(CodecException.class, () -> HIST.read(envelope(text), 1), "hIST");
         }
 
         @Test
         @DisplayName("Rejects a wrong chunk type passed to convert as a caller bug")
         void rejectsWrongType() {
             final PngChunk text = new TEXT(TEXT.KEYWORD_TITLE, "value").toChunk();
-            assertThrows(IllegalArgumentException.class, () -> ZTXT.convert(text));
-            assertThrows(IllegalArgumentException.class, () -> ITXT.convert(text));
-            assertThrows(IllegalArgumentException.class, () -> ICCP.convert(text));
-            assertThrows(IllegalArgumentException.class, () -> SRGB.convert(text));
+            assertThrows(IllegalArgumentException.class, () -> ZTXT.convert(text), "zTXt");
+            assertThrows(IllegalArgumentException.class, () -> ITXT.convert(text), "iTXt");
+            assertThrows(IllegalArgumentException.class, () -> ICCP.convert(text), "iCCP");
+            assertThrows(IllegalArgumentException.class, () -> SRGB.convert(text), "sRGB");
         }
     }
 

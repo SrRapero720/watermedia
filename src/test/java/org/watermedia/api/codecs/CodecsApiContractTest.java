@@ -17,14 +17,14 @@ import java.util.NoSuchElementException;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Verifies the {@link CodecsAPI} contract: format detection, header consumption on the caller's buffer, the
  * overloads and their argument checks, the requested layout, the iterator and close contract every
- * {@link ImageReader} shares and empty metadata.
+ * {@link ImageReader} shares and the {@link ImageMetadata#EMPTY} metadata of a reader that read none.
  */
 @DisplayName("CodecsAPI contract")
 public class CodecsApiContractTest {
@@ -61,7 +61,7 @@ public class CodecsApiContractTest {
                     new Fixture("GIF", Fixtures.GIF_ANIMATED, 6),
                     new Fixture("WEBP", Fixtures.WEBP_LOSSLESS, 12),
                     new Fixture("NETPBM", Fixtures.NETPBM_PPM, 2),
-                    new Fixture("JPEG", Fixtures.JPEG_BASELINE, 2))) {
+                    new Fixture("JPEG", Fixtures.JPEG_GRAY, 2))) {
                 final ByteBuffer data = ByteBuffer.wrap(Fixtures.readAll(fixture.path()));
                 try (final ImageReader reader = CodecsAPI.reader(data)) {
                     assertEquals(fixture.name(), reader.name());
@@ -76,8 +76,8 @@ public class CodecsApiContractTest {
         void refusedBodyRestoresPosition() {
             // A PNG SIGNATURE FOLLOWED BY GARBAGE: THE HEADER MATCHES, THE BODY DOES NOT
             final ByteBuffer source = ByteBuffer.wrap(new byte[] { (byte) 0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A, 1, 2, 3, 4 });
-            assertThrows(IOException.class, () -> CodecsAPI.reader(source));
-            assertEquals(0, source.position());
+            assertThrows(CodecException.class, () -> CodecsAPI.reader(source));
+            assertEquals(0, source.position(), "the refusal puts the caller's buffer back before the PNG signature");
         }
     }
 
@@ -90,9 +90,9 @@ public class CodecsApiContractTest {
         void readAllMatchesReader() throws Exception {
             try (final ImageReader reader = CodecsAPI.reader(ByteBuffer.wrap(Fixtures.readAll(Fixtures.PNG_ANIMATED)))) {
                 final ImageData image = reader.readAll();
-                assertEquals(reader.width(), image.width());
-                assertEquals(reader.height(), image.height());
-                assertEquals(reader.frameCount(), image.frames().length);
+                assertEquals(reader.width(), image.width(), "image width");
+                assertEquals(reader.height(), image.height(), "image height");
+                assertEquals(reader.frameCount(), image.frames().length, "frame count");
             }
         }
 
@@ -103,9 +103,9 @@ public class CodecsApiContractTest {
             final ImageData fromArray = CodecsAPI.decode(bytes);
             final ImageData fromBuffer = CodecsAPI.decode(ByteBuffer.wrap(bytes));
             final ImageData fromStream = CodecsAPI.decode(new ByteArrayInputStream(bytes));
-            assertEquals(fromArray.frames().length, fromBuffer.frames().length);
-            assertEquals(fromArray.width(), fromStream.width());
-            assertEquals(fromArray.format(), fromStream.format());
+            assertEquals(fromArray.frames().length, fromBuffer.frames().length, "buffer decode frame count");
+            assertEquals(fromArray.width(), fromStream.width(), "stream decode width");
+            assertEquals(fromArray.format(), fromStream.format(), "stream decode layout");
 
             final ByteBuffer probe = ByteBuffer.wrap(bytes);
             assertEquals(MediaType.IMAGE, CodecsAPI.sniff(probe));
@@ -123,7 +123,7 @@ public class CodecsApiContractTest {
         @Test
         @DisplayName("A requested RGBA layout swaps red and blue on every pixel and survives reset() on every reader")
         void requestedLayoutSurvivesReset() throws Exception {
-            for (final Path fixture: List.of(Fixtures.PNG_STATIC, Fixtures.GIF_ANIMATED, Fixtures.WEBP_LOSSLESS, Fixtures.JPEG_BASELINE, Fixtures.NETPBM_PPM)) {
+            for (final Path fixture: List.of(Fixtures.PNG_STATIC, Fixtures.GIF_ANIMATED, Fixtures.WEBP_LOSSLESS, Fixtures.JPEG_GRAY, Fixtures.NETPBM_PPM)) {
                 final byte[] bytes = Fixtures.readAll(fixture);
                 final byte[] swapped;
                 try (final ImageReader reference = CodecsAPI.reader(ByteBuffer.wrap(bytes), PixelFormat.BGRA)) {
@@ -147,33 +147,32 @@ public class CodecsApiContractTest {
         @Test
         @DisplayName("next() past the last frame throws NoSuchElementException, and a closed reader throws IllegalStateException but keeps its descriptors")
         void endAndClose() throws IOException {
-            final ImageReader reader = CodecsAPI.reader(ByteBuffer.wrap(Fixtures.readAll(Fixtures.PNG_STATIC)));
-            assertEquals(0L, reader.delay(), "no frame delivered yet");
-            reader.next();
-            assertFalse(reader.hasNext());
-            assertThrows(NoSuchElementException.class, reader::next);
-            reader.close();
-            reader.close();
-            assertThrows(IllegalStateException.class, reader::hasNext);
-            assertThrows(IllegalStateException.class, reader::next);
-            assertThrows(IllegalStateException.class, reader::reset);
-            assertThrows(IllegalStateException.class, reader::readAll);
-            assertEquals(64, reader.width(), "descriptors stay readable after close");
+            // CLOSING TWICE INSIDE THE BLOCK PROVES close() IDEMPOTENT; THE BLOCK'S OWN CLOSE IS A THIRD, STILL HARMLESS
+            try (final ImageReader reader = CodecsAPI.reader(ByteBuffer.wrap(Fixtures.readAll(Fixtures.PNG_STATIC)))) {
+                assertEquals(0L, reader.delay(), "no frame delivered yet");
+                reader.next();
+                assertFalse(reader.hasNext(), "a static PNG holds one frame");
+                assertThrows(NoSuchElementException.class, reader::next);
+                reader.close();
+                reader.close();
+                assertThrows(IllegalStateException.class, reader::hasNext);
+                assertThrows(IllegalStateException.class, reader::next);
+                assertThrows(IllegalStateException.class, reader::reset);
+                assertThrows(IllegalStateException.class, reader::readAll);
+                assertEquals(64, reader.width(), "descriptors stay readable after close");
+            }
         }
     }
 
     @Nested
-    @DisplayName("Metadata")
+    @DisplayName("Empty metadata")
     class EmptyMetadata {
 
         @Test
-        @DisplayName("Empty metadata: scalar fields null, collection fields empty (not null)")
-        void emptyMetadataFields() throws Exception {
-            try (final ImageReader reader = CodecsAPI.reader(ByteBuffer.wrap(Fixtures.readAll(Fixtures.JPEG_BASELINE)))) {
-                final ImageMetadata metadata = reader.metadata();
-                assertNull(metadata.title());
-                assertTrue(metadata.authors().isEmpty());
-                assertTrue(metadata.values().isEmpty());
+        @DisplayName("A reader that read no metadata hands out the EMPTY singleton")
+        void readerWithoutMetadataGivesEmpty() throws Exception {
+            try (final ImageReader reader = CodecsAPI.reader(ByteBuffer.wrap(Fixtures.readAll(Fixtures.JPEG_GRAY)))) {
+                assertSame(ImageMetadata.EMPTY, reader.metadata(), "the grayscale JPEG fixture carries no metadata");
             }
         }
     }

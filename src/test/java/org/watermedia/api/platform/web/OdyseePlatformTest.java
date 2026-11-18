@@ -211,7 +211,7 @@ public class OdyseePlatformTest {
                 "https://odysee.com/@DTV:9/%D0%A1%D0%B0%D0%BC%D1%8B%D0%B9-%D0%BC%D1%83%D0%BB%D1%8C%D1%82:a | lbry://@DTV#9/Самый-мульт#a"
         })
         @DisplayName("Canonical, embed and download URLs map to the lbry claim URI")
-        void testClaimUris(final String url, final String expected) {
+        void pageUrlsMapToClaimUris(final String url, final String expected) {
             assertEquals(expected, OdyseePlatform.claimUri(URI.create(url)));
         }
 
@@ -222,13 +222,13 @@ public class OdyseePlatformTest {
                 "https://odysee.com/$/embed/", "https://odysee.com/@ch:1/name:2/extra", "https://odysee.com/name/not-a-claim-id"
         })
         @DisplayName("Channels, playlists and other pages name no stream")
-        void testNoClaim(final String url) {
+        void otherPagesNameNoClaim(final String url) {
             assertNull(OdyseePlatform.claimUri(URI.create(url)));
         }
 
         @Test
-        @DisplayName("A channel URL is refused before any request")
-        void testChannelUrlUnsupported() {
+        @DisplayName("A channel URL is refused with its code before any request")
+        void channelUrlIsRefusedBeforeAnyRequest() {
             final PlatformException e = assertThrows(PlatformException.class,
                     () -> OdyseePlatformTest.this.platform.resolve(URI.create("https://odysee.com/@IsaacElite10:8")));
             assertTrue(e.getMessage().startsWith("Odysee: (wm_err:2020) Failed to resolve "), e.getMessage());
@@ -242,7 +242,7 @@ public class OdyseePlatformTest {
 
         @Test
         @DisplayName("A video resolves through resolve and get to the player URL with its size, metadata and Referer")
-        void testVideo() throws Exception {
+        void videoResolvesThroughResolveAndGet() throws Exception {
             final URI page = URI.create("https://odysee.com/@IsaacElite10:8/2026-05-06-21-36-32:5");
             final Resolution resolution = OdyseePlatformTest.this.platform.resolve(page);
 
@@ -265,8 +265,8 @@ public class OdyseePlatformTest {
         }
 
         @Test
-        @DisplayName("An audio claim is an AUDIO source without dimensions")
-        void testAudio() throws Exception {
+        @DisplayName("An audio claim is an AUDIO source without dimensions, with its duration and channel title")
+        void audioClaimIsAudioSource() throws Exception {
             final Source source = OdyseePlatformTest.this.platform.resolve(URI.create("https://odysee.com/@LBRYFoundation:0/Episode-1:e")).sources().get(0);
             assertEquals(MediaType.AUDIO, source.type());
             assertEquals(0, source.qualities().get(0).width());
@@ -276,7 +276,7 @@ public class OdyseePlatformTest {
 
         @Test
         @DisplayName("A repost plays the shared claim and asks get for that claim's own URL")
-        void testRepost() throws Exception {
+        void repostPlaysSharedClaim() throws Exception {
             final Source source = OdyseePlatformTest.this.platform.resolve(URI.create("https://odysee.com/@Fan:1/share:2")).sources().get(0);
             assertEquals(OdyseePlatformTest.this.http.uri("/v6/streams/5d2af9ea0959b3938b6e0fbd2eacc550430b169f/b8e5ee.mp4"), source.qualities().get(0).uri());
             // get ON THE REPOST URL ITSELF ANSWERS "stream doesn't have source data"; THE SHARED CLAIM'S PERMANENT URL STREAMS
@@ -290,7 +290,7 @@ public class OdyseePlatformTest {
 
         @Test
         @DisplayName("A claim without a file resolves its channel's live HLS ladder with a TTL")
-        void testLive() throws Exception {
+        void liveClaimResolvesChannelLadder() throws Exception {
             final long before = System.currentTimeMillis();
             final Resolution resolution = OdyseePlatformTest.this.platform.resolve(URI.create("https://odysee.com/@RT:fd/livestream_RT:d"));
 
@@ -308,7 +308,7 @@ public class OdyseePlatformTest {
 
         @Test
         @DisplayName("A past livestream claim of a channel live on another claim has nothing to play")
-        void testEnded() {
+        void pastLivestreamHasNothingToPlay() {
             final PlatformException e = assertThrows(PlatformException.class,
                     () -> OdyseePlatformTest.this.platform.resolve(URI.create("https://odysee.com/@RT:fd/RTlivestream:8")));
             assertTrue(e.getMessage().contains("has ended"), e.getMessage());
@@ -316,7 +316,7 @@ public class OdyseePlatformTest {
 
         @Test
         @DisplayName("An offline channel fails instead of returning a dead source")
-        void testOffline() {
+        void offlineChannelFails() {
             final PlatformException e = assertThrows(PlatformException.class,
                     () -> OdyseePlatformTest.this.platform.resolve(URI.create("https://odysee.com/@Quiet:1/stream:2")));
             assertTrue(e.getMessage().contains("not live"), e.getMessage());
@@ -330,7 +330,7 @@ public class OdyseePlatformTest {
 
         @Test
         @DisplayName("A mature tag blocks the stream while mature content is off, before get")
-        void testMatureBlocked() {
+        void matureTagBlocksBeforeGet() {
             final PlatformException e = assertThrows(MatureContentException.class,
                     () -> OdyseePlatformTest.this.platform.resolve(URI.create("https://odysee.com/@Spicy:1/late-night:2")));
             assertTrue(e.getMessage().contains("Hentai"), e.getMessage());
@@ -339,7 +339,7 @@ public class OdyseePlatformTest {
 
         @Test
         @DisplayName("A mature tag is ignored while mature content is allowed")
-        void testMatureAllowed() throws Exception {
+        void matureTagIsIgnoredWhileAllowed() throws Exception {
             WaterMediaConfig.platforms.allowMatureContent = true;
             final Source source = OdyseePlatformTest.this.platform.resolve(URI.create("https://odysee.com/@Spicy:1/late-night:2")).sources().get(0);
             assertEquals(720, source.qualities().get(0).height());
@@ -347,16 +347,16 @@ public class OdyseePlatformTest {
 
         @Test
         @DisplayName("Paid content fails with its price instead of a source the player cannot open")
-        void testPaid() {
+        void paidContentFailsWithItsPrice() {
             final PlatformException e = assertThrows(PlatformException.class,
                     () -> OdyseePlatformTest.this.platform.resolve(URI.create("https://odysee.com/@Shop:1/premiere:2")));
-            assertFalse(e instanceof MatureContentException);
+            assertFalse(e instanceof MatureContentException, "Paid content is not a mature block");
             assertTrue(e.getMessage().contains("paid content (1 LBC)"), e.getMessage());
         }
 
         @Test
         @DisplayName("An unknown claim, a non-media file and a collection fail with a named reason")
-        void testNotPlayable() {
+        void unplayableClaimsFailWithAReason() {
             final PlatformException unknown = assertThrows(PlatformException.class,
                     () -> OdyseePlatformTest.this.platform.resolve(URI.create("https://odysee.com/@IsaacElite10:8/anything:1")));
             assertTrue(unknown.getMessage().contains("Could not find claim"), unknown.getMessage());

@@ -5,7 +5,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.zip.CRC32;
 import java.util.zip.Deflater;
 
-/** Builds hand-packed image streams: an append-only byte builder plus the PNG, zlib and RIFF/WebP chunk writers the codec tests share. */
+/** Builds hand-packed image streams: an append-only byte builder plus the PNG, zlib, RIFF/WebP and EXIF writers the codec tests share. */
 public final class ImageBytes {
     /** The 8-byte PNG file signature. */
     public static final byte[] PNG_SIGNATURE = { (byte) 0x89, 'P', 'N', 'G', '\r', '\n', 0x1A, '\n' };
@@ -99,6 +99,12 @@ public final class ImageBytes {
     /** Returns a VP8X payload: flags, three reserved bytes and the minus-one 24-bit canvas size. */
     public static byte[] vp8x(final int flags, final int width, final int height) {
         return new ImageBytes().u8(flags).fill(0, 3).le24(width - 1).le24(height - 1).bytes();
+    }
+
+    /** Returns a little-endian TIFF (the EXIF payload) whose IFD0 holds one entry: the orientation tag 0x0112, a SHORT. */
+    public static byte[] exif(final int orientation) {
+        // HEADER "II", 42 AND THE IFD0 OFFSET 8; ONE ENTRY (TAG, TYPE 3, COUNT 1, VALUE PADDED TO 4 BYTES); NO NEXT IFD
+        return new ImageBytes().ascii("II").le16(42).le32(8).le16(1).le16(0x0112).le16(3).le32(1).le16(orientation).le16(0).le32(0).bytes();
     }
 
     /** LSB-first bit writer, the packing VP8L reads every field in. */

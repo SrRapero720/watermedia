@@ -29,7 +29,6 @@ import org.watermedia.test.support.PlayerWait;
 import java.lang.reflect.Method;
 import java.net.InetAddress;
 import java.net.ServerSocket;
-import java.net.Socket;
 import java.net.URI;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -66,6 +65,7 @@ import static org.bytedeco.ffmpeg.global.avutil.av_dict_get;
 import static org.bytedeco.ffmpeg.global.avutil.av_free;
 import static org.bytedeco.ffmpeg.global.avutil.av_opt_get;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -73,18 +73,19 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
- * Verifies {@link FFDecoder}: the configured probe policy reaches the main input and a separate audio track through the
- * shared input options, which also give the nested requests of HLS and DASH the reconnect policy, so an HLS segment
- * download a server reset while the demuxer was held resumes instead of being skipped, bound the requests of YouTube's
- * CDN alone, keep RTMP from waiting for a connection and ask again for a segment that failed to open; an abort cuts
- * every blocked open short however many decoders are alive without passing for the end of the input, and the audio an
- * {@link AudioChoice} asks for is the stream that decodes, reported with every other audio stream of the opened inputs
- * while the streams nobody decodes are discarded.
+ * Verifies {@link FFDecoder}: the shared input options (the configured probe policy and the I/O timeout on the main
+ * input and a separate track, the reconnect policy of HLS and DASH segments, headers only when present, bounded
+ * requests on YouTube's CDN alone, an RTMP input that connects instead of listening), HLS segment downloads that resume
+ * after a reset or a silent connection, a refused segment asked for again, aborts that cut every blocked open and read
+ * short without passing for the end of the input, the audio stream an {@link AudioChoice} decodes among the main
+ * input's streams, HLS renditions and separate tracks while the others are discarded, the quad order of four channels
+ * and the language match.
  */
 @DisplayName("FFDecoder")
 public class FFDecoderTest {
     private static final long OPEN_TIMEOUT_MS = 15_000L;
     private static final long ABORT_MS = 5_000L; // HALF THE 10 s I/O TIMEOUT AN OPEN THE ABORT MISSED WAITS FOR
+    private static final long BLOCKED_MS = 200L; // A READ THAT HOLDS THE DEMUXER THIS LONG WAITS FOR DATA, NOT ON A BUFFERED PACKET
     private static final int RATE_HZ = 8_000;
     private static final int SECONDS = 3;
     // SAMPLE VALUES OF THE SEPARATE TRACKS, APART FROM EVERY Fixtures.level OF THE MAIN INPUT
@@ -128,6 +129,7 @@ public class FFDecoderTest {
     }
 
     // PLAYS A THREE-SEGMENT HLS VOD FROM origin, HELD UNTIL IT CUT EVERY CONNECTION; EVERY FRAME OF EVERY SEGMENT MUST DECODE
+    // AND EVERY DOWNLOAD CUT MID-BODY MUST BE ASKED FOR AGAIN
     private static void playsWholeAfterHold(final IdleOrigin origin, final Path directory) throws Exception {
         // A SEGMENT OUTGROWS THE SOCKET BUFFERS, SO THE CUT LANDS MID-DOWNLOAD; ITS SAMPLES CARRY Fixtures.level OF ITS INDEX
         final StringBuilder playlist = new StringBuilder("#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:" + SEGMENT_SECONDS + "\n#EXT-X-MEDIA-SEQUENCE:0\n");
@@ -149,13 +151,18 @@ public class FFDecoderTest {
             assertNull(host.failure, "the playlist must open without a failure");
             // HELD, THE DEMUXER STOPS READING AND THE ORIGIN CUTS THE SEGMENT DOWNLOADS IT CANNOT FINISH
             assertTrue(PlayerWait.awaitCondition(() -> origin.connections() == 0, CUT_TIMEOUT_MS), "the origin must cut every idle connection");
-            assertTrue(origin.cuts() > 0, "the origin must cut the stalled segment download");
+            // ONLY A CUT IN THE MIDDLE OF A BODY NEEDS A RESUME: AN IDLE KEEP-ALIVE CUT PASSES WITH OR WITHOUT THE RECONNECT POLICY
+            final List<String> stalled = new ArrayList<>();
+            for (int i = 0; i < SEGMENTS; i++) if (origin.cuts("/segment" + i + ".mkv") > 0) stalled.add("/segment" + i + ".mkv");
+            assertFalse(stalled.isEmpty(), "the origin must cut a segment download in the middle of its body");
             timeline.release();
 
             final int[] frames = framesPerSegment(decoder, timeline);
             final int[] whole = new int[SEGMENTS];
             Arrays.fill(whole, SEGMENT_SECONDS * 10); // Fixtures.segment WRITES 100 ms PACKETS, ONE FRAME EACH
             assertArrayEquals(whole, frames, "every packet of every segment must decode, frames per segment: " + Arrays.toString(frames));
+            for (final String path: stalled)
+                assertTrue(origin.requests(path) > origin.cuts(path), path + " must be asked for again after its cut, requests: " + origin.requests(path) + ", cuts: " + origin.cuts(path));
             assertEquals(0, origin.strays(), "no request may end its headers twice");
         } finally {
             decoder.close();
@@ -163,15 +170,14 @@ public class FFDecoderTest {
     }
 
     // DRAINS THE DECODER TO THE END OF ITS INPUT AND RETURNS EVERY DECODED FRAME, COUNTED BY THE SEGMENT ITS SAMPLES NAME
-    private static int[] framesPerSegment(final FFDecoder decoder, final Linear timeline) throws Exception {
+    private static int[] framesPerSegment(final FFDecoder decoder, final Linear timeline) {
         final int[] frames = new int[SEGMENTS];
         final long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(DRAIN_TIMEOUT_MS);
         while (!timeline.finished || decoder.decoding() || !decoder.audioFrames().empty()) {
-            assertTrue(System.nanoTime() - deadline < 0, "the input must play to its end, frames per segment so far: " + Arrays.toString(frames));
-            if (decoder.audioFrames().peek() == null) {
-                Thread.sleep(1);
-                continue;
-            }
+            final boolean ready = PlayerWait.awaitCondition(() -> decoder.audioFrames().peek() != null || timeline.finished && !decoder.decoding(),
+                    TimeUnit.NANOSECONDS.toMillis(deadline - System.nanoTime()));
+            assertTrue(ready, "the input must play to its end, frames per segment so far: " + Arrays.toString(frames));
+            if (decoder.audioFrames().peek() == null) continue;
             frames[sample(decoder) / Fixtures.level(0) - 1]++;
             decoder.audioFrames().next();
         }
@@ -189,15 +195,20 @@ public class FFDecoderTest {
     }
 
     // OPENS AN AUDIO-ONLY DECODER OF choice ON A MONO S16 ENGINE, WHICH TAKES THE FIXTURES' PCM AS IT IS, AND RETURNS IT ONCE
-    // THE FIRST FRAME DECODED; THE CALLER CLOSES IT
+    // THE FIRST FRAME DECODED; THE CALLER CLOSES IT, A FAILED OPEN CLOSES IT HERE
     private static FFDecoder decode(final URI uri, final AudioChoice choice) throws Exception {
         final Recorder host = new Recorder(new FFDecoder.Pcm(SampleType.S16, 1));
         final FFDecoder decoder = new FFDecoder("FFThread-Audio", uri, new HttpHeaders(), false, choice, new Linear(false), host);
-        decoder.start();
-        assertTrue(host.opened.await(OPEN_TIMEOUT_MS, TimeUnit.MILLISECONDS), "the input must open");
-        assertNull(host.failure, "the input must open without a failure");
-        assertTrue(PlayerWait.awaitCondition(() -> decoder.audioFrames().peek() != null, OPEN_TIMEOUT_MS), "the audio must decode");
-        return decoder;
+        try {
+            decoder.start();
+            assertTrue(host.opened.await(OPEN_TIMEOUT_MS, TimeUnit.MILLISECONDS), "the input must open");
+            assertNull(host.failure, "the input must open without a failure");
+            assertTrue(PlayerWait.awaitCondition(() -> decoder.audioFrames().peek() != null, OPEN_TIMEOUT_MS), "the audio must decode");
+            return decoder;
+        } catch (final Throwable failure) {
+            decoder.close();
+            throw failure;
+        }
     }
 
     // THE FIRST DECODED SAMPLE, WHICH NAMES THE STREAM IT CAME FROM
@@ -208,7 +219,7 @@ public class FFDecoderTest {
     // THREE TAGGED STREAMS, THE SPANISH ONE FLAGGED DEFAULT; THE FRENCH ONE CARRIES THE BIBLIOGRAPHIC CODE
     private static URI dubbed(final Path directory) throws Exception {
         final Path file = directory.resolve("dubbed.mka");
-        Fixtures.dubbed(file, RATE_HZ,SECONDS, 1, "eng", "spa", "fre");
+        Fixtures.dubbed(file, RATE_HZ, SECONDS, 1, "eng", "spa", "fre");
         return file.toUri();
     }
 
@@ -216,8 +227,8 @@ public class FFDecoderTest {
     private static List<Track> tracks(final Path directory) throws Exception {
         final Path german = directory.resolve("german.wav");
         final Path french = directory.resolve("french.wav");
-        Fixtures.wav(german, RATE_HZ,1, Fixtures.tone(GERMAN, RATE_HZ *SECONDS));
-        Fixtures.wav(french, RATE_HZ,1, Fixtures.tone(FRENCH, RATE_HZ *SECONDS));
+        Fixtures.wav(german, RATE_HZ, 1, Fixtures.tone(GERMAN, RATE_HZ * SECONDS));
+        Fixtures.wav(french, RATE_HZ, 1, Fixtures.tone(FRENCH, RATE_HZ * SECONDS));
         return List.of(new Track("Deutsch", "de", german.toUri()), new Track("Français", "fr-CA", french.toUri()));
     }
 
@@ -234,6 +245,7 @@ public class FFDecoderTest {
         void configure() {
             this.analysis = WaterMediaConfig.codecs.ffmpeg.analyzeDuration;
             this.probe = WaterMediaConfig.codecs.ffmpeg.probeSize;
+            // VALUES NO DEFAULT HAS, SO AN INPUT THAT IGNORES THE CONFIG FAILS
             WaterMediaConfig.codecs.ffmpeg.analyzeDuration = 19_000;
             WaterMediaConfig.codecs.ffmpeg.probeSize = 23;
         }
@@ -245,7 +257,7 @@ public class FFDecoderTest {
         }
 
         @Test
-        @DisplayName("The main input opens with the configured probe policy and the I/O timeout, and the shared input options carry them")
+        @DisplayName("The main input opens with the configured probe policy and the I/O timeout, and the shared input options carry the policy in FFmpeg's units")
         void mainInputAppliesTheConfiguredProbePolicy() throws Exception {
             final Recorder host = new Recorder(null);
             final FFDecoder decoder = decoder(Fixtures.fileUri(Fixtures.MP4_H264), host);
@@ -259,8 +271,8 @@ public class FFDecoderTest {
 
                 // BUILDING THE SHARED OPTIONS ONLY READS THE DECODER'S HEADERS
                 decoder.applyInputOptions(options, decoder.uri());
-                assertEquals("19000000", av_dict_get(options, "analyzeduration", null, 0).value().getString(), "microseconds");
-                assertEquals(String.valueOf(23L * 1_024 * 1_024), av_dict_get(options, "probesize", null, 0).value().getString(), "bytes");
+                assertEquals("19000000", av_dict_get(options, "analyzeduration", null, 0).value().getString(), "the analysis duration goes in microseconds");
+                assertEquals(String.valueOf(23L * 1_024 * 1_024), av_dict_get(options, "probesize", null, 0).value().getString(), "the probe size goes in bytes");
             } finally {
                 av_dict_free(options);
                 decoder.close();
@@ -268,7 +280,7 @@ public class FFDecoderTest {
         }
 
         @Test
-        @DisplayName("Every connection of an input gets a 10 s I/O timeout and the reconnect policy, nested HLS and DASH requests never a restart at byte 0")
+        @DisplayName("An input's connections get the 10 s I/O timeout, and HLS and DASH segments keep the TLS policy, retry a failed open and resume a cut download without restarting it at byte 0")
         void transportPolicy() {
             final FFDecoder decoder = decoder(Fixtures.fileUri(Fixtures.MP4_H264), new Recorder(null));
             final AVDictionary options = new AVDictionary();
@@ -306,8 +318,8 @@ public class FFDecoderTest {
                     try {
                         decoder.applyInputOptions(options, URI.create(input.getKey()));
                         final AVDictionaryEntry size = av_dict_get(options, "request_size", null, 0);
-                        if (input.getValue()) assertEquals(String.valueOf(REQUEST_BYTES), size == null ? null : size.value().getString(), input.getKey());
-                        else assertNull(size, input.getKey());
+                        if (input.getValue()) assertEquals(String.valueOf(REQUEST_BYTES), size == null ? null : size.value().getString(), input.getKey() + " asks for at most 10 MiB");
+                        else assertNull(size, input.getKey() + " asks for the whole file");
                     } finally {
                         av_dict_free(options);
                     }
@@ -377,8 +389,8 @@ public class FFDecoderTest {
                     decoder.start();
                     assertTrue(host.opened.await(OPEN_TIMEOUT_MS, TimeUnit.MILLISECONDS), "the input must open");
                     assertNull(host.failure, "the input must open without a failure");
-                    assertTrue(!ranges.isEmpty() && ranges.stream().allMatch(range -> range.equals("null") || range.endsWith("-")),
-                            "no request may name its end: " + ranges);
+                    assertFalse(ranges.isEmpty(), "the input must reach the origin");
+                    assertTrue(ranges.stream().allMatch(range -> range.equals("null") || range.endsWith("-")), "no request may name its end: " + ranges);
                 } finally {
                     decoder.close();
                 }
@@ -397,9 +409,9 @@ public class FFDecoderTest {
                     try {
                         decoder.applyInputOptions(options, URI.create(scheme + "://example.org/live/stream"));
                         final AVDictionaryEntry timeout = av_dict_get(options, "timeout", null, 0);
-                        if (scheme.toLowerCase(Locale.ROOT).startsWith("rtmp")) assertNull(timeout, scheme);
-                        else assertEquals("10000000", timeout == null ? null : timeout.value().getString(), scheme);
-                        assertEquals("10000000", av_dict_get(options, "rw_timeout", null, 0).value().getString(), scheme);
+                        if (scheme.toLowerCase(Locale.ROOT).startsWith("rtmp")) assertNull(timeout, scheme + " takes no timeout");
+                        else assertEquals("10000000", timeout == null ? null : timeout.value().getString(), scheme + " times out its connection");
+                        assertEquals("10000000", av_dict_get(options, "rw_timeout", null, 0).value().getString(), scheme + " times out a stalled read");
                     } finally {
                         av_dict_free(options);
                     }
@@ -418,9 +430,7 @@ public class FFDecoderTest {
                 try {
                     decoder.start();
                     // THE CONNECTION IS ENOUGH: AN INPUT THAT LISTENS NEVER MAKES ONE AND accept TIMES OUT
-                    try (final Socket client = server.accept()) {
-                        assertTrue(client.isConnected(), "the input must connect");
-                    }
+                    assertDoesNotThrow(server::accept, "the input must connect to its server").close();
                 } finally {
                     decoder.close();
                 }
@@ -470,7 +480,7 @@ public class FFDecoderTest {
     class Abort {
         @Test
         @DisplayName("An abort cuts every open blocked on a held origin short, with more decoders alive than JavaCPP binds callbacks for")
-        void abortCutsEveryBlockedOpenShort() throws Exception {
+        void abortCutsEveryBlockedOpenShort() {
             // JAVACPP BINDS AT MOST 10 LIVE INSTANCES OF ONE CALLBACK CLASS
             final int count = 12;
             final List<Recorder> hosts = new ArrayList<>();
@@ -515,7 +525,14 @@ public class FFDecoderTest {
                     decoder.start();
                     assertTrue(host.opened.await(OPEN_TIMEOUT_MS, TimeUnit.MILLISECONDS), "the partial input must open");
                     assertNull(host.failure, "the partial input must open without a failure");
-                    assertTrue(PlayerWait.awaitCondition(() -> reading("FFThread-Read-demux"), OPEN_TIMEOUT_MS), "the demuxer must wait for the rest of the input");
+                    // A STOP THAT LANDS ON A QUICK READ OF BUFFERED DATA ENDS THE LOOP ON ITS INTERRUPT, WITH OR WITHOUT THE ABORT GUARD,
+                    // SO EVERY POLL OF THE LAST BLOCKED_MS MUST FIND THE DEMUXER INSIDE THE READ; since IS ITS LAST POLL OUTSIDE ONE
+                    final long[] since = { System.nanoTime() };
+                    assertTrue(PlayerWait.awaitCondition(() -> {
+                        final long now = System.nanoTime();
+                        if (!reading("FFThread-Read-demux")) since[0] = now;
+                        return now - since[0] >= TimeUnit.MILLISECONDS.toNanos(BLOCKED_MS);
+                    }, OPEN_TIMEOUT_MS), "the demuxer must wait inside one read for the rest of the input");
                     decoder.stop();
                     assertFalse(timeline.finished, "an aborted read is the end of the decoder, not of the input");
                 } finally {
@@ -604,9 +621,9 @@ public class FFDecoderTest {
         void defaultStreamWithoutPreference(@TempDir final Path directory) throws Exception {
             final FFDecoder decoder = decode(dubbed(directory), new AudioChoice(List.of(), AudioChoice.AUTO, -1, null));
             try {
-                assertEquals(new AudioStream(AudioChoice.MAIN, 1, "Audio 1", "spa"), decoder.audioStream());
+                assertEquals(new AudioStream(AudioChoice.MAIN, 1, "Audio 1", "spa"), decoder.audioStream(), "the Spanish default stream decodes");
                 assertEquals(List.of(new AudioStream(AudioChoice.MAIN, 0, "Audio 0", "eng"), new AudioStream(AudioChoice.MAIN, 1, "Audio 1", "spa"),
-                        new AudioStream(AudioChoice.MAIN, 2, "Audio 2", "fre")), decoder.audioStreams());
+                        new AudioStream(AudioChoice.MAIN, 2, "Audio 2", "fre")), decoder.audioStreams(), "every audio stream is reported in order");
                 assertEquals(Fixtures.level(1), sample(decoder), "the default stream decodes, not the first");
                 assertEquals(AVDISCARD_ALL, decoder.formatContext.streams(0).discard(), "an undecoded stream is discarded");
                 assertEquals(AVDISCARD_DEFAULT, decoder.formatContext.streams(1).discard(), "the decoded stream is read");
@@ -621,8 +638,8 @@ public class FFDecoderTest {
         void preferredLanguageOutranksTheDefault(@TempDir final Path directory) throws Exception {
             final FFDecoder decoder = decode(dubbed(directory), new AudioChoice(List.of(), AudioChoice.AUTO, -1, "fr-CA"));
             try {
-                assertEquals(2, decoder.audioStream().stream());
-                assertEquals(Fixtures.level(2), sample(decoder));
+                assertEquals(2, decoder.audioStream().stream(), "the French stream decodes, not the Spanish default");
+                assertEquals(Fixtures.level(2), sample(decoder), "the French stream's samples decode");
             } finally {
                 decoder.close();
             }
@@ -634,7 +651,7 @@ public class FFDecoderTest {
             final URI uri = dubbed(directory);
             final FFDecoder picked = decode(uri, new AudioChoice(List.of(), AudioChoice.MAIN, 0, "eng"));
             try {
-                assertEquals(0, picked.audioStream().stream());
+                assertEquals(0, picked.audioStream().stream(), "the picked English stream decodes");
                 assertEquals(Fixtures.level(0), sample(picked), "the pick outranks the default");
             } finally {
                 picked.close();
@@ -642,7 +659,7 @@ public class FFDecoderTest {
             final FFDecoder moved = decode(uri, new AudioChoice(List.of(), AudioChoice.MAIN, 0, "fre"));
             try {
                 assertEquals(2, moved.audioStream().stream(), "stream 0 is no longer French, so the language finds the French one");
-                assertEquals(Fixtures.level(2), sample(moved));
+                assertEquals(Fixtures.level(2), sample(moved), "the French stream's samples decode");
             } finally {
                 moved.close();
             }
@@ -651,12 +668,12 @@ public class FFDecoderTest {
         @Test
         @DisplayName("An HLS master's audio renditions decode by BCP 47 language, named after their NAME and flagged by DEFAULT")
         void hlsRenditions(@TempDir final Path directory) throws Exception {
-            // A VARIANT WITH ITS OWN AUDIO AND TWO RENDITIONS OF ITS GROUP, EACH A ONE-SEGMENT PLAYLIST OF ITS OWN LEVEL
-            final String[][] media = { { "main", "1000" }, { "english", "2000" }, { "spanish", "3000" } };
-            for (final String[] entry: media) {
-                Fixtures.segment(directory.resolve(entry[0] + ".mkv"), RATE_HZ,SECONDS, Short.parseShort(entry[1]));
-                Files.writeString(directory.resolve(entry[0] + ".m3u8"), "#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:" + SECONDS
-                        + "\n#EXT-X-MEDIA-SEQUENCE:0\n#EXTINF:" + SECONDS + ".0,\n" + entry[0] + ".mkv\n#EXT-X-ENDLIST\n", StandardCharsets.UTF_8);
+            // A VARIANT WITH ITS OWN AUDIO AND TWO RENDITIONS OF ITS GROUP, EACH A ONE-SEGMENT PLAYLIST FILLED WITH Fixtures.level OF ITS INDEX
+            final String[] media = { "main", "english", "spanish" };
+            for (int i = 0; i < media.length; i++) {
+                Fixtures.segment(directory.resolve(media[i] + ".mkv"), RATE_HZ, SECONDS, Fixtures.level(i));
+                Files.writeString(directory.resolve(media[i] + ".m3u8"), "#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:" + SECONDS
+                        + "\n#EXT-X-MEDIA-SEQUENCE:0\n#EXTINF:" + SECONDS + ".0,\n" + media[i] + ".mkv\n#EXT-X-ENDLIST\n", StandardCharsets.UTF_8);
             }
             final Path master = directory.resolve("master.m3u8");
             Files.writeString(master, """
@@ -671,15 +688,15 @@ public class FFDecoderTest {
             final FFDecoder english = decode(master.toUri(), new AudioChoice(List.of(), AudioChoice.AUTO, -1, null));
             try {
                 assertEquals(new AudioStream(AudioChoice.MAIN, english.audioStream().stream(), "English", "en"), english.audioStream(), "DEFAULT=YES plays");
-                assertEquals((short) 2_000, sample(english));
+                assertEquals(Fixtures.level(1), sample(english), "the English rendition's samples decode");
                 assertEquals(3, english.audioStreams().size(), "the variant's audio and both renditions");
             } finally {
                 english.close();
             }
             final FFDecoder spanish = decode(master.toUri(), new AudioChoice(List.of(), AudioChoice.AUTO, -1, "es-MX"));
             try {
-                assertEquals(new AudioStream(AudioChoice.MAIN, spanish.audioStream().stream(), "Español", "es-419"), spanish.audioStream());
-                assertEquals((short) 3_000, sample(spanish));
+                assertEquals(new AudioStream(AudioChoice.MAIN, spanish.audioStream().stream(), "Español", "es-419"), spanish.audioStream(), "es-MX picks the es-419 rendition");
+                assertEquals(Fixtures.level(2), sample(spanish), "the Spanish rendition's samples decode");
                 for (final AudioStream other: spanish.audioStreams())
                     if (other.stream() != spanish.audioStream().stream())
                         assertEquals(AVDISCARD_ALL, spanish.formatContext.streams(other.stream()).discard(), "the other renditions are discarded");
@@ -700,25 +717,25 @@ public class FFDecoderTest {
                 init.setAccessible(true);
                 reopen.setAccessible(true);
                 assertTrue((boolean) init.invoke(decoder), "the input must open");
-                assertEquals(2, decoder.audioStream().stream());
+                assertEquals(2, decoder.audioStream().stream(), "the French stream plays before the reopen");
                 assertTrue((boolean) reopen.invoke(decoder), "the input must reopen");
-                assertEquals(new AudioStream(AudioChoice.MAIN, 2, "Audio 2", "fre"), decoder.audioStream());
+                assertEquals(new AudioStream(AudioChoice.MAIN, 2, "Audio 2", "fre"), decoder.audioStream(), "the French stream plays after the reopen");
                 assertEquals(AVDISCARD_ALL, decoder.formatContext.streams(0).discard(), "the reopened input discards again");
-                assertEquals(AVDISCARD_DEFAULT, decoder.formatContext.streams(2).discard());
+                assertEquals(AVDISCARD_DEFAULT, decoder.formatContext.streams(2).discard(), "the reopened input reads the playing stream");
             } finally {
                 decoder.close();
             }
         }
 
         @Test
-        @DisplayName("Without a match nor a default flag the first stream decodes, and an untagged stream reports no language")
+        @DisplayName("With neither a language match nor a default flag the first stream decodes, and an untagged stream reports no language")
         void firstStreamWithoutMatchOrDefault(@TempDir final Path directory) throws Exception {
             final Path file = directory.resolve("plain.mka");
-            Fixtures.dubbed(file, RATE_HZ,SECONDS, -1, null, "eng");
+            Fixtures.dubbed(file, RATE_HZ, SECONDS, -1, null, "eng");
             final FFDecoder decoder = decode(file.toUri(), new AudioChoice(List.of(), AudioChoice.AUTO, -1, "ja"));
             try {
-                assertEquals(new AudioStream(AudioChoice.MAIN, 0, "Audio 0", null), decoder.audioStream());
-                assertEquals(Fixtures.level(0), sample(decoder));
+                assertEquals(new AudioStream(AudioChoice.MAIN, 0, "Audio 0", null), decoder.audioStream(), "the untagged first stream decodes");
+                assertEquals(Fixtures.level(0), sample(decoder), "the first stream's samples decode");
             } finally {
                 decoder.close();
             }
@@ -737,10 +754,10 @@ public class FFDecoderTest {
             final FFDecoder french = decode(main, new AudioChoice(tracks, AudioChoice.AUTO, -1, "fr"));
             try {
                 // THE WAV TRACK CARRIES NO TAGS, SO ITS STREAM TAKES THE TRACK'S NAME AND LANGUAGE
-                assertEquals(new AudioStream(1, 0, "Français", "fr-CA"), french.audioStream());
-                assertEquals(FRENCH, sample(french));
+                assertEquals(new AudioStream(1, 0, "Français", "fr-CA"), french.audioStream(), "the French track plays");
+                assertEquals(FRENCH, sample(french), "the French track's samples decode");
                 assertEquals(4, french.audioStreams().size(), "the main input's three streams and the opened track's one");
-                assertEquals(new AudioStream(1, 0, "Français", "fr-CA"), french.audioStreams().get(3));
+                assertEquals(new AudioStream(1, 0, "Français", "fr-CA"), french.audioStreams().get(3), "the opened track is reported last");
             } finally {
                 french.close();
             }
@@ -748,7 +765,7 @@ public class FFDecoderTest {
                 final FFDecoder first = decode(main, new AudioChoice(tracks, AudioChoice.AUTO, -1, language));
                 try {
                     assertEquals(new AudioStream(0, 0, "Deutsch", "de"), first.audioStream(), "the platform's original plays for " + language);
-                    assertEquals(GERMAN, sample(first));
+                    assertEquals(GERMAN, sample(first), "the German track's samples decode for " + language);
                 } finally {
                     first.close();
                 }
@@ -760,8 +777,8 @@ public class FFDecoderTest {
         void pickOfTheMainInput(@TempDir final Path directory) throws Exception {
             final FFDecoder decoder = decode(dubbed(directory), new AudioChoice(tracks(directory), AudioChoice.MAIN, 0, "eng"));
             try {
-                assertEquals(new AudioStream(AudioChoice.MAIN, 0, "Audio 0", "eng"), decoder.audioStream());
-                assertEquals(Fixtures.level(0), sample(decoder));
+                assertEquals(new AudioStream(AudioChoice.MAIN, 0, "Audio 0", "eng"), decoder.audioStream(), "the picked English stream plays");
+                assertEquals(Fixtures.level(0), sample(decoder), "the English stream's samples decode");
                 assertNull(decoder.trackFormatContext, "no separate track opens");
                 assertEquals(3, decoder.audioStreams().size(), "only the main input's streams are known");
             } finally {
@@ -775,8 +792,8 @@ public class FFDecoderTest {
             final List<Track> tracks = List.of(new Track("Gone", "de", directory.resolve("missing.wav").toUri()));
             final FFDecoder decoder = decode(dubbed(directory), new AudioChoice(tracks, AudioChoice.AUTO, -1, null));
             try {
-                assertEquals(new AudioStream(AudioChoice.MAIN, 1, "Audio 1", "spa"), decoder.audioStream());
-                assertEquals(Fixtures.level(1), sample(decoder));
+                assertEquals(new AudioStream(AudioChoice.MAIN, 1, "Audio 1", "spa"), decoder.audioStream(), "the main input's default stream plays");
+                assertEquals(Fixtures.level(1), sample(decoder), "the default stream's samples decode");
             } finally {
                 decoder.close();
             }
@@ -790,10 +807,10 @@ public class FFDecoderTest {
         @DisplayName("Four channels leave in OpenAL's quad order, so a 4.0 center plays from the front instead of the back left")
         void fourChannelsLeaveAsQuad(@TempDir final Path directory) throws Exception {
             // 4.0 IS FL FR FC BC: ONLY THE CENTER CARRIES SOUND
-            final ByteBuffer pcm = ByteBuffer.allocate(RATE_HZ *SECONDS * 8).order(ByteOrder.LITTLE_ENDIAN);
-            for (int i = 0; i < RATE_HZ *SECONDS; i++) pcm.putShort((short) 0).putShort((short) 0).putShort(GERMAN).putShort((short) 0);
+            final ByteBuffer pcm = ByteBuffer.allocate(RATE_HZ * SECONDS * 8).order(ByteOrder.LITTLE_ENDIAN);
+            for (int i = 0; i < RATE_HZ * SECONDS; i++) pcm.putShort((short) 0).putShort((short) 0).putShort(GERMAN).putShort((short) 0);
             final Path file = directory.resolve("center.wav");
-            Fixtures.wav(file, RATE_HZ,4, AV_CH_LAYOUT_4POINT0, pcm.array());
+            Fixtures.wav(file, RATE_HZ, 4, AV_CH_LAYOUT_4POINT0, pcm.array());
             final Recorder host = new Recorder(new FFDecoder.Pcm(SampleType.S16, 4));
             final FFDecoder decoder = new FFDecoder("FFThread-Quad", file.toUri(), new HttpHeaders(), false,
                     new AudioChoice(List.of(), AudioChoice.AUTO, -1, null), new Linear(false), host);
@@ -803,7 +820,7 @@ public class FFDecoderTest {
                 assertNull(host.failure, "the input must open without a failure");
                 assertTrue(PlayerWait.awaitCondition(() -> decoder.audioFrames().peek() != null, OPEN_TIMEOUT_MS), "the audio must decode");
                 final AVFrame frame = decoder.audioFrames().peek().frame;
-                assertEquals(AV_CH_LAYOUT_QUAD, frame.ch_layout().u_mask());
+                assertEquals(AV_CH_LAYOUT_QUAD, frame.ch_layout().u_mask(), "the frames leave in the quad layout");
                 final ByteBuffer out = frame.data(0).limit(8L * frame.nb_samples()).asBuffer().order(ByteOrder.nativeOrder());
                 final int at = frame.nb_samples() / 2 * 8;
                 assertTrue(out.getShort(at) > 0 && out.getShort(at + 2) > 0, "the center reaches the front pair");
@@ -821,10 +838,10 @@ public class FFDecoderTest {
         @Test
         @DisplayName("The same tag scores 2 across case, BCP 47 and the ISO 639-2 codes containers carry")
         void sameTag() {
-            assertEquals(2, FFDecoder.match("es-MX", "ES-mx"));
-            assertEquals(2, FFDecoder.match("en", "eng"));
-            assertEquals(2, FFDecoder.match("spa", "es"));
-            assertEquals(2, FFDecoder.match("en_US", "en-US"));
+            assertEquals(2, FFDecoder.match("es-MX", "ES-mx"), "es-MX meets ES-mx");
+            assertEquals(2, FFDecoder.match("en", "eng"), "en meets eng");
+            assertEquals(2, FFDecoder.match("spa", "es"), "spa meets es");
+            assertEquals(2, FFDecoder.match("en_US", "en-US"), "en_US meets en-US");
             assertEquals(2, FFDecoder.match("en", "en,fr"), "an HLS pair counts by its first language");
         }
 
@@ -847,20 +864,20 @@ public class FFDecoderTest {
         @DisplayName("The same primary language scores 1, a preference for es-MX taking every Spanish")
         void samePrimaryLanguage() {
             for (final String spanish: new String[] { "es-419", "es", "es-US", "spa" })
-                assertEquals(1, FFDecoder.match("es-MX", spanish), spanish);
-            assertEquals(1, FFDecoder.match("en", "en-US"));
-            assertEquals(1, FFDecoder.match("zh-Hans", "chi"));
+                assertEquals(1, FFDecoder.match("es-MX", spanish), "es-MX takes " + spanish);
+            assertEquals(1, FFDecoder.match("en", "en-US"), "en takes en-US");
+            assertEquals(1, FFDecoder.match("zh-Hans", "chi"), "zh-Hans takes chi");
         }
 
         @Test
         @DisplayName("Another language, an undetermined one or a missing side scores 0")
         void noMatch() {
-            assertEquals(0, FFDecoder.match("es", "en"));
-            assertEquals(0, FFDecoder.match("fr", "en,fr"));
-            assertEquals(0, FFDecoder.match("es", "und"));
-            assertEquals(0, FFDecoder.match(null, "en"));
-            assertEquals(0, FFDecoder.match("es", null));
-            assertEquals(0, FFDecoder.match("", "en"));
+            assertEquals(0, FFDecoder.match("es", "en"), "es misses en");
+            assertEquals(0, FFDecoder.match("fr", "en,fr"), "an HLS pair counts by its first language");
+            assertEquals(0, FFDecoder.match("es", "und"), "und names no language");
+            assertEquals(0, FFDecoder.match(null, "en"), "no preference matches nothing");
+            assertEquals(0, FFDecoder.match("es", null), "an untagged stream matches nothing");
+            assertEquals(0, FFDecoder.match("", "en"), "an empty preference matches nothing");
         }
     }
 

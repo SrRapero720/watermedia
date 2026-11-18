@@ -40,11 +40,10 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertThrowsExactly;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** Verifies the site lists: the gate of {@link MediaPlayer}, its matching rules, the MRL refusal before any request and the player revalidation. */
+/** Verifies the site lists of {@code MediaPlayer.checkSite}: switches, whitelist, trusted local links, water://global, blacklist, entry matching, disguised hosts, file shares, jar links, the MRL refusal before any request, Windows share strings and the player revalidation. */
 @DisplayName("Site lists")
 public class SiteListsTest {
 
@@ -184,20 +183,20 @@ public class SiteListsTest {
     class Switches {
 
         @Test
-        @DisplayName("Both lists ship off with the documented sites")
-        void testDefaults() {
+        @DisplayName("Both lists ship off: the whitelist with its documented sites and trustLocal, the blacklist empty")
+        void shippedDefaults() {
             final WaterMediaConfig.Player.Whitelist white = new WaterMediaConfig.Player.Whitelist();
             final WaterMediaConfig.Player.Blacklist black = new WaterMediaConfig.Player.Blacklist();
-            assertFalse(white.enable);
+            assertFalse(white.enable, "the whitelist ships off");
             assertArrayEquals(new String[] { "youtube.com", "youtu.be", "twitch.tv", "imgur.com", "kick.com" }, white.sites);
-            assertTrue(white.trustLocal);
-            assertFalse(black.enable);
-            assertEquals(0, black.sites.length);
+            assertTrue(white.trustLocal, "trustLocal ships on");
+            assertFalse(black.enable, "the blacklist ships off");
+            assertEquals(0, black.sites.length, "the blacklist ships without sites");
         }
 
         @Test
         @DisplayName("Disabled lists judge nothing, whatever their entries")
-        void testDisabledListsJudgeNothing() {
+        void disabledListsJudgeNothing() {
             WaterMediaConfig.player.whitelist.sites = new String[] { "youtube.com" };
             WaterMediaConfig.player.whitelist.trustLocal = false;
             WaterMediaConfig.player.blacklist.sites = new String[] { "vimeo.com", "localhost" };
@@ -207,14 +206,14 @@ public class SiteListsTest {
 
         @Test
         @DisplayName("An enabled whitelist without sites and without trustLocal is ignored")
-        void testEmptyWhitelistWithoutTrustIsIgnored() {
+        void emptyWhitelistWithoutTrustIsIgnored() {
             whitelist(false);
             plays("https://vimeo.com/76979871", "http://8.8.8.8/", "data:image/png;base64,AAAA", "water://local/a.png", "http://2130706433/");
         }
 
         @Test
         @DisplayName("An enabled whitelist without sites but with trustLocal plays only local links")
-        void testEmptyWhitelistWithTrustPlaysOnlyLocal() {
+        void emptyWhitelistWithTrustPlaysOnlyLocal() {
             whitelist(true);
             plays("water://local/a.png", "http://localhost/a.png", "http://192.168.0.2/a.png", "file:///C:/a.mp4");
             notAllowed("https://www.youtube.com/watch?v=dQw4w9WgXcQ", "https://vimeo.com/76979871");
@@ -222,7 +221,7 @@ public class SiteListsTest {
 
         @Test
         @DisplayName("An enabled blacklist without sites is off, disguised addresses included")
-        void testEmptyBlacklistIsOff() {
+        void emptyBlacklistIsOff() {
             blacklist();
             plays("https://pornhub.com/", "http://2130706433/", "http://0x7f.0.0.1/");
             // ONLY THE WHITELIST JUDGES: THE DISGUISED LOOPBACK IS NOT ALLOWED INSTEAD OF FORBIDDEN
@@ -231,8 +230,8 @@ public class SiteListsTest {
         }
 
         @Test
-        @DisplayName("The default whitelist plays its sites, their subdomains and local links once enabled")
-        void testDefaultWhitelist() {
+        @DisplayName("The default whitelist plays its sites, their subdomains and local links once enabled, and refuses the rest")
+        void defaultWhitelistPlaysItsSites() {
             final WaterMediaConfig.Player.Whitelist defaults = new WaterMediaConfig.Player.Whitelist();
             whitelist(defaults.trustLocal, defaults.sites);
             plays("https://www.youtube.com/watch?v=dQw4w9WgXcQ", "https://m.youtube.com/watch?v=x", "https://music.youtube.com/watch?v=x",
@@ -249,15 +248,15 @@ public class SiteListsTest {
 
         @Test
         @DisplayName("Only the listed sites and their subdomains play")
-        void testListedSitesPlay() {
+        void listedSitesPlay() {
             whitelist(false, "youtube.com", "kick.com");
             plays("https://youtube.com/", "https://www.youtube.com/watch?v=x", "https://music.youtube.com/x", "https://kick.com/x");
             notAllowed("https://vimeo.com/76979871", "https://twitch.tv/x", "http://localhost/a.png");
         }
 
         @Test
-        @DisplayName("The refusal carries its code and the link")
-        void testRefusalMessage() {
+        @DisplayName("A whitelist refusal carries its code and the link")
+        void refusalCarriesCodeAndLink() {
             whitelist(false, "youtube.com");
             final WhitelistException refusal = assertThrowsExactly(WhitelistException.class,
                     () -> MediaPlayer.checkSite(URI.create("https://vimeo.com/76979871")));
@@ -266,7 +265,7 @@ public class SiteListsTest {
 
         @Test
         @DisplayName("A listed name in the user info, fragment, query, path or as a label of another site does not pass")
-        void testSpoofedLinksAreRefused() {
+        void spoofedLinksAreRefused() {
             whitelist(false, "youtube.com");
             notAllowed("http://youtube.com@evil.example/", "http://youtube.com:443@evil.example/", "http://evil.example#@youtube.com/",
                     "http://evil.example/?u=youtube.com", "http://evil.example/youtube.com", "http://youtube.com.evil.example/",
@@ -275,7 +274,7 @@ public class SiteListsTest {
 
         @Test
         @DisplayName("A link without a host that is not local is refused")
-        void testHostlessLinksAreRefused() {
+        void hostlessLinksAreRefused() {
             whitelist(true, "youtube.com");
             notAllowed("data:image/png;base64,AAAA", "http:///a.mp4", "urn:example:media");
         }
@@ -287,7 +286,7 @@ public class SiteListsTest {
 
         @Test
         @DisplayName("trustLocal plays stores, local files, local names and private addresses")
-        void testLocalShapesPlay() {
+        void localShapesPlay() {
             whitelist(true, "youtube.com");
             plays("water://local/a.png", "WATER://LOCAL/a.png", "water://remote/abc", "file:///C:/videos/a.mp4", "file:/C:/a.mp4",
                     Fixtures.fileUri(Fixtures.PNG_STATIC).toString(), "http://localhost:8080/a.mp4", "http://LOCALHOST./",
@@ -298,18 +297,20 @@ public class SiteListsTest {
         }
 
         @Test
-        @DisplayName("Public neighbours of the local ranges and disguised loopbacks are not trusted")
-        void testNearbyPublicAddressesAreRefused() {
+        @DisplayName("Public neighbours of the local ranges, lookalike names, disguised loopbacks and disguised local names are not trusted")
+        void lookalikesAreNotTrusted() {
             whitelist(true, "youtube.com");
             notAllowed("http://172.15.255.255/", "http://172.32.0.1/", "http://11.0.0.1/", "http://192.169.0.1/", "http://169.255.0.1/",
                     "http://8.8.8.8/", "http://[2001:4860:4860::8888]/", "http://[fbff::1]/", "http://[fe00::1]/", "http://[::ffff:8.8.8.8]/",
                     "http://localhost.evil.example/", "http://evillocalhost/", "http://evil.example/localhost", "http://local/",
                     "http://evil.local.example/", "http://127.0.0.1.nip.io/", "http://127.1/", "http://2130706433/", "http://0x7f000001/");
+            // THESE HOSTS END IN .local OR .localhost, SO ONLY THEIR DISGUISE (AN ESCAPE, A SECOND @) KEEPS THEM FROM BEING LOCAL
+            notAllowed("http://evil.com%2f.local/", "http://a@b@printer.local/", "http://a@b@media.localhost/");
         }
 
         @Test
         @DisplayName("Without trustLocal a local link needs its own entry")
-        void testLocalNeedsAnEntryWithoutTrust() {
+        void localNeedsAnEntryWithoutTrust() {
             whitelist(false, "youtube.com");
             notAllowed("http://localhost/a.png", "http://127.0.0.1/", "http://192.168.1.10/", "http://[::1]/", "http://printer.local/",
                     "file:///C:/a.mp4", "water://local/a.png", "water://remote/abc");
@@ -321,7 +322,7 @@ public class SiteListsTest {
 
         @Test
         @DisplayName("Stores and files without a host can never be listed")
-        void testStoresAndFilesCannotBeListed() {
+        void storesAndFilesCannotBeListed() {
             whitelist(false, "local", "remote", "water", "file", "water://local", "water://remote/abc", "file:///C:/a.mp4");
             notAllowed("water://local/a.png", "water://remote/abc", "file:///C:/a.mp4", "file:/C:/a.mp4");
         }
@@ -333,7 +334,7 @@ public class SiteListsTest {
 
         @Test
         @DisplayName("water://global plays under any whitelist and any blacklist")
-        void testGlobalAlwaysPlays() {
+        void globalAlwaysPlays() {
             whitelist(false, "youtube.com");
             blacklist("global", "water", "watermedia.srrapero720.me", "srrapero720.me");
             plays("water://global/a.png", "WATER://GLOBAL/a.png", "water://Global/x?y=1", "water://global");
@@ -347,8 +348,8 @@ public class SiteListsTest {
     class Forbidding {
 
         @Test
-        @DisplayName("The refusal carries its code and the link")
-        void testRefusalMessage() {
+        @DisplayName("A blacklist refusal carries its code and the link")
+        void refusalCarriesCodeAndLink() {
             blacklist("pornhub.com");
             final BlacklistException refusal = assertThrowsExactly(BlacklistException.class,
                     () -> MediaPlayer.checkSite(URI.create("https://www.pornhub.com/view_video.php?viewkey=1")));
@@ -357,7 +358,7 @@ public class SiteListsTest {
 
         @Test
         @DisplayName("The blacklist wins over the whitelist")
-        void testBlacklistWinsOverWhitelist() {
+        void blacklistWinsOverWhitelist() {
             whitelist(true, "pornhub.com", "youtube.com");
             blacklist("pornhub.com");
             forbidden("https://pornhub.com/", "https://www.pornhub.com/");
@@ -367,7 +368,7 @@ public class SiteListsTest {
 
         @Test
         @DisplayName("The blacklist wins over trustLocal")
-        void testBlacklistWinsOverTrustLocal() {
+        void blacklistWinsOverTrustLocal() {
             whitelist(true, "youtube.com");
             blacklist("192.168.0.5", "localhost", "[::1]", "printer.local");
             forbidden("http://192.168.0.5/", "http://localhost:8080/", "http://[::1]/", "http://[0:0:0:0:0:0:0:1]/", "http://printer.local/");
@@ -376,7 +377,7 @@ public class SiteListsTest {
 
         @Test
         @DisplayName("Stores, files without a host and data links can never be forbidden")
-        void testHostlessLinksCannotBeForbidden() {
+        void hostlessLinksCannotBeForbidden() {
             blacklist("local", "remote", "localhost", "file", "water");
             plays("water://local/a.png", "water://remote/abc", "file:///C:/a.mp4", "data:image/png;base64,AAAA");
         }
@@ -388,7 +389,7 @@ public class SiteListsTest {
 
         @Test
         @DisplayName("A site covers itself and its subdomains on a dot boundary")
-        void testSiteCoversSubdomains() {
+        void siteCoversSubdomains() {
             blacklist("website.com");
             forbidden("https://website.com/", "https://www.website.com/", "https://a.b.website.com/");
             plays("https://notwebsite.com/", "https://wwwwebsite.com/", "https://website.com.evil.net/", "https://website.co/", "https://ebsite.com/");
@@ -396,7 +397,7 @@ public class SiteListsTest {
 
         @Test
         @DisplayName("A subdomain covers only itself and deeper names")
-        void testSubdomainCoversOnlyItself() {
+        void subdomainCoversOnlyItself() {
             blacklist("some.website.com");
             forbidden("https://some.website.com/", "https://deep.some.website.com/");
             plays("https://website.com/", "https://www.website.com/", "https://other.website.com/", "https://awesome.website.com/");
@@ -404,7 +405,7 @@ public class SiteListsTest {
 
         @Test
         @DisplayName("Case, trailing dots, ports, user info, percent encoding and Unicode forms do not evade")
-        void testSpellingsDoNotEvade() {
+        void spellingsDoNotEvade() {
             blacklist("pornhub.com");
             forbidden("http://PornHub.COM./", "HTTPS://WWW.PORNHUB.COM:443/", "http://x@pornhub.com:8080/", "http://user:pw@cdn.pornhub.com:8443/x",
                     "http://pornhub.com:/", "http://pornhub.com../", "http://pornhub.com:abc/");
@@ -418,7 +419,7 @@ public class SiteListsTest {
 
         @Test
         @DisplayName("Unicode and punycode spellings of an entry match each other")
-        void testUnicodeAndPunycodeMatch() {
+        void unicodeAndPunycodeMatch() {
             blacklist("b\u00FCcher.example");
             forbidden("http://xn--bcher-kva.example/", "http://b\u00FCcher.example/", "http://www.B\u00DCCHER.example/");
             blacklist("xn--bcher-kva.example");
@@ -428,7 +429,7 @@ public class SiteListsTest {
 
         @Test
         @DisplayName("Entries pasted as links, with a port, user info, spaces or a trailing dot still name their site")
-        void testEntrySpellingsNameTheirSite() {
+        void entrySpellingsNameTheirSite() {
             whitelist(false, "https://Imgur.com/gallery", "kick.com:443", "user@youtu.be", "  TWITCH.tv.  ", "http://[::1]:8080/");
             plays("https://i.imgur.com/a.png", "https://kick.com/x", "https://youtu.be/x", "https://www.twitch.tv/x", "http://[::1]/");
             notAllowed("https://vimeo.com/76979871");
@@ -447,7 +448,7 @@ public class SiteListsTest {
 
         @Test
         @DisplayName("Junk entries match nothing and never throw")
-        void testJunkEntriesMatchNothing() {
+        void junkEntriesMatchNothing() {
             final String[] junk = { "", "   ", "*", "*.", ".", "..", "https://", "x://", "a b.com", "[", "%", "@", ":443" };
             whitelist(false, junk);
             notAllowed("https://www.twitch.tv/x", "https://twitch.tv/", "https://vimeo.com/76979871");
@@ -458,7 +459,7 @@ public class SiteListsTest {
 
         @Test
         @DisplayName("IP entries match exactly")
-        void testIpEntriesMatchExactly() {
+        void ipEntriesMatchExactly() {
             blacklist("192.168.0.5");
             forbidden("http://192.168.0.5/", "http://192.168.0.5:8080/x", "http://192.168.0.5./", "http://[::ffff:192.168.0.5]/");
             plays("http://192.168.0.50/", "http://192.168.0.4/", "http://92.168.0.5/");
@@ -471,7 +472,7 @@ public class SiteListsTest {
 
         @Test
         @DisplayName("Bracketed IPv6 entries match any spelling of the address, mapped IPv4 and zones included")
-        void testIpv6SpellingsMatch() {
+        void ipv6SpellingsMatch() {
             blacklist("[2001:db8::1]");
             forbidden("http://[2001:db8::1]/", "http://[2001:DB8:0:0:0:0:0:1]/", "http://[2001:0db8:0000:0000:0000:0000:0000:0001]:8080/");
             plays("http://[2001:db8::2]/");
@@ -485,7 +486,7 @@ public class SiteListsTest {
 
         @Test
         @DisplayName("IPv6 entries without brackets match too")
-        void testIpv6EntriesWithoutBrackets() {
+        void ipv6EntriesWithoutBracketsMatch() {
             blacklist("2001:db8::1", "::1", "fe80:0:0:0:0:0:0:1");
             forbidden("http://[2001:db8::1]/", "http://[::1]/", "http://[fe80::1]/");
         }
@@ -497,7 +498,7 @@ public class SiteListsTest {
 
         @Test
         @DisplayName("With the blacklist on an IPv4 written as one number, in hex, octal, shortened or with leading zeros is forbidden")
-        void testDisguisedAddressesAreForbidden() {
+        void disguisedAddressesAreForbidden() {
             blacklist("unrelated.example");
             forbidden("http://2130706433/", "http://3232235521/", "http://0x7f.0.0.1/", "http://0x7F.0x0.0x0.0x1/", "http://0x7f000001/",
                     "http://127.1/", "http://127.0.1/", "http://010.0.0.1/", "http://0177.0.0.1/", "http://2130706433:8080/x");
@@ -505,7 +506,7 @@ public class SiteListsTest {
 
         @Test
         @DisplayName("Plain addresses that are not listed play")
-        void testPlainAddressesPlay() {
+        void plainAddressesPlay() {
             blacklist("unrelated.example");
             plays("http://8.8.8.8/", "http://93.184.216.34:8080/", "http://127.0.0.1/", "http://0.0.0.0/", "http://255.255.255.255/",
                     "http://[::1]/", "http://[2001:db8::1]/");
@@ -513,7 +514,7 @@ public class SiteListsTest {
 
         @Test
         @DisplayName("The whitelist never allows a disguised address, even one written as an entry or ending in one")
-        void testDisguisedIsNeverAllowed() {
+        void disguisedIsNeverAllowed() {
             whitelist(true, "2130706433", "127.1", "192.168.0.5");
             notAllowed("http://2130706433/", "http://127.1/", "http://0x7f.0.0.1/", "http://x.192.168.0.5/", "http://evil.192.168.0.5:8080/");
             plays("http://192.168.0.5/", "http://127.0.0.1/");
@@ -521,7 +522,7 @@ public class SiteListsTest {
 
         @Test
         @DisplayName("A host that keeps an @, a percent escape or the Windows IPv6 alias is forbidden by any active blacklist")
-        void testMarkedHostsAreForbidden() {
+        void markedHostsAreForbidden() {
             blacklist("unrelated.example");
             forbidden("http://a@b@youtube.com/", "http://evil.com%40youtube.com/", "http://%70ornhub.com/", "http://%79outube.com/",
                     "http://you%74ube.com/", "http://youtube.com%3F/", "http://--1.ipv6-literal.net/", "http://fe80--1s4.ipv6-literal.net/",
@@ -533,7 +534,7 @@ public class SiteListsTest {
 
         @Test
         @DisplayName("The whitelist never allows a marked host, not even its own entry or a local alias")
-        void testMarkedHostsAreNeverAllowed() {
+        void markedHostsAreNeverAllowed() {
             whitelist(false, "youtube.com");
             notAllowed("http://a@b@youtube.com/", "http://evil.com%40youtube.com/", "http://%79outube.com/", "http://www.%79outube.com/",
                     "http://evil.com＠youtube.com/");
@@ -545,7 +546,7 @@ public class SiteListsTest {
 
         @Test
         @DisplayName("The user info is cut at the first @, so a name java.net.URI rejects is still judged by its host")
-        void testUserInfoStillNamesTheHost() {
+        void userInfoStillNamesTheHost() {
             blacklist("my_host", "pornhub.com");
             forbidden("http://user@my_host:80/", "http://user:pw@cdn.my_host/x", "http://user@ｐornhub.com/");
             plays("http://my_host@other_host/");
@@ -562,7 +563,7 @@ public class SiteListsTest {
 
         @Test
         @DisplayName("A file link with a host is a network share judged by that host")
-        void testNetworkShareIsJudgedByHost() {
+        void networkShareIsJudgedByHost() {
             whitelist(true, "youtube.com");
             notAllowed("file://server/share/a.mp4", "file://fileserver.corp.example/share/a.mp4");
             plays("file://192.168.1.5/share/a.mp4", "file://nas.local/share/a.mp4", "file://localhost/C:/a.mp4");
@@ -575,7 +576,7 @@ public class SiteListsTest {
 
         @Test
         @DisplayName("A file path that starts with two separators is a Windows share judged by its server")
-        void testSharePathIsJudgedByServer() {
+        void sharePathIsJudgedByServer() {
             final String[] shares = { "file:////server/share/a.mp4", "file://///server/share/a.mp4", "file://localhost//server/share/a.mp4",
                     "file:///%5C%5Cserver%5Cshare%5Ca.mp4", "file:%5C%5Cserver%5Cshare%5Ca.mp4" };
             whitelist(true, "youtube.com");
@@ -589,7 +590,7 @@ public class SiteListsTest {
 
         @Test
         @DisplayName("The server of a share path is judged only when Java reads the link host as none (missing, localhost or ~)")
-        void testShareServerOnlyWithoutLinkHost() {
+        void shareServerOnlyWithoutLinkHost() {
             blacklist("127.0.0.1");
             forbidden("file://127.0.0.1//allowed.example/s/x.mp4");
             WaterMediaConfig.player.blacklist.enable = false;
@@ -605,7 +606,7 @@ public class SiteListsTest {
 
         @Test
         @DisplayName("A device prefix, an empty server or a WebDAV mark in a share path is disguised")
-        void testDeviceSharesAreDisguised() {
+        void deviceSharesAreDisguised() {
             final String[] devices = { "file:////./UNC/server/share/x", "file:///%5C%5C.%5CUNC%5Cserver%5Cshare%5Cx",
                     "file:////./GLOBALROOT/Device/Mup/server/share/x", "file:////%3F/UNC/server/share/x", "file:////",
                     "file:////server@SSL/share/x", "file:////server@8080/share/x" };
@@ -618,7 +619,7 @@ public class SiteListsTest {
 
         @Test
         @DisplayName("A device prefix written as the link host is disguised too")
-        void testDeviceHostIsDisguised() {
+        void deviceHostIsDisguised() {
             // JAVA OPENS file://./UNC/server/share/x AS \\.\UNC\server\share\x, THE DEVICE SPELLING OF \\server\share\x
             final String[] devices = { "file://./UNC/server/share/x.mp4", "file://./GLOBALROOT/Device/Mup/server/share/x.mp4",
                     "file://..//server/share/x.mp4", "http://./x.mp4", "http://@/x.mp4", "http://:80/x.mp4" };
@@ -630,7 +631,7 @@ public class SiteListsTest {
 
         @Test
         @DisplayName("A link host left empty by its user info or port is no host, so the share server is judged")
-        void testEmptyLinkHostIsJudgedByServer() {
+        void emptyLinkHostIsJudgedByServer() {
             // JAVA READS THE HOST OF file://@//server/x AS EMPTY AND OPENS \\server\x
             final String[] shares = { "file://@//server/share/x.mp4", "file://user@//server/share/x.mp4", "file://:80//server/share/x.mp4" };
             whitelist(true, "youtube.com");
@@ -646,7 +647,7 @@ public class SiteListsTest {
 
         @Test
         @DisplayName("A jar link is judged by the link it wraps, nested ones included")
-        void testJarIsJudgedByTheWrappedLink() {
+        void jarIsJudgedByTheWrappedLink() {
             blacklist("evil.com");
             forbidden("jar:http://evil.com/x.jar!/a.png", "jar:jar:http://evil.com/a.jar!/b.jar!/c.png", "JAR:HTTP://EVIL.COM/x.jar!/a.png",
                     "jar:https://cdn.evil.com/x.jar!/dir/a.png", "jar:http://evil.com/x.jar", "jar:http://a@b@youtube.com/x.jar!/a.png");
@@ -660,7 +661,7 @@ public class SiteListsTest {
 
         @Test
         @DisplayName("A jar on this machine follows trustLocal and a jar on a share is judged by its server")
-        void testJarFilesFollowTheirLink() {
+        void jarFilesFollowTheirLink() {
             final String[] local = { "jar:file:/C:/mods/pack.jar!/a.png", "jar:file:///home/u/pack.jar!/a.png" };
             whitelist(true, "youtube.com");
             plays(local);
@@ -675,26 +676,29 @@ public class SiteListsTest {
 
         @Test
         @DisplayName("A jar wrapping water://global always plays")
-        void testJarGlobalAlwaysPlays() {
+        void jarGlobalAlwaysPlays() {
             whitelist(false, "youtube.com");
             blacklist("global", "watermedia.srrapero720.me");
             plays("jar:water://global/x!/a", "jar:water://global/x.jar!/dir/a.png");
         }
 
         @Test
-        @DisplayName("A jar whose inner text is no link never plays under an active list")
-        void testMalformedJarNeverPlays() {
+        @DisplayName("A jar whose inner text is no link is rejected with IllegalArgumentException under either list")
+        void malformedJarIsRejected() {
+            // THE TEXT BEFORE !/ IS NO URI (AN UNCLOSED BRACKET, A SCHEME WITHOUT A PART), SO UNWRAPPING IT FAILS IN URI.create
             final String[] broken = { "jar:http://[::1!/a.png", "jar:x:!/a.png" };
             blacklist("unrelated.example");
-            assertAll(Arrays.stream(broken).<Executable>map(link -> () -> assertThrows(Exception.class, () -> MediaPlayer.checkSite(URI.create(link)), link)));
+            assertAll(Arrays.stream(broken).<Executable>map(link -> () -> assertThrowsExactly(IllegalArgumentException.class,
+                    () -> MediaPlayer.checkSite(URI.create(link)), link + " under the blacklist")));
             WaterMediaConfig.player.blacklist.enable = false;
             whitelist(true, "youtube.com");
-            assertAll(Arrays.stream(broken).<Executable>map(link -> () -> assertThrows(Exception.class, () -> MediaPlayer.checkSite(URI.create(link)), link)));
+            assertAll(Arrays.stream(broken).<Executable>map(link -> () -> assertThrowsExactly(IllegalArgumentException.class,
+                    () -> MediaPlayer.checkSite(URI.create(link)), link + " under the whitelist")));
         }
 
         @Test
         @DisplayName("A jar link is judged by the file Java fetches, which ends at the first !/")
-        void testJarIsJudgedByTheFetchedFile() {
+        void jarIsJudgedByTheFetchedFile() {
             // JarURLConnection CUTS AT THE FIRST !/: jar:http://evil.com!/x.jar!/a.png FETCHES http://evil.com
             blacklist("evil.com", "server");
             forbidden("jar:http://evil.com!/x.jar!/a.png", "jar:file:////server!/x.jar!/a.png");
@@ -707,7 +711,7 @@ public class SiteListsTest {
 
         @Test
         @DisplayName("A link the whitelist does not allow ends BLOCKED before any platform or request touches it")
-        void testWhitelistRefusalComesFirst() {
+        void whitelistRefusalComesFirst() {
             final AtomicInteger requests = new AtomicInteger();
             final AtomicInteger asked = new AtomicInteger();
             try (final LocalHttp origin = picture(requests)) {
@@ -718,7 +722,7 @@ public class SiteListsTest {
                 try {
                     final MRL mrl = settled(link);
                     assertSame(MRL.Status.BLOCKED, mrl.status());
-                    assertTrue(mrl.status().failed());
+                    assertTrue(mrl.status().failed(), "a BLOCKED MRL counts as failed");
                     final WhitelistException refusal = assertInstanceOf(WhitelistException.class, mrl.exception());
                     assertEquals("(wm_err:1150) Failed to resolve " + link + ", the site is not allowed", refusal.getMessage());
                     assertEquals(0, mrl.sourceCount());
@@ -732,7 +736,7 @@ public class SiteListsTest {
 
         @Test
         @DisplayName("A forbidden LAN link ends BLOCKED before any platform or request, even under trustLocal")
-        void testBlacklistRefusalComesFirst() {
+        void blacklistRefusalComesFirst() {
             final AtomicInteger requests = new AtomicInteger();
             final AtomicInteger asked = new AtomicInteger();
             try (final LocalHttp origin = picture(requests)) {
@@ -744,7 +748,7 @@ public class SiteListsTest {
                 try {
                     final MRL mrl = settled(link);
                     assertSame(MRL.Status.BLOCKED, mrl.status());
-                    assertTrue(mrl.status().failed());
+                    assertTrue(mrl.status().failed(), "a BLOCKED MRL counts as failed");
                     final BlacklistException refusal = assertInstanceOf(BlacklistException.class, mrl.exception());
                     assertEquals("(wm_err:1149) Failed to resolve " + link + ", the site is forbidden", refusal.getMessage());
                 } finally {
@@ -756,21 +760,28 @@ public class SiteListsTest {
         }
 
         @Test
-        @DisplayName("A disguised address ends BLOCKED before its request reaches the loopback it hides")
-        void testDisguisedAddressNeverConnects() {
+        @DisplayName("A disguised address ends BLOCKED before its request reaches the loopback it hides, which it reaches with the lists off")
+        void disguisedAddressNeverConnects() {
             final AtomicInteger requests = new AtomicInteger();
             try (final LocalHttp origin = picture(requests)) {
+                // 2130706433 IS 127.0.0.1 WRITTEN AS ONE NUMBER
+                final String alias = "http://2130706433:" + origin.uri("/").getPort();
                 blacklist("unrelated.example");
-                final MRL mrl = settled(URI.create("http://2130706433:" + origin.uri("/").getPort() + "/site-lists/disguised.png"));
+                final MRL mrl = settled(URI.create(alias + "/site-lists/disguised.png"));
                 assertSame(MRL.Status.BLOCKED, mrl.status());
                 assertInstanceOf(BlacklistException.class, mrl.exception());
                 assertEquals(0, requests.get(), "no request reached the origin");
+
+                // THE CONTROL PROVES THE ALIAS REALLY LEADS TO THE ORIGIN; ITS OWN PATH, SINCE THE MRL CACHE KEEPS THE BLOCKED ONE
+                WaterMediaConfig.player.blacklist.enable = false;
+                loaded(URI.create(alias + "/site-lists/disguised-control.png"));
+                assertTrue(requests.get() > 0, "the alias reached the loopback origin");
             }
         }
 
         @Test
         @DisplayName("Only the link is judged: the player plays a source the platform put on a forbidden host")
-        void testResolvedHostsPlay() {
+        void resolvedHostsPlay() {
             final AtomicInteger requests = new AtomicInteger();
             try (final LocalHttp origin = picture(requests)) {
                 final URI link = URI.create("https://allowed.example/site-lists/played-elsewhere");
@@ -788,8 +799,9 @@ public class SiteListsTest {
                 final MediaPlayer player = PlayerAPI.player(mrl, PlayerAPI::headlessEngine, () -> null);
                 assertNotNull(player, "the player judges the link, not the host of its source");
                 try {
-                    assertTrue(player.start());
-                    assertTrue(PlayerWait.awaitStatus(player, PLAY_TIMEOUT_MS, MediaPlayer.Status.PLAYING, MediaPlayer.Status.PAUSED));
+                    assertTrue(player.start(), "the player starts");
+                    assertTrue(PlayerWait.awaitStatus(player, PLAY_TIMEOUT_MS, MediaPlayer.Status.PLAYING, MediaPlayer.Status.PAUSED),
+                            () -> "the player did not play, it is " + player.status());
                     assertTrue(requests.get() > 0, "the picture came from the forbidden host");
                 } finally {
                     player.release();
@@ -799,7 +811,7 @@ public class SiteListsTest {
 
         @Test
         @DisplayName("Only the link is judged: a redirect to a forbidden host is followed")
-        void testRedirectsAreNotJudged() {
+        void redirectsAreNotJudged() {
             final AtomicInteger requests = new AtomicInteger();
             final byte[] body = Fixtures.readAll(Fixtures.PNG_STATIC);
             // THE LINK NAMES THE ORIGIN BY ITS ADDRESS AND THE REDIRECT BY ITS NAME, SO EACH HOP CARRIES ANOTHER HOST
@@ -823,18 +835,18 @@ public class SiteListsTest {
 
         @Test
         @DisplayName("Playlist channels on a forbidden host stay in the list")
-        void testPlaylistChannelsAreNotJudged() {
-            final byte[] playlist = Fixtures.readAll(Fixtures.RESOURCES.resolve("m3u").resolve("iptv_sample.m3u8"));
+        void playlistChannelsAreNotJudged() {
+            final byte[] playlist = Fixtures.readAll(Fixtures.M3U_IPTV);
             try (final LocalHttp origin = LocalHttp.start("/", exchange -> LocalHttp.respond(exchange, "application/vnd.apple.mpegurl", playlist, 0L))) {
                 whitelist(true, "youtube.com");
                 blacklist("stream.example", "logo.example");
-                assertEquals(3, loaded(origin.uri("/site-lists/channels.m3u8")).sourceCount());
+                assertEquals(3, loaded(origin.uri("/site-lists/channels.m3u8")).sourceCount(), "every channel of the fixture stays");
             }
         }
 
         @Test
         @DisplayName("water://global resolves under lists that refuse everything else")
-        void testGlobalResolves() {
+        void globalResolves() {
             final URI link = URI.create("water://global/site-lists-resolved.png");
             final AtomicInteger asked = new AtomicInteger();
             final Platform platform = platform(link, asked, image(URI.create("https://watermedia.srrapero720.me/site-lists-resolved.png")));
@@ -843,7 +855,7 @@ public class SiteListsTest {
             PlatformAPI.register(platform);
             try {
                 loaded(link);
-                assertEquals(1, asked.get());
+                assertEquals(1, asked.get(), "the platform resolved the link once");
             } finally {
                 PlatformAPI.unregister(platform);
             }
@@ -851,7 +863,7 @@ public class SiteListsTest {
 
         @Test
         @DisplayName("water://local loads under trustLocal and is BLOCKED without it, even when listed")
-        void testWaterLocalFollowsTrustLocal() throws IOException {
+        void waterLocalFollowsTrustLocal() throws IOException {
             copy("water-local-trusted.png");
             copy("water-local-untrusted.png");
             whitelist(true, "youtube.com");
@@ -874,7 +886,7 @@ public class SiteListsTest {
 
         @Test
         @DisplayName("reload() judges the link again and loads it once the list is off")
-        void testReloadAfterTheListTurnsOff() {
+        void reloadLoadsOnceTheListIsOff() {
             final AtomicInteger requests = new AtomicInteger();
             try (final LocalHttp origin = picture(requests)) {
                 whitelist(false, "youtube.com");
@@ -882,13 +894,13 @@ public class SiteListsTest {
                 assertSame(MRL.Status.BLOCKED, mrl.status());
 
                 assertSame(mrl, mrl.reload());
-                assertTrue(mrl.await(TIMEOUT_MS));
+                assertTrue(mrl.await(TIMEOUT_MS), "the refused reload settles");
                 assertSame(MRL.Status.BLOCKED, mrl.status(), "a reload under the same list is refused again");
                 assertEquals(0, requests.get(), "no request reached the origin");
 
                 WaterMediaConfig.player.whitelist.enable = false;
                 assertSame(mrl, mrl.reload());
-                assertTrue(mrl.await(TIMEOUT_MS));
+                assertTrue(mrl.await(TIMEOUT_MS), "the allowed reload settles");
                 assertSame(MRL.Status.LOADED, mrl.status(), () -> "the link did not load: " + mrl.exception());
                 assertNull(mrl.exception());
                 assertTrue(requests.get() > 0, "the reload reached the origin");
@@ -899,38 +911,38 @@ public class SiteListsTest {
     // EVERY CASE REFUSES ITS SHARE AND NAMES ITS OWN .invalid SERVER, SO NO SMB CONNECTION CAN EVER BE ATTEMPTED
     @Nested
     @DisplayName("Windows share strings")
-    @EnabledOnOs(OS.WINDOWS)
+    @EnabledOnOs(value = OS.WINDOWS, disabledReason = "only a Windows path reads a share string as the root of a server")
     class ShareStrings {
 
         @Test
         @DisplayName("A backslash share string becomes a file link of its server, which the blacklist forbids")
-        void testBackslashShareIsForbidden() {
+        void backslashShareIsForbidden() {
             blacklist("site-lists-share-a.invalid");
             final MRL mrl = PlayerAPI.mrl("\\\\site-lists-share-a.invalid\\share\\a b.png");
             assertEquals(URI.create("file://site-lists-share-a.invalid/share/a%20b.png"), mrl.uri());
-            assertTrue(mrl.await(TIMEOUT_MS));
+            assertTrue(mrl.await(TIMEOUT_MS), "the share settles");
             assertSame(MRL.Status.BLOCKED, mrl.status());
             assertInstanceOf(BlacklistException.class, mrl.exception());
         }
 
         @Test
         @DisplayName("A slash share string becomes a file link of its server, which the whitelist does not allow")
-        void testSlashShareIsNotAllowed() {
+        void slashShareIsNotAllowed() {
             whitelist(false, "youtube.com");
             final MRL mrl = PlayerAPI.mrl("//site-lists-share-b.invalid/share/a b.png");
             assertEquals(URI.create("file://site-lists-share-b.invalid/share/a%20b.png"), mrl.uri());
-            assertTrue(mrl.await(TIMEOUT_MS));
+            assertTrue(mrl.await(TIMEOUT_MS), "the share settles");
             assertSame(MRL.Status.BLOCKED, mrl.status());
             assertInstanceOf(WhitelistException.class, mrl.exception());
         }
 
         @Test
         @DisplayName("A share string is judged by its server even under trustLocal")
-        void testShareIsNeverTrusted() {
+        void shareIsNeverTrusted() {
             whitelist(true, "youtube.com");
             final MRL mrl = PlayerAPI.mrl("\\\\site-lists-share-c.invalid\\share\\a.png");
             assertEquals(URI.create("file://site-lists-share-c.invalid/share/a.png"), mrl.uri());
-            assertTrue(mrl.await(TIMEOUT_MS));
+            assertTrue(mrl.await(TIMEOUT_MS), "the share settles");
             assertSame(MRL.Status.BLOCKED, mrl.status());
             assertInstanceOf(WhitelistException.class, mrl.exception());
         }
@@ -942,7 +954,7 @@ public class SiteListsTest {
 
         @Test
         @DisplayName("A whitelist turned on after the load refuses the player and blocks only the judged MRL")
-        void testWhitelistRefusesLoadedLinks() {
+        void whitelistRefusesLoadedLinks() {
             final AtomicInteger requests = new AtomicInteger();
             try (final LocalHttp origin = picture(requests)) {
                 final MRL first = loaded(origin.uri("/site-lists/revalidated-api.png"));
@@ -953,9 +965,9 @@ public class SiteListsTest {
                 final HeadlessGFXEngine[] made = new HeadlessGFXEngine[1];
                 final MediaPlayer player = PlayerAPI.player(first, () -> made[0] = PlayerAPI.headlessEngine(), () -> null);
                 if (player != null) player.release();
-                assertNull(player);
+                assertNull(player, "no player for the refused link");
                 assertSame(MRL.Status.BLOCKED, first.status());
-                assertTrue(first.status().failed());
+                assertTrue(first.status().failed(), "a BLOCKED MRL counts as failed");
                 final WhitelistException refusal = assertInstanceOf(WhitelistException.class, first.exception());
                 assertEquals("(wm_err:1150) Failed to resolve " + first.uri() + ", the site is not allowed", refusal.getMessage());
                 assertNull(first.source(0));
@@ -981,7 +993,7 @@ public class SiteListsTest {
 
         @Test
         @DisplayName("A blacklist turned on after the load refuses the player of a LAN link even under trustLocal")
-        void testBlacklistRefusesLoadedLinks() {
+        void blacklistRefusesLoadedLinks() {
             final AtomicInteger requests = new AtomicInteger();
             try (final LocalHttp origin = picture(requests)) {
                 final MRL mrl = loaded(origin.uri("/site-lists/revalidated-forbidden.png"));
@@ -997,7 +1009,7 @@ public class SiteListsTest {
 
         @Test
         @DisplayName("A blocked MRL loads and gets its player again once the list is off and it reloads")
-        void testBlockedMrlComesBack() {
+        void blockedMrlComesBack() {
             final AtomicInteger requests = new AtomicInteger();
             try (final LocalHttp origin = picture(requests)) {
                 final MRL mrl = loaded(origin.uri("/site-lists/revalidated-back.png"));
@@ -1007,23 +1019,23 @@ public class SiteListsTest {
 
                 WaterMediaConfig.player.blacklist.enable = false;
                 assertSame(mrl, mrl.reload());
-                assertTrue(mrl.await(TIMEOUT_MS));
+                assertTrue(mrl.await(TIMEOUT_MS), "the reload settles");
                 assertSame(MRL.Status.LOADED, mrl.status(), () -> "the link did not load: " + mrl.exception());
                 final MediaPlayer player = PlayerAPI.player(mrl, PlayerAPI::headlessEngine, () -> null);
-                assertNotNull(player);
+                assertNotNull(player, "the reloaded MRL gets its player");
                 player.release();
             }
         }
 
         @Test
         @DisplayName("A local file keeps its player while trusted and is refused once trustLocal turns off")
-        void testLocalFileFollowsTrustLocal() throws IOException {
+        void localFileFollowsTrustLocal() throws IOException {
             final MRL trusted = loaded(Fixtures.fileUri(copy("revalidated-trusted.png")));
             final MRL untrusted = loaded(Fixtures.fileUri(copy("revalidated-untrusted.png")));
             whitelist(true, "youtube.com");
             blacklist("pornhub.com");
             final MediaPlayer player = PlayerAPI.player(trusted, PlayerAPI::headlessEngine, () -> null);
-            assertNotNull(player);
+            assertNotNull(player, "the trusted local file gets its player");
             player.release();
             assertSame(MRL.Status.LOADED, trusted.status());
 
@@ -1035,7 +1047,7 @@ public class SiteListsTest {
 
         @Test
         @DisplayName("water://global gets its player under lists that refuse everything else")
-        void testGlobalGetsItsPlayer() {
+        void globalGetsItsPlayer() {
             final URI link = URI.create("water://global/site-lists-player.png");
             final Platform platform = platform(link, new AtomicInteger(), image(URI.create("https://watermedia.srrapero720.me/site-lists-player.png")));
             PlatformAPI.register(platform);
@@ -1048,7 +1060,7 @@ public class SiteListsTest {
             whitelist(false, "youtube.com");
             blacklist("global", "watermedia.srrapero720.me");
             final MediaPlayer player = PlayerAPI.player(mrl, PlayerAPI::headlessEngine, () -> null);
-            assertNotNull(player);
+            assertNotNull(player, "water://global gets its player");
             player.release();
             assertSame(MRL.Status.LOADED, mrl.status());
         }

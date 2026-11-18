@@ -16,7 +16,10 @@ import static org.watermedia.test.support.ImageBytes.riff;
 import static org.watermedia.test.support.ImageBytes.vp8x;
 import static org.watermedia.test.support.ImageBytes.webpChunk;
 
-/** Generator of the hostile image corpus under {@code src/test/resources/pentest}; {@code PentestTest} reads the committed output. */
+/**
+ * Generator of the hostile image corpus under {@code src/test/resources/pentest}; {@code PentestTest} reads the committed
+ * output. Run from the repository root to rewrite the corpus, or pass another output directory to compare against it.
+ */
 public final class MaliciousImages {
 
     private MaliciousImages() {}
@@ -24,7 +27,7 @@ public final class MaliciousImages {
     public static void main(final String[] args) throws IOException {
         // EACH FILE SITS NEXT TO ITS VULNERABILITY CLASS, THE CVE IT MIRRORS AND THE GUARD THAT REFUSES IT. PAYLOADS STAY
         // SMALL: EVERY BOMB DECLARES ITS COST IN HEADER FIELDS (DIMENSIONS, FRAME COUNTS, EXPANSION RATIOS), NOT IN BULK
-        final Path root = Fixtures.PENTEST_DIR;
+        final Path root = args.length > 0 ? Path.of(args[0]) : Fixtures.PENTEST_DIR;
         gif(root.resolve("gif"));
         png(root.resolve("png"));
         jpeg(root.resolve("jpeg"));
@@ -47,7 +50,7 @@ public final class MaliciousImages {
         write(dir, "direct-memory-bomb.pam", ascii("P4\n16384 16384\n"));
 
         // DEPTH 65535 WOULD SIZE A 2 GiB ROW FROM 69 BYTES (CVE-2017-2581's RASTER ARITHMETIC); NetpbmReader.Header BINDS DEPTH
-        // TO THE TUPLE TYPE, SO RGB WITH ANY DEPTH BUT 3 IS REFUSED BEFORE A ROW IS SIZED. HEIGHT 1 DODGES SIZE HEURISTICS
+        // TO THE TUPLE TYPE, SO RGB WITH ANY DEPTH BUT 3 IS REFUSED BEFORE THE RASTER IS SIZED. HEIGHT 1 DODGES SIZE HEURISTICS
         write(dir, "pam-depth-bomb.pam", ascii(
                 "P7\nWIDTH 16384\nHEIGHT 1\nDEPTH 65535\nMAXVAL 65535\nTUPLTYPE RGB\nENDHDR\n"));
 
@@ -63,9 +66,9 @@ public final class MaliciousImages {
                         + "\rX [12:00:00] [Render thread/INFO]: forged log line ".repeat(1_200)
                         + "\nENDHDR\n"));
 
-        // A P7 HEADER THAT NEVER REACHES ENDHDR; THE HEADER SCAN IS CAPPED AT 64 KiB AND REFUSES THE MISSING
-        // TERMINATOR AT END OF INPUT INSTEAD OF BUFFERING THE WHOLE BODY
-        write(dir, "unbounded-header.pam", ascii("P7\n#" + "Z".repeat(40_000) + "\n"));
+        // A P7 HEADER THAT NEVER REACHES ENDHDR, ITS COMMENT LINE LONGER THAN THE 64 KiB PAM HEADER CAP; THE HEADER SCAN
+        // STOPS AT THE CAP WHILE INPUT REMAINS INSTEAD OF BUFFERING THE WHOLE BODY
+        write(dir, "unbounded-header.pam", ascii("P7\n#" + "Z".repeat(65_536) + "\n"));
 
         // A COMMENT BETWEEN DIGITS: THE TOKENIZER ENDS A TOKEN AT '#', SO "1#x\n6384" READS AS 1x6384 LIKE EVERY
         // REFERENCE DECODER AND NEVER AS 16384, WHICH WOULD LET AN UPSTREAM SIZE CHECK SEE DIFFERENT DIMENSIONS
@@ -94,9 +97,9 @@ public final class MaliciousImages {
         // DIMENSION CAP REFUSES IT
         write(dir, "blockcount-overflow-zero.dds", ddsFile(65535, 65535, PixelFormat.BC7, 1, 1));
 
-        // ARRAY-SIZE AMPLIFICATION: 10000 DECLARED SLICES COST 8 FOOTER BYTES EACH BUT TWO DirectByteBuffer OBJECTS;
-        // THE DIMENSION AND arraySize CAPS REFUSE IT
-        write(dir, "arraysize-amplification.dds", ddsFile(65535, 65535, PixelFormat.BC7, 10_000, 10_000));
+        // ARRAY-SIZE AMPLIFICATION: 10000 DECLARED SLICES COST 8 FOOTER BYTES EACH BUT TWO DirectByteBuffer OBJECTS. A 4x4
+        // BC7 SLICE IS ONE 16-BYTE BLOCK, SO ONLY THE SLICE COUNT DRIVES THE COST AND THE 4096-SLICE arraySize CAP REFUSES IT
+        write(dir, "arraysize-amplification.dds", ddsFile(4, 4, PixelFormat.BC7, 10_000, 10_000));
 
         // STRUCTURAL FIELDS A READER MUST CHECK: dwSize 0, 15 MIP LEVELS, TEXTURE3D AND THE CUBEMAP FLAG (SIX FACES PER
         // SLICE WOULD SEND GARBAGE BLOCKS TO THE GPU AS VALID BCn); THE HEADER CHECK REFUSES THE ZERO dwSize FIRST
@@ -117,14 +120,15 @@ public final class MaliciousImages {
     private static void webp(final Path dir) throws IOException {
         Files.createDirectories(dir);
 
-        // A RUN OF 2000 BARE </rdf:li> TERMINATORS BEFORE ONE REAL 20000-CHARACTER ELEMENT, SHAPED TO MAKE A RESCANNING
-        // XMP PARSER RETAIN THE SAME BODY ONCE PER TERMINATOR (CWE-1333); THE SCAN ADVANCES PAST EVERY CONSUMED ELEMENT
+        // A RUN OF 2000 BARE </rdf:li> TERMINATORS BEFORE ONE REAL CREATOR, SHAPED TO MAKE A RESCANNING XMP PARSER RETAIN
+        // THE SAME BODY ONCE PER TERMINATOR (CWE-1333); THE SCAN ADVANCES PAST EVERY CONSUMED ELEMENT. THE BODY STAYS UNDER
+        // THE 4096-CHARACTER VALUE CAP AND SITS IN dc:creator, SO EVERY RETAINED COPY WOULD SHOW AS ONE MORE AUTHOR
         final int terminators = 2_000;
-        final int bodyLength = 20_000;
+        final int bodyLength = 4_000;
         // THE TRAILING VP8L MAKES THE FILE DECODABLE, SO A REFUSAL CANNOT HIDE WHAT THE XMP PARSE COST
         write(dir, "xmp-quadratic-bomb.webp", riff(webpChunk("VP8X", vp8x(0x00, 1, 1)),
-                webpChunk("XMP ", ascii("<dc:title>" + "</rdf:li>".repeat(terminators)
-                        + "<rdf:li>" + "Z".repeat(bodyLength) + "</rdf:li></dc:title>")),
+                webpChunk("XMP ", ascii("<dc:creator>" + "</rdf:li>".repeat(terminators)
+                        + "<rdf:li>" + "Z".repeat(bodyLength) + "</rdf:li></dc:creator>")),
                 webpChunk("VP8L", new ImageBytes().u8(0x2F).le32(0).raw(vp8lSingleSymbolGroup()).bytes())));
 
         // AN ANIMATED 8192x8192 VP8X WITH NO FRAME: THE PIXEL CAP ADMITS IT, AND THE 256 MiB COMPOSITING CANVAS IS ONLY
@@ -139,8 +143,8 @@ public final class MaliciousImages {
                 .raw(vp8lSingleSymbolGroup())
                 .bytes())));
 
-        // AN 8192x8192 KEY FRAME WITH A 2-BYTE PARTITION 0, ~608 MB OF PLANES FROM 52 BYTES IF THE BOOL DECODER READ
-        // IMPLICIT ZEROS (CVE-2018-25009/25010/25012/25014); ITS EOF FLAG REFUSES THE DRY PARTITION BEFORE ANY PLANE
+        // AN 8192x8192 KEY FRAME WITH A 2-BYTE PARTITION 0, A FULL FRAME DECODED FROM 52 BYTES IF THE BOOL DECODER READ
+        // IMPLICIT ZEROS (CVE-2018-25009/25010/25012/25014); ITS EOF FLAG REFUSES THE FIRST MACROBLOCK PAST THE DRY PARTITION
         write(dir, "vp8-booldecoder-eof.webp", riff(
                 webpChunk("VP8X", vp8x(0x10, 8_192, 8_192)), // ALPHA FLAG FORCES THE BGRA PATH
                 webpChunk("VP8 ", new ImageBytes()
@@ -159,10 +163,12 @@ public final class MaliciousImages {
                 .raw(vp8lGroupBomb())
                 .bytes())));
 
-        // TRUNCATED PREAMBLE, CHUNK HEADER AND CHUNK BODIES: THE CHUNK WALK REPORTS EACH AS CodecException
+        // TRUNCATED PREAMBLE, CHUNK HEADER AND CHUNK BODIES: THE CHUNK WALK REPORTS EACH AS CodecException. THE RIFF SIZE
+        // COVERS THE 4-BYTE PARTIAL HEADER, BECAUSE THE READER IGNORES WHATEVER TRAILS THE RIFF BODY
         write(dir, "truncated-preamble.webp", new ImageBytes().ascii("RIFF").le32(4).ascii("WEBP").bytes());
         write(dir, "trailing-partial-chunk.webp", new ImageBytes()
-                .raw(riff(webpChunk("VP8X", vp8x(0x00, 1, 1))))
+                .ascii("RIFF").le32(26).ascii("WEBP")
+                .raw(webpChunk("VP8X", vp8x(0x00, 1, 1)))
                 .ascii("AAAA").bytes());
         write(dir, "chunk-size-past-eof.webp", new ImageBytes()
                 .ascii("RIFF").le32(21).ascii("WEBP")
@@ -217,8 +223,9 @@ public final class MaliciousImages {
     private static void svg(final Path dir) throws IOException {
         Files.createDirectories(dir);
 
-        // INTERNAL-SUBSET ENTITIES EXPANDING TO 300,000 <g> NODES (BILLION LAUGHS, librsvg CVE-2019-20446); SvgParser COUNTS
-        // ELEMENTS AGAINST ITS OWN BUDGET, AND THE SUBSET STAYS UNDER THE 4096-BYTE SNIFF WINDOW SO THE FILE STILL READS AS SVG
+        // INTERNAL-SUBSET ENTITIES EXPANDING TO 300,000 <g> NODES (BILLION LAUGHS, librsvg CVE-2019-20446); SvgParser SETS
+        // ITS OWN 100,000-NODE ENTITY REPLACEMENT LIMIT INSTEAD OF INHERITING THE JDK DEFAULT, AND IT REFUSES THE EXPANSION.
+        // THE SUBSET STAYS UNDER THE 4096-BYTE SNIFF WINDOW SO THE FILE STILL READS AS SVG
         write(dir, "entity-markup-bomb.svg", ascii(
                 "<?xml version=\"1.0\"?><!DOCTYPE svg [\n"
                         + entity("e0", "<g a='012345'/>".repeat(100))
@@ -226,8 +233,8 @@ public final class MaliciousImages {
                         + entity("e2", "&e1;".repeat(30))
                         + "]><svg xmlns=\"http://www.w3.org/2000/svg\" width=\"10\" height=\"10\">&e2;</svg>"));
 
-        // ENTITIES EXPANDING INSIDE ONE d ATTRIBUTE TO 500,000 SEGMENTS, WHICH NO JDK LIMIT BOUNDS ON 17 AND 21;
-        // THE PATH SEGMENT CAP REFUSES THEM BEFORE THE PATH IS COPIED TOWARDS THE EDGE TABLE
+        // ENTITIES EXPANDING INSIDE ONE d ATTRIBUTE TO 500,000 SEGMENTS (2,000,004 CHARACTERS), WHICH NO JDK DEFAULT BOUNDS
+        // ON 17 AND 21; SvgParser's OWN 1,000,000-CHARACTER TOTAL ENTITY SIZE LIMIT REFUSES THE EXPANSION BEFORE ANY PATH IS BUILT
         write(dir, "attribute-entity-path-bomb.svg", ascii(
                 "<?xml version='1.0'?><!DOCTYPE svg [\n"
                         + entity("d0", "l1 1".repeat(500))
@@ -328,8 +335,8 @@ public final class MaliciousImages {
                         .raw(0x78, 0x20).be32(1).fill(0x00, 4).bytes()),
                 idatGray1x1()));
 
-        // 16384x16384 RGBA FROM A 45-BYTE IHDR: EACH AXIS PASSES, BUT Limits.fits REFUSES THE PRODUCT BEFORE ANY CANVAS
-        // EXISTS, THE DEFENCE libpng SHIPS AS png_set_user_limits
+        // 16384x16384 RGBA FROM A 45-BYTE IHDR: EACH AXIS PASSES, BUT THE IHDR PIXEL CAP REFUSES THE PRODUCT BEFORE ANY
+        // CANVAS EXISTS, THE DEFENCE libpng SHIPS AS png_set_user_limits
         write(dir, "canvas-pixel-bomb.png", ImageBytes.png(ihdr(16_384, 16_384, 8, 6)));
 
         // 8192x8192 16-BIT TRUECOLOR DECLARES A 384 MB SCANLINE BUFFER BEHIND AN 8-BYTE IDAT (libpng CVE-2011-3026's
@@ -346,12 +353,15 @@ public final class MaliciousImages {
                 idatGray1x1()));
 
         // acTL num_plays 0xFFFFFFFB, UNSIGNED IN THE SPEC AND NEGATIVE AS AN int; scan() MAPS EVERY NON-POSITIVE COUNT TO
-        // REPEAT_FOREVER INSTEAD OF HANDING ImageData A PLAY COUNT ITS CONSTRUCTOR REJECTS
+        // REPEAT_FOREVER INSTEAD OF HANDING ImageData A PLAY COUNT ITS CONSTRUCTOR REJECTS. TWO FRAMES, BECAUSE scan() READS
+        // THE PLAY COUNT OF AN ANIMATION ONLY: ONE FRAME IS A STILL IMAGE THAT PLAYS ONCE
         write(dir, "actl-negative-loopcount.png", ImageBytes.png(
                 ihdr(1, 1, 8, 0),
                 pngChunk("acTL", new ImageBytes().be32(2).be32(-5).bytes()),
                 pngChunk("fcTL", fctl(0)),
-                idatGray1x1()));
+                idatGray1x1(),
+                pngChunk("fcTL", fctl(1)),
+                pngChunk("fdAT", new ImageBytes().be32(2).raw(deflate(new byte[] { 0, 0 }, 9)).bytes())));
 
         // A WELL-FORMED 2-BYTE tRNS ON AN RGBA IMAGE, WHICH THE SPEC FORBIDS; THE ANCILLARY CHUNK IS SKIPPED INSTEAD OF
         // FAILING THE DECODE WITH AN IllegalArgumentException
@@ -382,7 +392,8 @@ public final class MaliciousImages {
         // A STRUCTURALLY VALID PNG WITH NO IDAT; THE READER REFUSES THE MISSING IMAGE DATA AS CodecException
         write(dir, "no-idat.png", ImageBytes.png(ihdr(1, 1, 8, 0)));
 
-        // 4 MiB OF ONE BYTE DEFLATED TO A FEW KB INSIDE zTXt; THE TEXT INFLATE CAP STOPS IT AND THE CHUNK IS SKIPPED
+        // 4 MiB OF ONE BYTE DEFLATED TO A FEW KB INSIDE zTXt, EXACTLY THE READER'S TEXT BUDGET; THE 2 MiB zTXt INFLATE CAP
+        // STOPS IT AND THE CHUNK IS SKIPPED
         write(dir, "ztxt-zlib-bomb.png", ImageBytes.png(
                 ihdr(1, 1, 8, 0),
                 pngChunk("zTXt", new ImageBytes().ascii("A").u8(0).u8(0)
@@ -437,7 +448,7 @@ public final class MaliciousImages {
                 .bytes());
 
         // 500 AC REFINEMENT SCANS WITH NO FIRST PASS: ONE 15-BIT EOB SYMBOL BUYS 16384 BLOCKS OF 63 ITERATIONS, AND 4096x4096
-        // IS 16 x 16384 BLOCKS, SO 30 ZERO BYTES PER SCAN; A REFINEMENT WITHOUT ITS FIRST PASS IS REFUSED AND MAX_SCANS BOUNDS IT
+        // IS 16 x 16384 BLOCKS, SO 30 ZERO BYTES PER SCAN; THE SCAN-ORDERING GATE REFUSES THE FIRST REFINEMENT WITHOUT ITS FIRST PASS
         final ImageBytes eob = new ImageBytes()
                 .raw(0xFF, 0xD8)
                 .raw(segment(0xDB, new ImageBytes().u8(0).fill(0x01, 64).bytes()))
@@ -493,12 +504,13 @@ public final class MaliciousImages {
                 .bytes());
 
         // CHROMA SAMPLED TALLER THAN LUMA (CVE-2018-14498 / CVE-2017-15232 SHAPE); COLOUR CONVERSION RESAMPLES EVERY
-        // COMPONENT ONTO THE MAX SAMPLING GRID WITH CLAMPED INDEXES, SO NO PLANE IS READ OUT OF BOUNDS
+        // COMPONENT ONTO THE MAX SAMPLING GRID WITH CLAMPED INDEXES, SO NO PLANE IS READ OUT OF BOUNDS. EVERY COMPONENT
+        // USES THE ONE QUANTIZATION TABLE THE FILE DEFINES, SO THE FRAME BUILDS FROM ZERO COEFFICIENTS AND REACHES IT
         write(dir, "chroma-taller-than-luma.jpg", new ImageBytes()
                 .raw(0xFF, 0xD8)
                 .raw(segment(0xDB, new ImageBytes().u8(0).fill(0x01, 64).bytes()))
                 .raw(segment(0xC0, new ImageBytes().u8(8).be16(64).be16(64).u8(3)
-                        .raw(1, 0x11, 0).raw(2, 0x12, 1).raw(3, 0x12, 1).bytes()))
+                        .raw(1, 0x11, 0).raw(2, 0x12, 0).raw(3, 0x12, 0).bytes()))
                 .raw(0xFF, 0xD9)
                 .bytes());
 
@@ -593,8 +605,9 @@ public final class MaliciousImages {
         for (int i = 0; i < 4; i++) gce.raw(minimalGifFrame());
         write(dir, "gce-blocksize-divergence.gif", gce.u8(0x3B).bytes());
 
-        // A FOREVER LOOP WITH 5000 EMPTY APPLICATION EXTENSIONS PAST THE FIRST FRAME, AIMED AT A READER THAT RE-PARSES
-        // METADATA ON EVERY REPLAY; METADATA IS READ ONCE AT CONSTRUCTION, CAPPED, AND NEVER RE-READ BY reset()
+        // A FOREVER LOOP WITH 2048 APPLICATION EXTENSIONS (TWICE THE 1024-RECORD CAP) PAST THE FIRST FRAME, AIMED AT A
+        // READER THAT KEEPS EVERY RECORD OR RE-PARSES METADATA ON EVERY REPLAY. EACH CARRIES THE 11-BYTE HEADER BLOCK THE
+        // SCAN NEEDS TO COUNT IT AS A RECORD; METADATA IS READ ONCE AT CONSTRUCTION, CAPPED, AND NEVER RE-READ BY reset()
         final ImageBytes meta = new ImageBytes()
                 .ascii("GIF89a")
                 .le16(64).le16(64)
@@ -602,7 +615,7 @@ public final class MaliciousImages {
                 .raw(0x00, 0x00, 0x00, 0xFF, 0xFF, 0xFF)
                 .raw(0x21, 0xFF, 0x0B).ascii("NETSCAPE2.0").raw(0x03, 0x01, 0x00, 0x00, 0x00)
                 .raw(minimalGifFrame());
-        for (int i = 0; i < 5_000; i++) meta.raw(0x21, 0xFF, 0x00, 0x00); // EMPTY APP EXTENSION
+        for (int i = 0; i < 2_048; i++) meta.raw(0x21, 0xFF, 0x0B).ascii("METADATA1.0").u8(0x00); // HEADER BLOCK, NO PAYLOAD
         for (int i = 0; i < 256; i++) meta.raw(minimalGifFrame());
         write(dir, "metadata-accumulation.gif", meta.u8(0x3B).bytes());
     }

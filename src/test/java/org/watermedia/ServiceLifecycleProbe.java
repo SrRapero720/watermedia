@@ -29,6 +29,14 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 /** Exercises the loaded services in a fresh JVM: searches, uploads and the MRL cache sweep. */
 public final class ServiceLifecycleProbe {
+    private static final int UPLOAD_WORKERS = 4; // NetworkAPI.UPLOAD_THREADS
+    private static final int UPLOADS = 12;
+
+    private ServiceLifecycleProbe() {}
+
+    // ==========================================================================
+    // INTERNAL API
+    // ==========================================================================
     public static void main(final String[] arguments) throws Exception {
         final Path root = Path.of("").toAbsolutePath();
         WaterConfig.setPath(root.resolve("config"));
@@ -50,6 +58,7 @@ public final class ServiceLifecycleProbe {
     // ==========================================================================
     // UTILITY
     // ==========================================================================
+    // A RESOLUTION THAT EXPIRES AT ONCE: THE NEXT CACHE SWEEP FORGETS ITS HANDLE AND A RELOAD GIVES THE CANONICAL ONE
     private static void evicted() throws Exception {
         for (final Platform platform: PlatformAPI.platforms()) PlatformAPI.unregister(platform);
         final URI key = URI.create("fixture:expired");
@@ -66,6 +75,7 @@ public final class ServiceLifecycleProbe {
         if (!old.await(3_000) || old.status() != MRL.Status.EXPIRED || old.sourceCount() != 1)
             throw new AssertionError("Expiring fixture did not load");
         awaitIdle(old);
+        // THE NEXT REQUEST SWEEPS THE CACHE AT ONCE INSTEAD OF AFTER THE SWEEP PERIOD
         final var ownerField = MRL.class.getDeclaredField("owner");
         ownerField.setAccessible(true);
         final Object owner = ownerField.get(old);
@@ -81,6 +91,7 @@ public final class ServiceLifecycleProbe {
             throw new AssertionError("Reload did not return the canonical replacement");
     }
 
+    // THE SWEEP KEEPS AN MRL WHOSE LOADER IS STILL BUSY, SO THE CASE WAITS FOR IT UNDER ITS OWN LOCK
     private static void awaitIdle(final MRL mrl) throws Exception {
         final var lockField = MRL.class.getDeclaredField("loadLock");
         final var loadingField = MRL.class.getDeclaredField("loading");
@@ -95,6 +106,7 @@ public final class ServiceLifecycleProbe {
         }, 3_000)) throw new AssertionError("Loader did not become idle");
     }
 
+    // A NEW QUERY DISCARDS THE SEARCH IN FLIGHT, A HELD RESOLUTION NEVER GATES SEARCHES AND A REGISTRY CHANGE DROPS THE CACHE
     private static void platforms() throws Exception {
         for (final Platform platform: PlatformAPI.platforms()) PlatformAPI.unregister(platform);
         final CountDownLatch entered = new CountDownLatch(1);
@@ -109,6 +121,7 @@ public final class ServiceLifecycleProbe {
                 @Override public Resolution resolve(final URI uri) {
                     if (!"fixture".equals(uri.getScheme())) return null;
                     resolveEntered.countDown();
+                    // BOTH HELD CALLBACKS IGNORE INTERRUPTS, LIKE A HANDLER STUCK IN I/O: ONLY THEIR LATCH RELEASES THEM
                     boolean done = false;
                     while (!done) {
                         try { done = resolveResume.await(10, TimeUnit.SECONDS); }
@@ -233,15 +246,17 @@ public final class ServiceLifecycleProbe {
         }
     }
 
+    // THE UPLOAD POOL SENDS FOUR AT A TIME WHILE THE OTHERS WAIT PENDING, AND A BAD REMOTE FAILS THE STATUS INSTEAD OF THROWING
     private static void uploads(final Path root) throws Exception {
-        final CountDownLatch entered = new CountDownLatch(4);
+        final AtomicInteger arrived = new AtomicInteger();
         final CountDownLatch respond = new CountDownLatch(1);
-        final var handlers = Executors.newFixedThreadPool(4, ThreadTool.factory("Upload-Origin", Thread.NORM_PRIORITY));
+        // ONE HANDLER THREAD PER UPLOAD, SO ONLY THE CLIENT POOL CAN LIMIT HOW MANY ARRIVE AT ONCE
+        final var handlers = Executors.newFixedThreadPool(UPLOADS, ThreadTool.factory("Upload-Origin", Thread.NORM_PRIORITY));
         final Path file = Files.write(root.resolve("upload.bin"), new byte[8_192]);
         final boolean handlersStopped;
         try (final LocalHttp origin = LocalHttp.start("/upload", exchange -> {
             exchange.getRequestBody().readAllBytes();
-            entered.countDown();
+            arrived.incrementAndGet();
             try { if (!respond.await(5, TimeUnit.SECONDS)) throw new IOException("Held upload timed out"); }
             catch (final InterruptedException interrupted) { Thread.currentThread().interrupt(); }
             try { LocalHttp.respond(exchange, "text/plain", "stored12".getBytes(StandardCharsets.UTF_8), 0); }
@@ -258,10 +273,13 @@ public final class ServiceLifecycleProbe {
                 NetworkAPI.upload(root.resolve("missing.bin").toFile());
                 throw new AssertionError("A missing file was accepted for upload");
             } catch (final IllegalArgumentException expected) {}
-            final NetworkAPI.UploadStatus[] statuses = new NetworkAPI.UploadStatus[12];
+            final NetworkAPI.UploadStatus[] statuses = new NetworkAPI.UploadStatus[UPLOADS];
             for (int i = 0; i < statuses.length; i++) statuses[i] = NetworkAPI.upload(file.toFile());
-            if (!entered.await(3, TimeUnit.SECONDS)) throw new AssertionError("Upload workers did not start");
-            // FOUR WORKERS SERVE THE QUEUE; THE WAITING UPLOADS STAY PENDING INSTEAD OF FAILING
+            if (!PlayerWait.awaitCondition(() -> arrived.get() >= UPLOAD_WORKERS, 3_000))
+                throw new AssertionError("Upload workers did not start: " + arrived.get() + " arrived");
+            // A WIDER POOL SENDS ITS NEXT UPLOAD WITHIN MILLISECONDS; THE HELD ONES ANSWER WELL BEFORE THEIR 2 S READ TIMEOUT
+            if (PlayerWait.awaitCondition(() -> arrived.get() > UPLOAD_WORKERS, 300))
+                throw new AssertionError("More uploads ran at once than the " + UPLOAD_WORKERS + " workers: " + arrived.get());
             for (final var status: statuses) {
                 if (status.failed() || status.completed()) throw new AssertionError("A queued upload ended before the server answered");
             }

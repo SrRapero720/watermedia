@@ -102,16 +102,16 @@ public class NewgroundsPlatformTest {
         private final NewgroundsPlatform platform = new NewgroundsPlatform();
 
         @Test
-        @DisplayName("Foreign hosts and lookalikes are disclaimed with null")
-        void testForeignHosts() throws PlatformException {
+        @DisplayName("Foreign hosts, lookalikes and the uploads CDN are disclaimed with null")
+        void foreignHostsYieldNull() throws PlatformException {
             assertNull(this.platform.resolve(URI.create("https://example.com/portal/view/297383")));
             assertNull(this.platform.resolve(URI.create("https://notnewgrounds.com/portal/view/297383")));
             assertNull(this.platform.resolve(URI.create("https://uploads.ungrounded.net/alternate/65000/65289_alternate_865.360p.mp4")));
         }
 
         @Test
-        @DisplayName("Unsupported shapes of the site fail without network and are not mature blocks")
-        void testUnsupportedShapes() {
+        @DisplayName("Unsupported shapes of the site fail with their code before any request, and are not mature blocks")
+        void unsupportedShapesThrow() {
             for (final String url: List.of("https://www.newgrounds.com/", "https://newgrounds.com/games/view/1", "https://burn7.newgrounds.com/audio",
                     "https://www.newgrounds.com/art/view/luwano", "https://www.newgrounds.com/portal/view/abc")) {
                 final PlatformException thrown = assertThrows(PlatformException.class, () -> this.platform.resolve(URI.create(url)), url);
@@ -126,8 +126,8 @@ public class NewgroundsPlatformTest {
     class Movies {
 
         @Test
-        @DisplayName("One MP4 per tier with the tier height, and the page's decoded metadata")
-        void testMovieParsing() throws PlatformException {
+        @DisplayName("One MP4 per tier with the tier height, the page's decoded metadata and the default headers")
+        void movieKeepsOneMp4PerTier() throws PlatformException {
             final Source source = NewgroundsPlatform.parseMovie(MOVIE_HTML, MOVIE_JSON, "297383");
             assertEquals(MediaType.VIDEO, source.type());
             assertEquals(3, source.qualities().size());
@@ -144,8 +144,8 @@ public class NewgroundsPlatformTest {
         }
 
         @Test
-        @DisplayName("Behind the adult login wall the JSON's own title and author serve")
-        void testWalledMovieUsesJsonMetadata() throws PlatformException {
+        @DisplayName("Behind the adult login wall the JSON's own title and author serve, without a thumbnail")
+        void walledMovieUsesJsonMetadata() throws PlatformException {
             WaterMediaConfig.platforms.allowMatureContent = true;
             final Source source = NewgroundsPlatform.parseMovie("", MOVIE_JSON, "297383");
             assertEquals("Metal Gear Awesome", source.metadata().title());
@@ -155,7 +155,7 @@ public class NewgroundsPlatformTest {
 
         @Test
         @DisplayName("The site's error message and a Flash-only movie fail with a PlatformException")
-        void testMovieFailures() {
+        void siteErrorAndFlashOnlyFail() {
             final PlatformException missing = assertThrows(PlatformException.class,
                     () -> NewgroundsPlatform.parseMovie(MOVIE_HTML, "{\"error\": {\"code\": 404, \"msg\": \"The submission you are looking for could not be found.\"}}", "1"));
             assertTrue(missing.getMessage().contains("could not be found"), missing.getMessage());
@@ -165,8 +165,8 @@ public class NewgroundsPlatformTest {
         }
 
         @Test
-        @DisplayName("Mature and Adult ratings block while the gate is off and pass once it is on")
-        void testMatureGate() throws PlatformException {
+        @DisplayName("Mature and Adult ratings block while the gate is off, Teen passes, and Adult passes once it is on")
+        void matureRatingsBlockWhileGateIsOff() throws PlatformException {
             final String mature = MOVIE_HTML.replace("rated-t", "rated-m");
             final String adult = MOVIE_HTML.replace("rated-t", "rated-a");
             assertThrows(MatureContentException.class, () -> NewgroundsPlatform.parseMovie(mature, MOVIE_JSON, "297383"));
@@ -182,8 +182,8 @@ public class NewgroundsPlatformTest {
     class Audio {
 
         @Test
-        @DisplayName("The player's file, duration and the page's artist")
-        void testAudioParsing() throws PlatformException {
+        @DisplayName("An audio page yields the player's file and duration with the page's title, artist, date and icon")
+        void audioReadsPlayerAndPage() throws PlatformException {
             final Source source = NewgroundsPlatform.parseAudio(AUDIO_HTML, "549479");
             assertEquals(MediaType.AUDIO, source.type());
             assertEquals(1, source.qualities().size());
@@ -197,16 +197,16 @@ public class NewgroundsPlatformTest {
 
         @Test
         @DisplayName("The former embedController boot still yields the file")
-        void testLegacyPlayer() throws PlatformException {
+        void legacyPlayerYieldsFile() throws PlatformException {
             final String legacy = AUDIO_HTML.replace("NgAudioPlayer.fromListenPage({ 'generic_id': 549479, 'type_id': 3, 'url':", "embedController([{\"url\":");
             assertEquals("https://audio.ngfiles.com/549000/549479_B7---BusMode.mp3?f1378892946", NewgroundsPlatform.parseAudio(legacy, "549479").qualities().get(0).uri().toString());
         }
 
         @Test
-        @DisplayName("A page without the player fails with a PlatformException")
-        void testNoPlayer() {
+        @DisplayName("A page without the player fails with a PlatformException that is not a mature block")
+        void pageWithoutPlayerFails() {
             final PlatformException thrown = assertThrows(PlatformException.class, () -> NewgroundsPlatform.parseAudio("<html><body>nothing</body></html>", "1"));
-            assertFalse(thrown instanceof MatureContentException);
+            assertFalse(thrown instanceof MatureContentException, "A missing player is not a mature block");
             assertTrue(thrown.getMessage().contains("no audio file"), thrown.getMessage());
         }
     }
@@ -217,7 +217,7 @@ public class NewgroundsPlatformTest {
 
         @Test
         @DisplayName("One image source per gallery piece with its size and preview")
-        void testArtParsing() throws PlatformException {
+        void artKeepsOneSourcePerPiece() throws PlatformException {
             final List<Source> sources = NewgroundsPlatform.parseArt(ART_HTML, "Art luwano/geistober-2026");
             assertEquals(2, sources.size());
             assertEquals(MediaType.IMAGE, sources.get(0).type());
@@ -231,7 +231,7 @@ public class NewgroundsPlatformTest {
 
         @Test
         @DisplayName("A page without the gallery script fails with a PlatformException")
-        void testNoImages() {
+        void pageWithoutGalleryFails() {
             final PlatformException thrown = assertThrows(PlatformException.class, () -> NewgroundsPlatform.parseArt("<html><body></body></html>", "Art x/y"));
             assertTrue(thrown.getMessage().contains("no images"), thrown.getMessage());
         }
@@ -243,7 +243,7 @@ public class NewgroundsPlatformTest {
 
         @Test
         @DisplayName("BLAKE2b matches the RFC 7693 vectors")
-        void testBlake2b() {
+        void blake2bMatchesRfcVectors() {
             assertEquals("ba80a53f981c4d0d6a2797b69f12f6e94c212f14685ac4b74b12bb6fdbffa2d17d87c5392aab792dc252d5de4533cc9518d38aa8dbf1925ab92386edd4009923",
                     HexFormat.of().formatHex(NewgroundsPlatform.blake2b(64, "abc".getBytes(StandardCharsets.US_ASCII))));
             assertEquals("786a02f742015903c6c6fd852552d272912f4740e15847618a86e217f71f5419d25e1031afee585313896444934eb04b903a685b1448b755d56f701afe9be2ce",
@@ -252,7 +252,7 @@ public class NewgroundsPlatformTest {
 
         @Test
         @DisplayName("Argon2id matches the reference implementation's vectors, one and two lanes")
-        void testArgon2id() throws PlatformException {
+        void argon2idMatchesReferenceVectors() throws PlatformException {
             final byte[] password = "password".getBytes(StandardCharsets.US_ASCII);
             final byte[] salt = "somesalt".getBytes(StandardCharsets.US_ASCII);
             assertEquals("9dfeb910e80bad0311fee20f9c0e2b12c17987b4cac90c2ef54d5b3021c68bfe",
@@ -263,14 +263,14 @@ public class NewgroundsPlatformTest {
 
         @Test
         @DisplayName("A puzzle the live guard accepted on 2026-11-01 solves to the same nonce")
-        void testCapturedPuzzle() throws PlatformException {
+        void capturedPuzzleSolvesToSameNonce() throws PlatformException {
             final byte[] payload = "1793538360467|eb1a1096".getBytes(StandardCharsets.US_ASCII);
             assertEquals(355L, NewgroundsPlatform.solve(payload, 8, new NewgroundsPlatform.Argon2id(4_096, 1, 1, 32, new byte[8])));
         }
 
         @Test
-        @DisplayName("The SHA-256 variant finds a digest with the asked leading zero bits")
-        void testSha256Puzzle() throws Exception {
+        @DisplayName("The SHA-256 variant reports the first nonce whose digest has the asked leading zero bits")
+        void sha256PuzzleFindsFirstFittingNonce() throws Exception {
             final byte[] payload = "1793538360467|eb1a1096".getBytes(StandardCharsets.US_ASCII);
             final long nonce = NewgroundsPlatform.solve(payload, 12, null);
             final byte[] digest = MessageDigest.getInstance("SHA-256").digest(("1793538360467|eb1a1096:" + nonce).getBytes(StandardCharsets.US_ASCII));
@@ -284,7 +284,7 @@ public class NewgroundsPlatformTest {
 
         @Test
         @DisplayName("Puzzle parameters beyond the budget are refused before allocating")
-        void testUnreasonablePuzzle() {
+        void unreasonablePuzzleIsRefused() {
             assertThrows(PlatformException.class, () -> new NewgroundsPlatform.Argon2id(1_048_576, 1, 1, 32, new byte[8]));
             assertThrows(PlatformException.class, () -> new NewgroundsPlatform.Argon2id(4_096, 0, 1, 32, new byte[8]));
             assertThrows(PlatformException.class, () -> new NewgroundsPlatform.Argon2id(4_096, 1, 64, 32, new byte[8]));

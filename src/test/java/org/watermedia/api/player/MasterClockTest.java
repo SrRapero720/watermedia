@@ -16,49 +16,51 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** Verifies {@link MasterClock}: the state machine, seek lifecycle, serial invalidation, the timed hold and its reread, and speed/time linearity. */
+/**
+ * Verifies {@link MasterClock}: the state machine (the pause freeze, the latched pause, reload, stop and halt), the order and
+ * lock of its listener, the seek lifecycle with its serial invalidation, the timed hold and its reread, and the speed.
+ */
 @DisplayName("MasterClock")
 public class MasterClockTest {
 
     private static final long ADVANCE_MS = 20L; // WALL-CLOCK TIME THAT LETS PLAYING TIME DIVERGE FROM ZERO BEFORE A READ
+    private static final long JOIN_MS = 2_000L;
 
     // ==========================================================================
-    // NESTED TYPES: STATE MACHINE TESTS
+    // NESTED TYPES
     // ==========================================================================
 
     @Nested
-    @DisplayName("State Machine")
-    class StateMachineTests {
+    @DisplayName("State machine")
+    class StateMachine {
 
         @Test
-        @DisplayName("PLAYING to PAUSED freezes the PTS")
-        void testTransitionFromPlayingToPausedFreezesPts() throws InterruptedException {
+        @DisplayName("PLAYING to PAUSED freezes the PTS where playback reached")
+        void transitionFromPlayingToPausedFreezesPts() throws InterruptedException {
             final MasterClock clock = new MasterClock();
             clock.start();
             Thread.sleep(ADVANCE_MS);
             assertTrue(clock.transition(Status.PAUSED));
             assertEquals(Status.PAUSED, clock.status());
 
-            // TWO READS A SLEEP APART MATCH WHILE PAUSED
             final double frozen = clock.time();
+            assertTrue(frozen >= ADVANCE_MS / 1_000.0, "the pause keeps the time reached before it, not " + frozen + " s");
             Thread.sleep(ADVANCE_MS);
-            assertEquals(frozen, clock.time(), 1.0e-9);
+            assertEquals(frozen, clock.time(), 1.0e-9, "a paused clock stands still");
         }
 
         @Test
-        @DisplayName("Illegal transition is rejected")
-        void testIllegalTransitionIsRejected() {
+        @DisplayName("A transition the state machine lacks is refused and leaves the status as it was")
+        void illegalTransitionIsRejected() {
             final MasterClock clock = new MasterClock();
             clock.start();
-
-            // PLAYING -> LOADING IS NOT IN THE STATE MACHINE
-            assertFalse(clock.transition(Status.LOADING));
+            assertFalse(clock.transition(Status.LOADING), "PLAYING never goes back to LOADING through a transition");
             assertEquals(Status.PLAYING, clock.status());
         }
 
         @Test
         @DisplayName("A pause while loading only latches the intent, and start() applies it")
-        void testPauseWhileLoadingLatches() {
+        void pauseWhileLoadingLatches() {
             final MasterClock clock = new MasterClock();
             assertFalse(clock.paused(true), "nothing to latch into before a run exists");
             assertFalse(clock.pauseRequested());
@@ -72,27 +74,41 @@ public class MasterClockTest {
         }
 
         @Test
-        @DisplayName("A reload takes a running clock back to LOADING with its pause intent and a cleared end, but never revives a finished run")
-        void testReloadFromAnyRunningStatus() {
-            final MasterClock clock = new MasterClock();
-            assertFalse(clock.reload(), "WAITING has no run to reload");
-            clock.transition(Status.LOADING);
-            clock.start();
-            clock.paused(true);
-            clock.signalDemuxFinished();
-            assertTrue(clock.reload(), "a pause racing the switch still reloads");
-            assertEquals(Status.LOADING, clock.status());
-            assertFalse(clock.demuxFinished(), "the next source starts unread");
-            clock.start();
-            assertEquals(Status.PAUSED, clock.status(), "the latched intent survives the reload");
-            assertTrue(clock.transition(Status.ERROR));
-            assertFalse(clock.reload(), "a failed run stays failed");
-            assertEquals(Status.ERROR, clock.status());
+        @DisplayName("A reload takes a running clock back to LOADING with its time, its pause intent and a cleared end, but never revives a finished run")
+        void reloadFromAnyRunningStatus() throws InterruptedException {
+            // A PAUSE OR A SEEK MAY RACE THE SWITCH, AND FFMediaPlayer.switchSource ITSELF RELOADS FROM BUFFERING
+            for (final Status running: List.of(Status.PLAYING, Status.PAUSED, Status.BUFFERING)) {
+                final MasterClock clock = new MasterClock();
+                clock.transition(Status.LOADING);
+                clock.start();
+                Thread.sleep(ADVANCE_MS);
+                if (running == Status.PAUSED) assertTrue(clock.paused(true));
+                if (running == Status.BUFFERING) assertTrue(clock.transition(Status.BUFFERING));
+                clock.signalDemuxFinished();
+
+                assertTrue(clock.reload(), running + " has a run to reload");
+                assertEquals(Status.LOADING, clock.status());
+                assertFalse(clock.demuxFinished(), "the next source starts unread");
+                assertTrue(clock.time() >= ADVANCE_MS / 1_000.0, running + ": the reload keeps the time reached, not " + clock.time() + " s");
+                clock.start();
+                assertEquals(running == Status.PAUSED ? Status.PAUSED : Status.PLAYING, clock.status(), running + ": the latched intent survives the reload");
+            }
+
+            // WAITING HAS NO RUN YET; ENDED, STOPPED AND ERROR FINISHED THEIRS
+            for (final Status finished: List.of(Status.WAITING, Status.ENDED, Status.STOPPED, Status.ERROR)) {
+                final MasterClock clock = new MasterClock();
+                if (finished != Status.WAITING) {
+                    clock.start();
+                    assertTrue(clock.transition(finished));
+                }
+                assertFalse(clock.reload(), finished + " has no run to reload");
+                assertEquals(finished, clock.status());
+            }
         }
 
         @Test
-        @DisplayName("Entering STOPPED rewinds the clock and a halt forces it from any state")
-        void testStoppedRewindsAndHaltForces() {
+        @DisplayName("Entering STOPPED rewinds the clock, and a halt forces STOPPED even from ERROR")
+        void stoppedRewindsAndHaltForces() {
             final MasterClock clock = new MasterClock();
             clock.start();
             clock.requestSeek(5_000L, true);
@@ -111,7 +127,7 @@ public class MasterClockTest {
 
         @Test
         @DisplayName("A listener runs outside the clock lock, so another thread can seek while it runs")
-        void testListenerRunsOutsideTheLock() {
+        void listenerRunsOutsideTheLock() {
             final MasterClock clock = new MasterClock();
             final List<Status> seen = new ArrayList<>();
             final boolean[] blocked = new boolean[1];
@@ -121,25 +137,24 @@ public class MasterClockTest {
                 if (next != Status.PAUSED) return;
                 final Thread seeker = new Thread(() -> clock.requestSeek(10L, true));
                 seeker.start();
-                try { seeker.join(2_000L); }
+                try { seeker.join(JOIN_MS); }
                 catch (final InterruptedException e) { Thread.currentThread().interrupt(); }
                 blocked[0] = seeker.isAlive();
             });
             clock.start();
             clock.paused(true);
             assertFalse(blocked[0], "a seek from another thread must complete while the listener runs");
-            assertEquals(List.of(Status.PLAYING, Status.PAUSED, Status.BUFFERING), seen);
+            assertEquals(List.of(Status.PLAYING, Status.PAUSED, Status.BUFFERING), seen, "the seek of the second thread is heard after the pause");
         }
 
         @Test
         @DisplayName("The listener hears every transition in order, after it is published")
-        void testListenerOrder() {
+        void listenerOrder() {
             final MasterClock clock = new MasterClock();
             final List<Status> seen = new ArrayList<>();
             clock.listener((prev, next) -> {
                 seen.add(next);
-                // THE STATUS IS ALREADY PUBLISHED WHEN THE LISTENER HEARS IT
-                assertEquals(next, clock.status());
+                assertEquals(next, clock.status(), "the status is published before the listener hears it");
             });
             clock.transition(Status.LOADING);
             clock.start();
@@ -153,37 +168,31 @@ public class MasterClockTest {
         }
     }
 
-    // ==========================================================================
-    // NESTED TYPES: SEEK LIFECYCLE TESTS
-    // ==========================================================================
-
     @Nested
-    @DisplayName("Seek Lifecycle")
-    class SeekTests {
+    @DisplayName("Seek lifecycle")
+    class SeekLifecycle {
 
         @Test
-        @DisplayName("requestSeek enqueues, enters BUFFERING and bumps the serial")
-        void testRequestSeekEnqueuesAndBufferingAndBumpsSerial() {
+        @DisplayName("requestSeek() queues the seek once, enters BUFFERING and bumps the serial")
+        void requestSeekQueuesBuffersAndBumpsSerial() {
             final MasterClock clock = new MasterClock();
             clock.start();
-            final int beforeSerial = clock.serial();
+            final int serial = clock.serial();
 
             assertTrue(clock.requestSeek(2_000L, true));
             assertEquals(Status.BUFFERING, clock.status());
-            assertTrue(clock.serial() > beforeSerial);
+            assertTrue(clock.serial() > serial, "the frames queued before the seek are stale");
 
-            final FFDecoder.Seek req = clock.consumeSeek();
-            assertNotNull(req);
-            assertEquals(2_000L, req.targetMs());
-            assertTrue(req.precise());
-
-            // CONSUMING IS DESTRUCTIVE
-            assertNull(clock.consumeSeek());
+            final FFDecoder.Seek seek = clock.consumeSeek();
+            assertNotNull(seek, "the seek waits for the demuxer");
+            assertEquals(2_000L, seek.targetMs());
+            assertTrue(seek.precise());
+            assertNull(clock.consumeSeek(), "the demuxer takes the seek once");
         }
 
         @Test
         @DisplayName("A seek while loading stays LOADING and start() lands BUFFERING at the target")
-        void testSeekWhileLoadingDeferredToStart() {
+        void seekWhileLoadingDeferredToStart() {
             final MasterClock clock = new MasterClock();
             clock.transition(Status.LOADING);
             assertTrue(clock.requestSeek(4_000L, true));
@@ -199,44 +208,40 @@ public class MasterClockTest {
         }
 
         @Test
-        @DisplayName("Seeks are rejected where no pipeline can serve them")
-        void testSeekRejectedWithoutPipeline() {
-            final MasterClock clock = new MasterClock();
-            assertFalse(clock.requestSeek(1L, true), "WAITING");
-            clock.start();
-            assertTrue(clock.transition(Status.ENDED));
-            assertFalse(clock.requestSeek(1L, true), "ENDED has no pipeline: the player restarts instead");
-            assertEquals(Status.ENDED, clock.status());
+        @DisplayName("A seek is refused where no pipeline can serve it: WAITING, ENDED, STOPPED and ERROR")
+        void seekRejectedWithoutPipeline() {
+            assertFalse(new MasterClock().requestSeek(1L, true), "WAITING has no pipeline yet");
+            // A PLAYER RESTARTS FROM ENDED OR STOPPED INSTEAD, AND ONLY stop() OR release() LEAVE ERROR
+            for (final Status finished: List.of(Status.ENDED, Status.STOPPED, Status.ERROR)) {
+                final MasterClock clock = new MasterClock();
+                clock.start();
+                assertTrue(clock.transition(finished));
+                assertFalse(clock.requestSeek(1L, true), finished + " has no pipeline");
+                assertEquals(finished, clock.status());
+            }
         }
 
         @Test
-        @DisplayName("Update with a stale serial is silently rejected")
-        void testUpdateWithWrongSerialIsSilentlyRejected() {
+        @DisplayName("An update with a stale serial is ignored: the clock stays BUFFERING at the seek target")
+        void updateWithWrongSerialIsSilentlyRejected() {
             final MasterClock clock = new MasterClock();
             clock.start();
             // THE SEEK BUMPS THE SERIAL, SO THE PREVIOUS ONE IS STALE
             clock.requestSeek(0L, false);
-            final int currentSerial = clock.serial();
-            final long before = clock.timeMs();
-            clock.update(5.0, currentSerial - 1);
-
-            // NO PROMOTION TO PLAYING, AND THE TIME STAYS FROZEN AT THE SEEK TARGET
-            assertEquals(Status.BUFFERING, clock.status());
-            assertEquals(before, clock.timeMs());
+            final long target = clock.timeMs();
+            clock.update(5.0, clock.serial() - 1);
+            assertEquals(Status.BUFFERING, clock.status(), "a stale frame never promotes the clock to PLAYING");
+            assertEquals(target, clock.timeMs(), "a stale frame never moves the clock");
         }
     }
 
-    // ==========================================================================
-    // NESTED TYPES: HOLD TESTS
-    // ==========================================================================
-
     @Nested
     @DisplayName("Hold")
-    class HoldTests {
+    class Hold {
 
         @Test
         @DisplayName("A hold is timed from the moment the clock pauses, by request, as a seek settles or at a paused start, and ends with the pause")
-        void testHoldTimedFromThePause() throws InterruptedException {
+        void holdTimedFromThePause() throws InterruptedException {
             final MasterClock clock = new MasterClock();
             clock.start();
             assertEquals(0L, clock.heldMs(), "a playing clock holds nothing");
@@ -270,13 +275,13 @@ public class MasterClockTest {
             Thread.sleep(ADVANCE_MS);
             final long starting = System.nanoTime();
             launched.start();
-            assertTrue(launched.holding());
+            assertTrue(launched.holding(), "a paused start holds");
             assertTrue(launched.heldMs() <= TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - starting), "the hold starts with the run");
         }
 
         @Test
         @DisplayName("A reread resumes a holding clock straight into BUFFERING with a precise seek to the paused position, and refuses any other clock")
-        void testRereadSeeksThePausedPosition() throws InterruptedException {
+        void rereadSeeksThePausedPosition() throws InterruptedException {
             final MasterClock clock = new MasterClock();
             final List<Status> seen = new ArrayList<>();
             clock.listener((prev, next) -> seen.add(next));
@@ -290,7 +295,7 @@ public class MasterClockTest {
             final int serial = clock.serial();
             seen.clear();
 
-            assertTrue(clock.reread());
+            assertTrue(clock.reread(), "a holding clock reads again");
             assertEquals(List.of(Status.BUFFERING), seen, "the reread never passes through PLAYING");
             assertFalse(clock.pauseRequested(), "the reread resumes");
             assertFalse(clock.holding());
@@ -312,17 +317,13 @@ public class MasterClockTest {
         }
     }
 
-    // ==========================================================================
-    // NESTED TYPES: SPEED AND TIME LINEARITY TESTS
-    // ==========================================================================
-
     @Nested
-    @DisplayName("Speed and Time Linearity")
-    class SpeedTests {
+    @DisplayName("Speed")
+    class Speed {
 
         @Test
-        @DisplayName("Speed change preserves time linearity")
-        void testSpeedChangePreservesTimeLinearity() throws InterruptedException {
+        @DisplayName("A speed change keeps the time continuous and the clock running")
+        void speedChangePreservesTimeLinearity() throws InterruptedException {
             final MasterClock clock = new MasterClock();
             clock.start();
             Thread.sleep(ADVANCE_MS);
@@ -339,12 +340,12 @@ public class MasterClockTest {
                     "a speed change must not jump the clock: " + beforeChange + " -> " + afterChange);
             assertEquals(2.0, clock.speed(), 0.0);
             Thread.sleep(ADVANCE_MS);
-            assertTrue(clock.time() > afterChange);
+            assertTrue(clock.time() > afterChange, "the clock keeps advancing after the change");
         }
 
         @Test
         @DisplayName("reset() keeps the playback speed across runs")
-        void testResetKeepsSpeed() {
+        void resetKeepsSpeed() {
             final MasterClock clock = new MasterClock();
             clock.start();
             clock.speed(2.0);

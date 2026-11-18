@@ -12,7 +12,7 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
-/** Verifies the {@link MediaPlayer.PlayerState} wire form: byte-exact round trips from any buffer and rejections that consume no byte. */
+/** Verifies the {@link MediaPlayer.PlayerState} wire form, byte-exact round trips from any buffer and rejections that consume no byte, and the validation of its constructor. */
 @DisplayName("PlayerState snapshot")
 public class PlayerStateTest {
 
@@ -49,10 +49,10 @@ public class PlayerStateTest {
         assertEquals(0, wire.remaining(), "the decode consumes the whole payload");
     }
 
-    private static void rejected(final ByteBuffer payload) {
+    private static void rejected(final ByteBuffer payload, final String label) {
         final int position = payload.position();
-        assertThrows(IllegalArgumentException.class, () -> MediaPlayer.PlayerState.read(payload));
-        assertEquals(position, payload.position(), "a rejected payload must not consume bytes");
+        assertThrows(IllegalArgumentException.class, () -> MediaPlayer.PlayerState.read(payload), label);
+        assertEquals(position, payload.position(), label + ": a rejected payload must not consume bytes");
     }
 
     // ==========================================================================
@@ -140,10 +140,10 @@ public class PlayerStateTest {
         @DisplayName("Null and truncated payloads are rejected")
         void nullAndTruncated() {
             assertThrows(IllegalArgumentException.class, () -> MediaPlayer.PlayerState.read(null));
-            rejected(ByteBuffer.allocate(0));
-            rejected(ByteBuffer.wrap(bytes(SAMPLE), 0, MediaPlayer.PlayerState.BYTES - 1));
+            rejected(ByteBuffer.allocate(0), "empty");
+            rejected(ByteBuffer.wrap(bytes(SAMPLE), 0, MediaPlayer.PlayerState.BYTES - 1), "one byte short");
             // WHAT COUNTS IS A WHOLE SNAPSHOT PAST THE POSITION, NOT THE CAPACITY
-            rejected(ByteBuffer.allocate(HEADER_BYTES + MediaPlayer.PlayerState.BYTES).position(HEADER_BYTES + 1));
+            rejected(ByteBuffer.allocate(HEADER_BYTES + MediaPlayer.PlayerState.BYTES).position(HEADER_BYTES + 1), "one byte short past the position");
         }
 
         @Test
@@ -151,10 +151,10 @@ public class PlayerStateTest {
         void otherVersion() {
             final byte[] wire = bytes(SAMPLE);
             wire[0]++;
-            rejected(ByteBuffer.wrap(wire));
+            rejected(ByteBuffer.wrap(wire), "next version");
             final ByteBuffer frame = ByteBuffer.allocate(HEADER_BYTES + MediaPlayer.PlayerState.BYTES).putInt(CHANNEL).put(wire).flip();
             assertEquals(CHANNEL, frame.getInt());
-            rejected(frame);
+            rejected(frame, "next version inside a frame");
         }
 
         @Test
@@ -163,7 +163,7 @@ public class PlayerStateTest {
             for (final int ordinal: new int[] { Status.values().length, 200, 255 }) {
                 final byte[] wire = bytes(SAMPLE);
                 wire[STATUS_OFFSET] = (byte) ordinal;
-                rejected(ByteBuffer.wrap(wire));
+                rejected(ByteBuffer.wrap(wire), "ordinal " + ordinal);
             }
         }
 
@@ -171,15 +171,15 @@ public class PlayerStateTest {
         @DisplayName("NaN, infinite and out-of-range speeds are rejected")
         void invalidSpeed() {
             for (final float speed: new float[] { Float.NaN, Float.POSITIVE_INFINITY, 0f, -0f, -1f, Math.nextUp(4f), 4.5f })
-                rejected(ByteBuffer.wrap(bytes(SAMPLE)).putFloat(SPEED_OFFSET, speed));
+                rejected(ByteBuffer.wrap(bytes(SAMPLE)).putFloat(SPEED_OFFSET, speed), "speed " + speed);
         }
 
         @Test
         @DisplayName("Negative times and durations are rejected")
         void negativeTimes() {
             for (final int offset: new int[] { TIME_OFFSET, DURATION_OFFSET }) {
-                rejected(ByteBuffer.wrap(bytes(SAMPLE)).putLong(offset, -1L));
-                rejected(ByteBuffer.wrap(bytes(SAMPLE)).putLong(offset, Long.MIN_VALUE));
+                rejected(ByteBuffer.wrap(bytes(SAMPLE)).putLong(offset, -1L), "-1 at offset " + offset);
+                rejected(ByteBuffer.wrap(bytes(SAMPLE)).putLong(offset, Long.MIN_VALUE), "Long.MIN_VALUE at offset " + offset);
             }
         }
 

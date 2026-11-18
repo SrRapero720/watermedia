@@ -18,10 +18,10 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Verifies the offline half of {@link BiliBiliPlatform}: which URIs it claims or refuses without touching the
- * network, and the {@code Cookie} its API calls carry, where the fetched {@code buvid3}/{@code buvid4} device
- * fingerprint completes the user's session cookie instead of replacing it. The API calls themselves are
- * exercised by the manual platform harness.
+ * Verifies the offline half of {@link BiliBiliPlatform}: which URIs it disclaims or refuses before any request, and the
+ * {@code Cookie} its API calls carry, where the fetched {@code buvid3}/{@code buvid4} device fingerprint completes the
+ * user's session cookie instead of replacing it. The API calls need the live site: pass a BiliBili link to the manual
+ * {@code PlatformSmokeTest} harness.
  */
 @DisplayName("BiliBili platform (offline)")
 public class BiliBiliPlatformTest {
@@ -42,8 +42,8 @@ public class BiliBiliPlatformTest {
                 "https://notbilibili.com/video/BV1Zt4y1C7s6",
                 "https://bilibili.tv/video/BV1Zt4y1C7s6"
         })
-        @DisplayName("A foreign host is disclaimed with null")
-        void testForeignHostYieldsNull(final String uri) throws Exception {
+        @DisplayName("A foreign host is disclaimed with null, even with a BV id in the link")
+        void foreignHostYieldsNull(final String uri) throws Exception {
             assertNull(new BiliBiliPlatform().resolve(URI.create(uri)));
         }
 
@@ -56,8 +56,8 @@ public class BiliBiliPlatformTest {
                 "https://live.bilibili.com/",
                 "https://live.bilibili.com/p/eden/area-tags"
         })
-        @DisplayName("An own-host URL without a BV id, an ep/ss id or a room number is refused before any request")
-        void testUnsupportedShapeThrows(final String uri) {
+        @DisplayName("An own-host URL without a BV id, an ep/ss id or a room number is refused with its code before any request")
+        void unsupportedShapeThrows(final String uri) {
             final PlatformException thrown = assertThrows(PlatformException.class, () -> new BiliBiliPlatform().resolve(URI.create(uri)));
             assertFalse(thrown instanceof MatureContentException, "An unsupported shape is not a mature block");
             assertTrue(thrown.getMessage().startsWith(BiliBiliPlatform.NAME + ": (wm_err:2020) Failed to resolve "), thrown.getMessage());
@@ -70,20 +70,20 @@ public class BiliBiliPlatformTest {
 
         @Test
         @DisplayName("Without a user cookie the API call carries the fingerprint alone")
-        void testFingerprintAlone() {
+        void fingerprintAlone() {
             assertEquals(FINGERPRINT, BiliBiliPlatform.cookie("", FINGERPRINT));
             assertEquals(FINGERPRINT, BiliBiliPlatform.cookie(null, FINGERPRINT));
         }
 
         @Test
         @DisplayName("A user session cookie follows the fingerprint instead of replacing it")
-        void testSessionFollowsFingerprint() {
+        void sessionFollowsFingerprint() {
             assertEquals(FINGERPRINT + "; " + SESSION, BiliBiliPlatform.cookie(SESSION, FINGERPRINT));
         }
 
         @Test
         @DisplayName("A user cookie that already carries buvid3 is sent verbatim")
-        void testUserFingerprintWins() {
+        void userFingerprintWins() {
             final String own = "buvid3=OWN-infoc; " + SESSION;
             assertSame(own, BiliBiliPlatform.cookie(own, FINGERPRINT));
         }

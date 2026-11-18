@@ -19,7 +19,8 @@ import static org.junit.jupiter.api.DynamicTest.dynamicTest;
 
 /**
  * Verifies the VP8L canonical {@link HuffmanTable}: single-symbol tables that consume no bits, one-bit two-symbol
- * tables, canonical builds from code lengths decoding LSB-first streams, and the refusal of over-subscribed codes.
+ * tables, canonical builds from code lengths decoding LSB-first streams (an incomplete code included, whose unassigned
+ * codes are refused), and the refusal of over-subscribed codes.
  */
 @DisplayName("HuffmanTable")
 public class HuffmanTableTest {
@@ -39,31 +40,30 @@ public class HuffmanTableTest {
     class Simple {
 
         @TestFactory
-        @DisplayName("Single-symbol tables")
-        Iterable<DynamicTest> testSingleSymbol() {
+        @DisplayName("A single-symbol table returns its symbol without consuming bits")
+        Iterable<DynamicTest> singleSymbol() {
             final List<DynamicTest> tests = new ArrayList<>();
             for (final int symbol: new int[] { 0, 255 }) {
                 tests.add(dynamicTest("Single symbol [" + symbol + "]", () -> {
-                    // SINGLE-SYMBOL TABLE: READS RETURN THE SYMBOL WITHOUT CONSUMING BITS
                     final HuffmanTable table = HuffmanTable.simple(1, symbol, 0);
                     final BitReader reader = reader(0xFF, 0xFF);
-                    for (int i = 0; i < 10; i++) assertEquals(symbol, table.read(reader), "Single symbol table should always return: " + symbol);
-                    assertEquals(2, reader.remaining(), "Single symbol table should not consume any bits");
+                    for (int i = 0; i < 10; i++) assertEquals(symbol, table.read(reader), "read " + i);
+                    assertEquals(2, reader.remaining(), "no bit consumed");
                 }));
             }
             return tests;
         }
 
         @TestFactory
-        @DisplayName("Two-symbol tables")
-        Iterable<DynamicTest> testTwoSymbol() {
+        @DisplayName("A two-symbol table maps bit 0 to the first symbol and bit 1 to the second")
+        Iterable<DynamicTest> twoSymbols() {
             final List<DynamicTest> tests = new ArrayList<>();
             // BYTE 0xAA = 10101010: LSB-FIRST READ ORDER YIELDS sym0, sym1, sym0, sym1...
             for (final int[] pair: new int[][] { { 0, 1 }, { 100, 200 } }) {
                 tests.add(dynamicTest("Two symbols [" + pair[0] + ", " + pair[1] + "]", () -> {
                     final HuffmanTable table = HuffmanTable.simple(2, pair[0], pair[1]);
                     final BitReader reader = reader(0xAA);
-                    for (int i = 0; i < 8; i++) assertEquals(pair[i & 1], table.read(reader), "Mismatch at bit position " + i);
+                    for (int i = 0; i < 8; i++) assertEquals(pair[i & 1], table.read(reader), "bit " + i);
                 }));
             }
             return tests;
@@ -81,14 +81,14 @@ public class HuffmanTableTest {
             // ARE THE BIT SEQUENCE 0 10 110 111, PACKED LSB-FIRST INTO 0xDA 0x01
             final HuffmanTable table = HuffmanTable.build(new int[] { 1, 2, 3, 3, 0, 0, 0, 0 }, 8);
             final BitReader reader = reader(0xDA, 0x01, 0x00, 0x00);
-            for (int symbol = 0; symbol < 4; symbol++) assertEquals(symbol, table.read(reader));
+            for (int symbol = 0; symbol < 4; symbol++) assertEquals(symbol, table.read(reader), "symbol " + symbol);
             assertEquals(-1, table.symbol(), "a table of several codes reads bits");
         }
 
         @Test
         @DisplayName("All-zero code lengths collapse to symbol 0 and a single code to its symbol, both without reading bits")
         void edgeCaseCodeLengths() throws CodecException {
-            assertEquals(0, HuffmanTable.build(new int[10], 10).symbol());
+            assertEquals(0, HuffmanTable.build(new int[10], 10).symbol(), "no code at all is symbol 0");
             final int[] single = new int[10];
             single[5] = 1;
             final HuffmanTable table = HuffmanTable.build(single, 10);
@@ -98,16 +98,19 @@ public class HuffmanTableTest {
         }
 
         @Test
-        @DisplayName("Two symbols with equal 2-bit codes decode from an incomplete code")
+        @DisplayName("Two equal 2-bit codes decode from an incomplete code, whose unassigned codes are refused")
         void twoSymbol2BitCodes() throws CodecException {
-            // TWO SYMBOLS WITH EQUAL 2-BIT CODES, AN UNDER-FULL CODE REAL FILES EMIT (6.webp'S META GREEN TABLE)
+            // TWO SYMBOLS WITH EQUAL 2-BIT CODES 00 AND 01, AN UNDER-FULL CODE REAL FILES EMIT (6.webp'S META GREEN TABLE)
             final int[] codeLengths = new int[280];
             codeLengths[0] = 2;
             codeLengths[1] = 2;
             final HuffmanTable table = HuffmanTable.build(codeLengths, 280);
-            // A ZERO BIT STREAM IS CODE 00, SYMBOL 0, FOUR TIMES PER BYTE
-            final BitReader reader = reader(0x00);
-            for (int i = 0; i < 4; i++) assertEquals(0, table.read(reader), "Should read symbol 0 for code 00");
+            // 0x22 READ LSB-FIRST TWO BITS AT A TIME IS 0 1, 0 0, 0 1, 0 0: CODES 01, 00, 01, 00
+            final BitReader reader = reader(0x22);
+            for (final int symbol: new int[] { 1, 0, 1, 0 }) assertEquals(symbol, table.read(reader));
+            // A LEADING 1 BIT STARTS THE CODES 10 AND 11, WHICH NO SYMBOL OWNS
+            final CodecException e = assertThrows(CodecException.class, () -> table.read(reader(0x01, 0x00, 0x00, 0x00)));
+            assertEquals("(wm_err:5161) Failed to read the huffman code due to invalid code (code=1)", e.getMessage());
         }
 
         @Test
@@ -115,7 +118,8 @@ public class HuffmanTableTest {
         void overSubscribedCodeLengthsRejected() {
             // THREE LENGTH-1 CODES OVER-SUBSCRIBE THE TREE (KRAFT SUM 1.5 > 1); BUILDING THEM WOULD
             // COLLIDE IN THE LOOKUP TABLE, SO build() MUST REJECT IT INSTEAD OF DECODING TO GARBAGE
-            assertThrows(CodecException.class, () -> HuffmanTable.build(new int[] { 1, 1, 1, 0, 0, 0, 0, 0 }, 8), "Over-subscribed code lengths must throw");
+            final CodecException e = assertThrows(CodecException.class, () -> HuffmanTable.build(new int[] { 1, 1, 1, 0, 0, 0, 0, 0 }, 8));
+            assertEquals("(wm_err:5160) Failed to build the huffman table due to over-subscribed code at length 1", e.getMessage());
         }
     }
 }

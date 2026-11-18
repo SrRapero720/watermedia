@@ -3,86 +3,45 @@ package org.watermedia.api.util;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 import static org.junit.jupiter.api.Assertions.assertSame;
 
 /**
- * Verifies MIME-string to {@link MediaType} resolution, including subtitle subtypes
- * and null/empty fallbacks.
+ * Verifies {@link MediaType} classification: {@code of} by the essence of a MIME type (primary types, subtitle
+ * subtypes, the {@code application/*} streaming and SubRip types, parameters, whitespace, null and empty text) and
+ * {@code ofExtension} by the extensions of a file name, scanned right to left.
  */
 @DisplayName("MediaType")
 public class MediaTypeTest {
+
     // ==========================================================================
     // NESTED TYPES
     // ==========================================================================
+
     @Nested
-    @DisplayName("of(mimeString)")
-    class OfMimeTests {
+    @DisplayName("of(mime)")
+    class OfMime {
 
-        @Test
-        @DisplayName("image/png -> IMAGE")
-        void imagePng() {
-            assertSame(MediaType.IMAGE, MediaType.of("image/png"));
-        }
-
-        @Test
-        @DisplayName("video/mp4 -> VIDEO")
-        void videoMp4() {
-            assertSame(MediaType.VIDEO, MediaType.of("video/mp4"));
-        }
-
-        @Test
-        @DisplayName("audio/mp3 -> AUDIO")
-        void audioMp3() {
-            assertSame(MediaType.AUDIO, MediaType.of("audio/mp3"));
-        }
-
-        @Test
-        @DisplayName("text/vtt -> SUBTITLES")
-        void textVtt() {
-            assertSame(MediaType.SUBTITLES, MediaType.of("text/vtt"));
-        }
-
-        @Test
-        @DisplayName("text/srt -> SUBTITLES")
-        void textSrt() {
-            assertSame(MediaType.SUBTITLES, MediaType.of("text/srt"));
-        }
-
-        @Test
-        @DisplayName("text/x-subtitle -> SUBTITLES")
-        void textSubtitleVariant() {
-            assertSame(MediaType.SUBTITLES, MediaType.of("text/x-subtitle"));
-        }
-
-        @Test
-        @DisplayName("text/html -> UNKNOWN")
-        void textHtml() {
-            assertSame(MediaType.UNKNOWN, MediaType.of("text/html"));
-        }
-
-        @Test
-        @DisplayName("application/json -> UNKNOWN")
-        void applicationJson() {
-            assertSame(MediaType.UNKNOWN, MediaType.of("application/json"));
-        }
-
-        @Test
-        @DisplayName("null -> UNKNOWN")
-        void nullInput() {
-            assertSame(MediaType.UNKNOWN, MediaType.of(null));
-        }
-
-        @Test
-        @DisplayName("empty string -> UNKNOWN")
-        void emptyInput() {
-            assertSame(MediaType.UNKNOWN, MediaType.of(""));
-        }
-
-        @Test
-        @DisplayName("uppercase primary type is normalized")
-        void caseInsensitivePrimaryType() {
-            assertSame(MediaType.VIDEO, MediaType.of("VIDEO/MP4"));
+        // AN EMPTY CELL IS NULL AND '' IS THE EMPTY STRING
+        @ParameterizedTest(name = "{displayName}: {0} is {1}")
+        @DisplayName("of classifies a MIME type by its primary type and its subtitle subtypes, in any case")
+        @CsvSource({
+                "image/png,        IMAGE",
+                "video/mp4,        VIDEO",
+                "VIDEO/MP4,        VIDEO",
+                "audio/mp3,        AUDIO",
+                "text/vtt,         SUBTITLES",
+                "text/srt,         SUBTITLES",
+                "text/x-subtitle,  SUBTITLES",
+                "text/html,        UNKNOWN",
+                "application/json, UNKNOWN",
+                ",                 UNKNOWN",
+                "'',               UNKNOWN"
+        })
+        void classifies(final String mime, final MediaType expected) {
+            assertSame(expected, MediaType.of(mime));
         }
 
         @Test
@@ -98,40 +57,38 @@ public class MediaTypeTest {
 
     @Nested
     @DisplayName("ofExtension(path)")
-    class OfExtensionTests {
+    class OfExtension {
 
-        @Test
-        @DisplayName("single extension")
-        void extensionSingle() {
-            assertSame(MediaType.IMAGE, MediaType.ofExtension("/clips/thumbnail.webp"));
-            assertSame(MediaType.VIDEO, MediaType.ofExtension("video.mp4"));
+        @ParameterizedTest(name = "{displayName}: {0} is {1}")
+        @DisplayName("ofExtension classifies the last media extension of the file name")
+        @CsvSource({
+                "/clips/thumbnail.webp, IMAGE",
+                "video.mp4,             VIDEO",
+                "clip.mp4.download,     VIDEO",
+                "file.bin,              UNKNOWN",
+                "noextension,           UNKNOWN",
+                ",                      UNKNOWN"
+        })
+        void classifies(final String path, final MediaType expected) {
+            assertSame(expected, MediaType.ofExtension(path));
         }
 
         @Test
-        @DisplayName("stacked extensions use the appended container")
+        @DisplayName("stacked media extensions resolve to the rightmost one")
         void extensionStacked() {
             assertSame(MediaType.VIDEO, MediaType.ofExtension("/v/video.m3u8.mp4"));
+            // TWO KINDS STACKED: A LEFT-TO-RIGHT SCAN WOULD PICK THE FIRST ONE
+            assertSame(MediaType.VIDEO, MediaType.ofExtension("cover.png.mp4"));
+            assertSame(MediaType.IMAGE, MediaType.ofExtension("clip.mp4.png"));
         }
 
         @Test
-        @DisplayName("trailing non-media suffix falls back to the earlier media one")
-        void extensionTrailingNonMedia() {
-            assertSame(MediaType.VIDEO, MediaType.ofExtension("clip.mp4.download"));
-        }
-
-        @Test
-        @DisplayName("dots in parent directories are ignored")
+        @DisplayName("dots in parent directories never count as extensions")
         void extensionDirectoryDots() {
             assertSame(MediaType.IMAGE, MediaType.ofExtension("/cdn.v1.2/path/image.png"));
             assertSame(MediaType.UNKNOWN, MediaType.ofExtension("/cdn.v1.2/path/noext"));
-        }
-
-        @Test
-        @DisplayName("no/unknown extension -> UNKNOWN")
-        void extensionUnknown() {
-            assertSame(MediaType.UNKNOWN, MediaType.ofExtension("file.bin"));
-            assertSame(MediaType.UNKNOWN, MediaType.ofExtension("noextension"));
-            assertSame(MediaType.UNKNOWN, MediaType.ofExtension(null));
+            // WITHOUT THE CUT AT THE LAST SLASH, THE DIRECTORY WOULD LEND ITS mp4 PIECE
+            assertSame(MediaType.UNKNOWN, MediaType.ofExtension("/media.mp4.d/noext"));
         }
     }
 }

@@ -30,7 +30,7 @@ public class ScanTest {
         try (final ImageReader reader = CodecsAPI.reader(ByteBuffer.wrap(Fixtures.readAll(resource)))) {
             final ImageData.Scan scan = reader.scan();
             assertTrue(scan.duration() > 0L, resource + ": scan duration must be positive");
-            assertTrue(scan.frameCount() > 1, resource + ": animated file must report >1 frames");
+            assertTrue(scan.frameCount() > 1, resource + ": an animated file must report more than one frame");
             // READERS THAT TOTAL THEIR OWN DURATION MUST AGREE WITH THE DELAYS THEY LIST
             long total = 0L;
             for (final long delay: scan.delays()) total += delay;
@@ -62,13 +62,13 @@ public class ScanTest {
     class Animated {
 
         @Test
-        @DisplayName("APNG scan matches streaming")
+        @DisplayName("APNG scan matches the frames and delays the reader streams")
         void apngScanMatchesStreaming() throws IOException {
             assertScanMatchesStreaming(Fixtures.PNG_ANIMATED);
         }
 
         @Test
-        @DisplayName("Animated WebP scan matches streaming")
+        @DisplayName("Animated WebP scan matches the frames and delays the reader streams")
         void animatedWebpScanMatchesStreaming() throws IOException {
             assertScanMatchesStreaming(Fixtures.WEBP_ANIMATED);
         }

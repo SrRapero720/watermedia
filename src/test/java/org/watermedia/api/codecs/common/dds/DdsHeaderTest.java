@@ -16,7 +16,10 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrowsExactly;
 
-/** Verifies {@link DdsHeader} header and footer parsing, independently of any native BC codec. */
+/**
+ * Verifies {@link DdsHeader} parsing without any native BC codec: the header fields, the malformed and the unsupported
+ * header shapes, and the animation footer (round trip, absence, malformed footers and the accepted frame counts).
+ */
 @DisplayName("DDS container")
 public class DdsHeaderTest {
 
@@ -36,23 +39,23 @@ public class DdsHeaderTest {
     class Parsing {
 
         @Test
-        @DisplayName("Header parses dimensions, the BC layout and frame count")
-        void header() throws CodecException {
+        @DisplayName("The header parses the dimensions, the BC layout and the array size")
+        void parsesHeaderFields() throws CodecException {
             final byte[] header = DdsFixture.write(64, 32, PixelFormat.BC7, 5);
-            assertEquals(DdsHeader.BYTES, header.length);
+            assertEquals(DdsHeader.BYTES, header.length, "the fixture writes a DDS plus DX10 header");
 
             final DdsHeader.Info info = DdsHeader.read(ByteBuffer.wrap(header));
-            assertEquals(64, info.width());
-            assertEquals(32, info.height());
-            assertEquals(PixelFormat.BC7, info.format());
-            assertEquals(5, info.arraySize());
+            assertEquals(64, info.width(), "width");
+            assertEquals(32, info.height(), "height");
+            assertEquals(PixelFormat.BC7, info.format(), "BC layout");
+            assertEquals(5, info.arraySize(), "array size");
         }
 
         @Test
         @DisplayName("Truncated, non-DDS and structurally broken headers are malformed")
         void rejectsMalformed() throws CodecException {
             assertEquals(PixelFormat.BC1, DdsHeader.read(patched(0, 0x20534444)).format(), "the unpatched header must parse");
-            assertThrowsExactly(CodecException.class, () -> DdsHeader.read(ByteBuffer.wrap(new byte[] { 1, 2, 3, 4 })));
+            assertThrowsExactly(CodecException.class, () -> DdsHeader.read(ByteBuffer.wrap(new byte[] { 1, 2, 3, 4 })), "a 4-byte header");
             // MAGIC, HEADER SIZE, PIXEL FORMAT SIZE, MISSING DDSCAPS_TEXTURE, NEGATIVE DEPTH AND MIP COUNT, AN UNKNOWN
             // RESOURCE DIMENSION, DXGI_FORMAT_UNKNOWN, AN EMPTY OR OVERSIZED ARRAY AND A ZERO WIDTH
             for (final int[] field: new int[][] { { 0, 0 }, { 4, 0 }, { 76, 0 }, { 108, 0 }, { 24, -1 }, { 28, -1 }, { 132, 0 },
@@ -80,8 +83,8 @@ public class DdsHeaderTest {
         void roundTrip() throws CodecException {
             final long[] delays = { 10L, 0L, 250L, 33L };
             final ByteBuffer footer = ByteBuffer.wrap(DdsFixture.writeFooter(delays));
-            assertArrayEquals(delays, DdsHeader.readFooter(footer, delays.length));
-            assertEquals(0, footer.position());
+            assertArrayEquals(delays, DdsHeader.readFooter(footer, delays.length), "the delays read back in order");
+            assertEquals(0, footer.position(), "the caller's buffer keeps its position");
         }
 
         @Test
@@ -102,8 +105,8 @@ public class DdsHeaderTest {
             for (final int length: new int[] { 4, 12, 20 })
                 assertThrowsExactly(CodecException.class, () -> DdsHeader.readFooter(ByteBuffer.wrap(Arrays.copyOf(footer, length)), 2), length + " bytes");
             final ByteBuffer version = ByteBuffer.wrap(footer.clone()).order(ByteOrder.LITTLE_ENDIAN).putInt(4, 2);
-            assertThrowsExactly(CodecException.class, () -> DdsHeader.readFooter(version, 2));
-            assertThrowsExactly(CodecException.class, () -> DdsHeader.readFooter(ByteBuffer.wrap(footer), 1));
+            assertThrowsExactly(CodecException.class, () -> DdsHeader.readFooter(version, 2), "version 2");
+            assertThrowsExactly(CodecException.class, () -> DdsHeader.readFooter(ByteBuffer.wrap(footer), 1), "two delays where one frame is expected");
         }
 
         @Test

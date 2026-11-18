@@ -22,8 +22,8 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Verifies how {@link LogUploader} walks its stages, scans an instance, masks what it reads and composes the issue
- * report and its link.
+ * Verifies how {@link LogUploader} walks its stages, scans an instance, masks the secrets and user names of what it
+ * reads, collects its {@code wm_err} codes and composes the issue report and its link.
  */
 @DisplayName("Log uploader")
 public class LogUploaderTest {
@@ -43,6 +43,10 @@ public class LogUploaderTest {
     @Nested
     @DisplayName("Stages")
     class Stages {
+        // BOUNDS, NOT DELAYS: THE SCAN READS THE REAL WORKING DIRECTORY AND THE REPORT THE REAL SYSTEM, WHOSE COMMANDS TIME OUT
+        // ON THEIR OWN
+        private static final long SCAN_TIMEOUT_MS = 30_000L;
+        private static final long REPORT_TIMEOUT_MS = 60_000L;
 
         // step() ONLY OPENS THE DIALOG ON A DEVELOPMENT RUN OR INSIDE A mods FOLDER
         @BeforeEach
@@ -59,43 +63,49 @@ public class LogUploaderTest {
             uploader.stage = 2;
             uploader.working = true;
             uploader.step();
-            assertTrue(uploader.visible);
+            assertTrue(uploader.visible, "the dialog shows again");
             assertEquals(2, uploader.stage);
             assertEquals(List.of(entry), uploader.files);
         }
 
         @Test
-        @DisplayName("a closed issue stage resumes with its uploads, title and description instead of scanning again")
+        @DisplayName("a closed issue stage resumes with its uploads, error codes, title and description instead of scanning again")
         void resumesIssueStage() {
             final LogUploader uploader = new LogUploader(() -> {});
             final LogUploader.FileEntry entry = new LogUploader.FileEntry("latest.log", "Game log", null);
             entry.uploaded = true;
             uploader.files.add(entry);
+            uploader.codes.add("0720");
             uploader.uploadsDone = true;
             uploader.title = "Crash on join";
             uploader.description = "It happens every time.";
             uploader.stage = 3;
             uploader.step();
-            assertTrue(uploader.visible);
+            assertTrue(uploader.visible, "the dialog shows again");
             assertFalse(uploader.working, "no scan and no second upload");
             assertEquals(3, uploader.stage);
-            assertTrue(uploader.uploadsDone);
+            assertTrue(uploader.uploadsDone, "the uploads stay done");
             assertEquals(List.of(entry), uploader.files);
+            assertEquals(Set.of("0720"), uploader.codes, "the codes of the uploaded files stay for the report");
             assertEquals("Crash on join", uploader.title);
             assertEquals("It happens every time.", uploader.description);
         }
 
         @Test
-        @DisplayName("an earlier stage and an opened issue start over, and only the opened issue spends the title and description")
+        @DisplayName("an earlier stage and an opened issue start over without the old rows and codes, and only the opened issue spends the title and description")
         void startsOver() {
             final LogUploader uploader = new LogUploader(() -> {});
-            uploader.files.add(new LogUploader.FileEntry("latest.log", "Game log", null));
+            final LogUploader.FileEntry stale = new LogUploader.FileEntry("latest.log", "Game log", null);
+            uploader.files.add(stale);
+            uploader.codes.add("0720");
             uploader.title = "Crash on join";
             uploader.description = "It happens every time.";
             uploader.stage = 2;
             uploader.step();
             assertEquals(1, uploader.stage, "a closed upload stage scans again");
-            assertTrue(PlayerWait.awaitCondition(() -> !uploader.working, 30_000), "the scan of the working directory ends");
+            assertTrue(PlayerWait.awaitCondition(() -> !uploader.working, SCAN_TIMEOUT_MS), "the scan of the working directory ends");
+            assertFalse(uploader.files.contains(stale), "the rows of the last session are gone");
+            assertEquals(Set.of(), uploader.codes, "the codes of the last session are gone");
             assertEquals("Crash on join", uploader.title);
             assertEquals("It happens every time.", uploader.description);
 
@@ -103,13 +113,15 @@ public class LogUploaderTest {
             uploader.stage = 3;
             uploader.issueOpened = true;
             uploader.browserFailed = true;
+            uploader.codes.add("0720");
             uploader.step();
             assertEquals(1, uploader.stage, "an issue already opened is a finished session");
+            assertEquals(Set.of(), uploader.codes, "the codes of the opened issue are gone");
             assertEquals("", uploader.title);
             assertEquals("", uploader.description);
-            assertFalse(uploader.issueOpened);
-            assertFalse(uploader.browserFailed);
-            assertTrue(PlayerWait.awaitCondition(() -> !uploader.working, 30_000), "the scan of the working directory ends");
+            assertFalse(uploader.issueOpened, "the new session has no issue opened");
+            assertFalse(uploader.browserFailed, "the new session has no failed submit");
+            assertTrue(PlayerWait.awaitCondition(() -> !uploader.working, SCAN_TIMEOUT_MS), "the scan of the working directory ends");
         }
 
         @Test
@@ -136,17 +148,17 @@ public class LogUploaderTest {
             };
             uploader.step();
             assertEquals(3, uploader.stage);
-            assertTrue(PlayerWait.awaitCondition(() -> !uploader.working, 60_000), "the report worker ends");
-            assertTrue(uploader.error);
-            assertFalse(uploader.ready());
+            assertTrue(PlayerWait.awaitCondition(() -> !uploader.working, REPORT_TIMEOUT_MS), "the report worker ends");
+            assertTrue(uploader.error, "the failed read flags the error");
+            assertFalse(uploader.ready(), "no report was gathered");
 
             uploader.jars = List.of();
             uploader.title = "Crash on join";
             uploader.step();
             assertFalse(uploader.error, "the retry clears the failure");
-            assertTrue(PlayerWait.awaitCondition(() -> !uploader.working, 60_000), "the report worker ends");
-            assertTrue(uploader.ready());
-            assertFalse(uploader.error);
+            assertTrue(PlayerWait.awaitCondition(() -> !uploader.working, REPORT_TIMEOUT_MS), "the report worker ends");
+            assertTrue(uploader.ready(), "the retry gathered the report");
+            assertFalse(uploader.error, "the retry read the system");
             assertFalse(uploader.issueOpened, "the step read the report again, it did not submit");
 
             uploader.title = " \n";
@@ -182,9 +194,9 @@ public class LogUploaderTest {
             uploader.working = true;
             uploader.scan(mods, true);
 
-            assertFalse(uploader.working);
-            assertFalse(uploader.error);
-            assertEquals(1, repaints[0]);
+            assertFalse(uploader.working, "the scan ends its work");
+            assertFalse(uploader.error, "every file was measured");
+            assertEquals(1, repaints[0], "the scan repaints once");
             assertEquals(List.of("latest.log", "crash-2026-11-01_10.00.00-client.txt", "hs_err_pid42.log", "watermedia-app.log",
                     "watermedia.toml (game)", "watermedia.toml (app)", "app.properties"), uploader.files.stream().map(entry -> entry.name).toList());
             assertEquals(List.of("Game log", "Crash report", "JVM crash (hs_err)", "App log", "Config (game)", "Config (app)", "App preferences"),
@@ -254,7 +266,7 @@ public class LogUploaderTest {
             final LogUploader uploader = new LogUploader(() -> {});
             uploader.scan(this.instance, false);
 
-            assertFalse(uploader.error);
+            assertFalse(uploader.error, "a missing file is no error");
             assertEquals(6, uploader.files.size());
             for (final LogUploader.FileEntry entry: uploader.files) {
                 assertFalse(entry.present || entry.valid, entry.name);
@@ -277,7 +289,7 @@ public class LogUploaderTest {
             assertEquals("Launched with --accessToken ******** wm_err:0420\n", uploader.readContent(uploader.files.get(0)));
             assertEquals("[network]\n  token = ********\n\n[platforms]\n  biliBiliCookie = ********\n", uploader.readContent(uploader.files.get(5)));
             assertEquals("engine=VULKAN\nnetwork.token=********\n", uploader.readContent(uploader.files.get(6)));
-            assertFalse(uploader.error);
+            assertFalse(uploader.error, "every file was read");
         }
 
         @Test
@@ -314,7 +326,7 @@ public class LogUploaderTest {
             final LogUploader.FileEntry entry = new LogUploader.FileEntry("gone.log", "Gone", this.instance.resolve("gone.log"));
             assertNull(uploader.readContent(entry));
             assertEquals("READ ERROR", entry.state);
-            assertTrue(uploader.error);
+            assertTrue(uploader.error, "the failed read flags the error");
         }
     }
 
@@ -323,7 +335,7 @@ public class LogUploaderTest {
     class Report {
 
         @Test
-        @DisplayName("the body runs the description, alerts, suspected mods, files, environment, folded codecs and system")
+        @DisplayName("the body runs the description, alerts, suspected mods, error codes, files, environment, folded codecs and system")
         void composes() {
             final LogUploader.FileEntry log = new LogUploader.FileEntry("latest.log", "Game log", null);
             log.url = "https://mclo.gs/abc1234";
@@ -482,10 +494,12 @@ public class LogUploaderTest {
         }
 
         @Test
-        @DisplayName("a link past the limit carries the title and the paste note instead of the report")
+        @DisplayName("a link past the limit keeps the whole encoded title and carries the paste note instead of the report")
         void tooLong() {
-            assertEquals(PAGE + "Crash+on+join&body=" + NOTE, LogUploader.issueUrl("Crash on join", "x".repeat(LogUploader.URL_LIMIT_CHARS)));
-            assertEquals(PAGE + "Crash+on+join&body=" + NOTE, LogUploader.issueUrl("Crash on join", LogUploader.PASTE_NOTE));
+            final String link = LogUploader.issueUrl("Crash on join: 50% & ñ", "x".repeat(LogUploader.URL_LIMIT_CHARS));
+            assertEquals(PAGE + "Crash+on+join%3A+50%25+%26+%C3%B1&body=" + NOTE, link);
+            // submit() TELLS A LINK THAT LOST THE REPORT BY COMPARING IT WITH THE NOTE LINK OF THE SAME TITLE
+            assertEquals(LogUploader.issueUrl("Crash on join: 50% & ñ", LogUploader.PASTE_NOTE), link, "the fallback is the note link of the title");
         }
 
         @Test

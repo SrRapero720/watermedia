@@ -17,33 +17,30 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.DynamicTest.dynamicTest;
 
 /**
- * Verifies {@link CodecsAPI#sniff(InputStream)} classifies streams from their leading bytes. Real
- * on-disk fixtures cover the decodable image formats; synthetic minimal headers cover the
- * container/codec signatures (video, audio, subtitles) that have no fixture.
+ * Verifies that {@link CodecsAPI#sniff(InputStream)} classifies streams from their leading bytes: every decodable
+ * on-disk image fixture, animated ones included, sniffs as an image, and synthetic minimal headers cover the image,
+ * video, audio and subtitle signatures that have no fixture, plus unknown and empty input.
  */
 @DisplayName("MediaType sniffing")
 public class MediaTypeSniffTest {
 
-    // ==========================================================================
-    // INTERNAL API
-    // ==========================================================================
     @TestFactory
     @DisplayName("On-disk fixtures")
     Iterable<DynamicTest> sniffsFixtures() {
+        // THE ANIMATED PNG AND WEBP ROWS GUARD THAT AN ANIMATION SNIFFS AS AN IMAGE, NEVER AS VIDEO
+        record FileCase(String label, Path path) {}
         final List<DynamicTest> tests = new ArrayList<>();
-
-        record FileCase(Path path, MediaType expected) {}
         for (final FileCase c: List.of(
-                new FileCase(Fixtures.PNG_STATIC, MediaType.IMAGE),
-                new FileCase(Fixtures.PNG_ANIMATED, MediaType.IMAGE),
-                new FileCase(Fixtures.JPEG_BASELINE, MediaType.IMAGE),
-                new FileCase(Fixtures.GIF_ANIMATED, MediaType.IMAGE),
-                new FileCase(Fixtures.WEBP_LOSSLESS, MediaType.IMAGE),
-                new FileCase(Fixtures.WEBP_ANIMATED, MediaType.IMAGE),
-                new FileCase(Fixtures.NETPBM_PPM, MediaType.IMAGE)
+                new FileCase("static PNG", Fixtures.PNG_STATIC),
+                new FileCase("animated PNG", Fixtures.PNG_ANIMATED),
+                new FileCase("progressive grayscale JPEG", Fixtures.JPEG_GRAY),
+                new FileCase("animated GIF", Fixtures.GIF_ANIMATED),
+                new FileCase("lossless WebP", Fixtures.WEBP_LOSSLESS),
+                new FileCase("animated WebP", Fixtures.WEBP_ANIMATED),
+                new FileCase("binary PPM", Fixtures.NETPBM_PPM)
         )) {
-            tests.add(dynamicTest("fixture " + c.path().getFileName(), () ->
-                    assertEquals(c.expected(), sniff(Fixtures.readAll(c.path())))));
+            tests.add(dynamicTest(c.label() + " sniffs as IMAGE", () ->
+                    assertEquals(MediaType.IMAGE, sniff(Fixtures.readAll(c.path())), c.path().toString())));
         }
         return tests;
     }
@@ -51,9 +48,8 @@ public class MediaTypeSniffTest {
     @TestFactory
     @DisplayName("Synthetic signatures")
     Iterable<DynamicTest> sniffsSignatures() {
-        final List<DynamicTest> tests = new ArrayList<>();
-
         record ByteCase(String name, byte[] data, MediaType expected) {}
+        final List<DynamicTest> tests = new ArrayList<>();
         for (final ByteCase c: List.of(
                 // IMAGES
                 new ByteCase("bmp", ascii("BM"), MediaType.IMAGE),
@@ -91,7 +87,7 @@ public class MediaTypeSniffTest {
                 new ByteCase("random", bytes(0xDE, 0xAD, 0xBE, 0xEF), MediaType.UNKNOWN),
                 new ByteCase("empty", new byte[0], MediaType.UNKNOWN)
         )) {
-            tests.add(dynamicTest("signature " + c.name(), () ->
+            tests.add(dynamicTest(c.name() + " signature sniffs as " + c.expected(), () ->
                     assertEquals(c.expected(), sniff(c.data()))));
         }
         return tests;

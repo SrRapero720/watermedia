@@ -26,7 +26,10 @@ import static org.lwjgl.glfw.GLFW.GLFW_PRESS;
 import static org.lwjgl.glfw.GLFW.GLFW_RELEASE;
 import static org.lwjgl.glfw.GLFW.GLFW_REPEAT;
 
-/** Verifies how a {@link TextArea} edits at its caret, moves it, wraps its rows, takes clicks and scrolls to the caret. */
+/**
+ * Verifies how a {@link TextArea} edits at its caret, hands CTRL+ENTER, TAB and ESC to the screen, normalizes inserted
+ * text, keeps a single-line box to one paragraph, moves the caret, wraps its rows, takes clicks and scrolls to the caret.
+ */
 @DisplayName("TextArea")
 public class TextAreaTest {
 
@@ -89,8 +92,8 @@ public class TextAreaTest {
         @DisplayName("any BMP character but controls goes in under the length cap, which counts line breaks")
         void filtersCharacters() {
             final TextArea area = area("").maxLength(4);
-            assertTrue(area.dispatchChar('ñ'));
-            assertTrue(area.dispatchChar('中'));
+            assertTrue(area.dispatchChar('ñ'), "a Latin letter");
+            assertTrue(area.dispatchChar('中'), "a CJK letter");
             assertFalse(area.dispatchChar(31), "a C0 control");
             assertFalse(area.dispatchChar(127), "DEL");
             assertFalse(area.dispatchChar(0x85), "a C1 control");
@@ -103,7 +106,7 @@ public class TextAreaTest {
             final TextArea capped = area("ab").maxLength(3);
             tap(capped, GLFW_KEY_ENTER);
             tap(capped, GLFW_KEY_ENTER);
-            assertFalse(capped.dispatchChar('x'));
+            assertFalse(capped.dispatchChar('x'), "the first line break filled the cap");
             assertEquals("ab\n", capped.value());
         }
 
@@ -114,9 +117,9 @@ public class TextAreaTest {
             final TextArea area = area("a");
             area.attach(ctx);
             ctx.ctrlDown = true;
-            assertFalse(area.dispatchChar('x'));
+            assertFalse(area.dispatchChar('x'), "CTRL+X is a shortcut");
             ctx.altDown = true;
-            assertTrue(area.dispatchChar('@'));
+            assertTrue(area.dispatchChar('@'), "AltGr types");
             assertEquals("a@", area.value());
         }
 
@@ -125,8 +128,8 @@ public class TextAreaTest {
         void enterBreaksLines() {
             final TextArea area = area("ab");
             tap(area, GLFW_KEY_ENTER);
-            assertTrue(area.dispatchKey(GLFW_KEY_ENTER, GLFW_REPEAT));
-            assertTrue(area.dispatchKey(GLFW_KEY_ENTER, GLFW_RELEASE));
+            assertTrue(area.dispatchKey(GLFW_KEY_ENTER, GLFW_REPEAT), "a held ENTER breaks again");
+            assertTrue(area.dispatchKey(GLFW_KEY_ENTER, GLFW_RELEASE), "its release is swallowed");
             type(area, "c");
             assertEquals("ab\n\nc", area.value());
         }
@@ -180,11 +183,12 @@ public class TextAreaTest {
         @DisplayName("a blurred or disabled area ignores keys and characters")
         void inactive() {
             final TextArea blurred = area("a").focused(false);
-            assertFalse(blurred.dispatchChar('x'));
-            assertFalse(blurred.dispatchKey(GLFW_KEY_BACKSPACE, GLFW_PRESS));
+            assertFalse(blurred.dispatchChar('x'), "a blurred area takes no character");
+            assertFalse(blurred.dispatchKey(GLFW_KEY_BACKSPACE, GLFW_PRESS), "a blurred area takes no key");
+            assertEquals("a", blurred.value());
             final TextArea disabled = area("a").enabled(false);
-            assertFalse(disabled.dispatchKey(GLFW_KEY_BACKSPACE, GLFW_PRESS));
-            assertFalse(disabled.dispatchChar('x'));
+            assertFalse(disabled.dispatchKey(GLFW_KEY_BACKSPACE, GLFW_PRESS), "a disabled area takes no key");
+            assertFalse(disabled.dispatchChar('x'), "a disabled area takes no character");
             assertEquals("a", disabled.value());
         }
     }
@@ -194,19 +198,19 @@ public class TextAreaTest {
     class ScreenKeys {
 
         @Test
-        @DisplayName("CTRL+ENTER reaches the screen, and its press decides for the release even when CTRL lifts first")
+        @DisplayName("CTRL+ENTER reaches the screen, and the press decides for the release whichever way CTRL moves in between")
         void ctrlEnterSubmits() {
             final AppContext ctx = new AppContext();
             final TextArea area = area("ab");
             area.attach(ctx);
             ctx.ctrlDown = true;
-            assertFalse(area.dispatchKey(GLFW_KEY_ENTER, GLFW_PRESS));
-            assertFalse(area.dispatchKey(GLFW_KEY_ENTER, GLFW_REPEAT));
+            assertFalse(area.dispatchKey(GLFW_KEY_ENTER, GLFW_PRESS), "CTRL+ENTER goes to the screen");
+            assertFalse(area.dispatchKey(GLFW_KEY_ENTER, GLFW_REPEAT), "and so does its repeat");
             ctx.ctrlDown = false;
             assertFalse(area.dispatchKey(GLFW_KEY_ENTER, GLFW_RELEASE), "CTRL lifted before ENTER still submits");
             assertEquals("ab", area.value());
 
-            assertTrue(area.dispatchKey(GLFW_KEY_ENTER, GLFW_PRESS));
+            assertTrue(area.dispatchKey(GLFW_KEY_ENTER, GLFW_PRESS), "a plain ENTER breaks the line");
             ctx.ctrlDown = true;
             assertTrue(area.dispatchKey(GLFW_KEY_ENTER, GLFW_RELEASE), "a plain press keeps its release");
             assertEquals("ab\n", area.value());
@@ -216,10 +220,10 @@ public class TextAreaTest {
         @DisplayName("TAB and ESC are never consumed")
         void tabAndEscape() {
             final TextArea area = area("ab");
-            assertFalse(area.dispatchKey(GLFW_KEY_TAB, GLFW_PRESS));
-            assertFalse(area.dispatchKey(GLFW_KEY_TAB, GLFW_RELEASE));
-            assertFalse(area.dispatchKey(GLFW_KEY_ESCAPE, GLFW_PRESS));
-            assertFalse(area.dispatchKey(GLFW_KEY_ESCAPE, GLFW_RELEASE));
+            assertFalse(area.dispatchKey(GLFW_KEY_TAB, GLFW_PRESS), "TAB press");
+            assertFalse(area.dispatchKey(GLFW_KEY_TAB, GLFW_RELEASE), "TAB release");
+            assertFalse(area.dispatchKey(GLFW_KEY_ESCAPE, GLFW_PRESS), "ESC press");
+            assertFalse(area.dispatchKey(GLFW_KEY_ESCAPE, GLFW_RELEASE), "ESC release");
             assertEquals("ab", area.value());
         }
     }
@@ -251,7 +255,7 @@ public class TextAreaTest {
             area.insert("zz");
             area.insert(null);
             area.insert("\u0001\u0002");
-            assertEquals(List.of("abc\nd"), changes);
+            assertEquals(List.of("abc\nd"), changes, "only the first insert reported");
         }
     }
 
@@ -265,12 +269,12 @@ public class TextAreaTest {
             final AppContext ctx = new AppContext();
             final TextArea area = area("ab").singleLine(true);
             area.attach(ctx);
-            assertFalse(area.dispatchKey(GLFW_KEY_ENTER, GLFW_PRESS));
-            assertFalse(area.dispatchKey(GLFW_KEY_ENTER, GLFW_REPEAT));
-            assertFalse(area.dispatchKey(GLFW_KEY_ENTER, GLFW_RELEASE));
+            assertFalse(area.dispatchKey(GLFW_KEY_ENTER, GLFW_PRESS), "ENTER press");
+            assertFalse(area.dispatchKey(GLFW_KEY_ENTER, GLFW_REPEAT), "ENTER repeat");
+            assertFalse(area.dispatchKey(GLFW_KEY_ENTER, GLFW_RELEASE), "ENTER release");
             ctx.ctrlDown = true;
-            assertFalse(area.dispatchKey(GLFW_KEY_ENTER, GLFW_PRESS));
-            assertFalse(area.dispatchKey(GLFW_KEY_ENTER, GLFW_RELEASE));
+            assertFalse(area.dispatchKey(GLFW_KEY_ENTER, GLFW_PRESS), "CTRL+ENTER press");
+            assertFalse(area.dispatchKey(GLFW_KEY_ENTER, GLFW_RELEASE), "CTRL+ENTER release");
             assertEquals("ab", area.value());
         }
 
@@ -294,8 +298,8 @@ public class TextAreaTest {
         }
 
         @Test
-        @DisplayName("the caret, the erase keys and the wrap work as in a multi-line box")
-        void editsAtCaret() {
+        @DisplayName("a single-line box still soft wraps, so HOME, LEFT and BACKSPACE act on its rows as in a multi-line one")
+        void stillWraps() {
             final TextArea area = area("hello world again").singleLine(true);
             tap(area, GLFW_KEY_HOME);
             type(area, "X");
@@ -474,13 +478,13 @@ public class TextAreaTest {
         @DisplayName("a click outside blurs and passes on, and clearFocus blurs too")
         void focusAndBlur() {
             final TextArea area = area("a").focused(false);
-            assertFalse(area.textInputActive());
-            assertTrue(area.dispatchClick(50, 30));
-            assertTrue(area.textInputActive());
-            assertFalse(area.dispatchClick(300, 300));
-            assertFalse(area.focused());
+            assertFalse(area.textInputActive(), "the area starts blurred");
+            assertTrue(area.dispatchClick(50, 30), "a click inside is taken");
+            assertTrue(area.textInputActive(), "and focuses the area");
+            assertFalse(area.dispatchClick(300, 300), "a click outside passes on");
+            assertFalse(area.focused(), "and blurs the area");
             area.focused(true).clearFocus();
-            assertFalse(area.textInputActive());
+            assertFalse(area.textInputActive(), "clearFocus blurs the area");
         }
     }
 
@@ -548,9 +552,9 @@ public class TextAreaTest {
         @DisplayName("the wheel is consumed only inside a box whose text overflows")
         void wheel() {
             final TextArea tall = area("1\n2\n3\n4\n5\n6");
-            assertTrue(tall.dispatchScroll(50, 30, 1));
-            assertFalse(tall.dispatchScroll(300, 300, 1));
-            assertFalse(area("one").dispatchScroll(50, 30, 1));
+            assertTrue(tall.dispatchScroll(50, 30, 1), "six rows overflow the three the box shows");
+            assertFalse(tall.dispatchScroll(300, 300, 1), "a point outside the box");
+            assertFalse(area("one").dispatchScroll(50, 30, 1), "a short text leaves the wheel to its holder");
         }
     }
 }

@@ -10,35 +10,39 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Verifies the intrinsic data of {@link PixelFormat}: only the BCn layouts are compressed, and the
- * plane geometry rounds subsampled planes up, scales texels with the sample depth and sums every
- * plane into the frame size.
+ * Verifies the intrinsic data of {@link PixelFormat}: only the BCn layouts are compressed, and the plane geometry
+ * rounds subsampled planes up, scales texels with the sample depth, sums every plane into the frame size and rejects
+ * missing planes, negative sizes, impossible depths and sizes past a long.
  */
 @DisplayName("PixelFormat")
 public class PixelFormatTest {
-    // ==========================================================================
-    // INTERNAL API
-    // ==========================================================================
-    @Test
-    @DisplayName("Only BCn formats are compressed, with 8 or 16 block bytes")
-    void testCompressed() {
-        for (final PixelFormat fmt: PixelFormat.values()) {
-            if (fmt.name().startsWith("BC")) {
-                assertTrue(fmt.compressed(), fmt + " must be compressed");
-                assertEquals(fmt == PixelFormat.BC1 ? 8 : 16, fmt.blockBytes(), fmt + " block bytes");
-            } else {
-                assertFalse(fmt.compressed(), fmt + " must not be compressed");
-                assertEquals(0, fmt.blockBytes(), fmt + " must have no block bytes");
-            }
-        }
-    }
 
     // ==========================================================================
     // NESTED TYPES
     // ==========================================================================
+
+    @Nested
+    @DisplayName("Compression")
+    class Compression {
+
+        @Test
+        @DisplayName("Only BCn formats are compressed, BC1 with 8 block bytes and the others with 16")
+        void onlyBcnFormatsAreCompressed() {
+            for (final PixelFormat fmt: PixelFormat.values()) {
+                if (fmt.name().startsWith("BC")) {
+                    assertTrue(fmt.compressed(), fmt + " must be compressed");
+                    assertEquals(fmt == PixelFormat.BC1 ? 8 : 16, fmt.blockBytes(), fmt + " block bytes");
+                } else {
+                    assertFalse(fmt.compressed(), fmt + " must not be compressed");
+                    assertEquals(0, fmt.blockBytes(), fmt + " must have no block bytes");
+                }
+            }
+        }
+    }
+
     @Nested
     @DisplayName("Plane geometry")
-    class GeometryTests {
+    class Geometry {
 
         @Test
         @DisplayName("Subsampled planes round up, so odd sizes keep their last chroma column and row")
@@ -46,11 +50,11 @@ public class PixelFormatTest {
             assertEquals(853, PixelFormat.YUV420P.planeWidth(0, 853));
             assertEquals(481, PixelFormat.YUV420P.planeHeight(0, 481));
             for (final int plane: new int[] { 1, 2 }) {
-                assertEquals(427, PixelFormat.YUV420P.planeWidth(plane, 853));
-                assertEquals(241, PixelFormat.YUV420P.planeHeight(plane, 481));
-                assertEquals(427, PixelFormat.YUV422P.planeWidth(plane, 853));
-                assertEquals(481, PixelFormat.YUV422P.planeHeight(plane, 481));
-                assertEquals(853, PixelFormat.YUV444P.planeWidth(plane, 853));
+                assertEquals(427, PixelFormat.YUV420P.planeWidth(plane, 853), "YUV420P width of plane " + plane);
+                assertEquals(241, PixelFormat.YUV420P.planeHeight(plane, 481), "YUV420P height of plane " + plane);
+                assertEquals(427, PixelFormat.YUV422P.planeWidth(plane, 853), "YUV422P width of plane " + plane);
+                assertEquals(481, PixelFormat.YUV422P.planeHeight(plane, 481), "YUV422P height of plane " + plane);
+                assertEquals(853, PixelFormat.YUV444P.planeWidth(plane, 853), "YUV444P width of plane " + plane);
             }
             assertEquals(853, PixelFormat.YUVA420P.planeWidth(3, 853), "alpha stays at full size");
             assertEquals(481, PixelFormat.YUVA420P.planeHeight(3, 481));

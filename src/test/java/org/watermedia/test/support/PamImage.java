@@ -1,13 +1,16 @@
 package org.watermedia.test.support;
 
+import org.watermedia.api.codecs.ImageData;
+
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
-/** PAM (P7) reference image for pixel-exact codec tests, which compare BGRA decoder output through {@link #bgraToRgba}. */
+/** RGB or RGBA reference raster in PAM (P7) sample order, read from a PAM file or built from another decoder, that pixel tests compare decoded frames against. */
 public record PamImage(int width, int height, int depth, byte[] pixels) {
 
     /** Reads {@code path} and parses the PAM payload. */
@@ -40,15 +43,24 @@ public record PamImage(int width, int height, int depth, byte[] pixels) {
         return new PamImage(width, height, depth, pixels);
     }
 
-    /** Converts a BGRA frame to an RGBA byte array with absolute reads, leaving the buffer position untouched. */
-    public static byte[] bgraToRgba(final ByteBuffer bgra, final int width, final int height) {
-        final byte[] rgba = new byte[width * height * 4];
-        for (int offset = 0; offset < rgba.length; offset += 4) {
-            rgba[offset] = bgra.get(offset + 2);
-            rgba[offset + 1] = bgra.get(offset + 1);
-            rgba[offset + 2] = bgra.get(offset);
-            rgba[offset + 3] = bgra.get(offset + 3);
+    /** Returns one frame of a four-byte layout as little-endian ints, which reads BGRA as ARGB. */
+    public static int[] argb(final ImageData image, final int frame) {
+        final int[] pixels = new int[image.width() * image.height()];
+        image.frames()[frame].duplicate().order(ByteOrder.LITTLE_ENDIAN).asIntBuffer().get(pixels);
+        return pixels;
+    }
+
+    /** Compares a BGRA frame of this size with the reference, channel by channel in its RGB (depth 3) or RGBA (depth 4) order. */
+    public PixelDiff diff(final ByteBuffer bgra, final int smallDiff) {
+        if (this.depth != 3 && this.depth != 4) throw new IllegalArgumentException("A BGRA frame compares only against an RGB or RGBA reference, not depth " + this.depth);
+        // ABSOLUTE READS LEAVE THE FRAME POSITION UNTOUCHED
+        final byte[] actual = new byte[this.width * this.height * this.depth];
+        for (int in = 0, out = 0; out < actual.length; in += 4, out += this.depth) {
+            actual[out] = bgra.get(in + 2);
+            actual[out + 1] = bgra.get(in + 1);
+            actual[out + 2] = bgra.get(in);
+            if (this.depth == 4) actual[out + 3] = bgra.get(in + 3);
         }
-        return rgba;
+        return PixelDiff.compare(this.pixels, actual, smallDiff);
     }
 }

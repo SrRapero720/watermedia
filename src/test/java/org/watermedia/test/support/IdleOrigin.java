@@ -41,6 +41,7 @@ public final class IdleOrigin implements AutoCloseable {
     private final ExecutorService workers = Executors.newCachedThreadPool();
     private final Map<String, Body> bodies = new ConcurrentHashMap<>();
     private final Map<String, Integer> paths = new ConcurrentHashMap<>(); // REQUESTS PER PATH
+    private final Map<String, Integer> stalls = new ConcurrentHashMap<>(); // DOWNLOADS CUT MID-BODY PER PATH
     private final Set<Connection> connections = ConcurrentHashMap.newKeySet(); // SERVED, NOT CUT
     private final Set<Connection> silenced = ConcurrentHashMap.newKeySet();    // CUT BY A SILENT ORIGIN, STILL OPEN
     private final CountDownLatch closing = new CountDownLatch(1);
@@ -77,6 +78,8 @@ public final class IdleOrigin implements AutoCloseable {
     public int requests(final String path) { return this.paths.getOrDefault(path, 0); }
     /** Returns the number of connections the origin cut for idling. */
     public int cuts() { return this.cuts.get(); }
+    /** Returns the number of downloads of {@code path} the origin cut in the middle of their body. */
+    public int cuts(final String path) { return this.stalls.getOrDefault(path, 0); }
     /** Returns the number of connections the origin still serves, neither closed nor cut. */
     public int connections() { return this.connections.size(); }
     /** Returns the number of requests that arrived after a stray empty line. */
@@ -124,16 +127,18 @@ public final class IdleOrigin implements AutoCloseable {
     private void watch() {
         while (!this.closed) {
             for (final Connection connection: this.connections)
-                if (connection.writing && System.nanoTime() - connection.progressNs > this.idleNs) this.cut(connection);
+                if (connection.writing && System.nanoTime() - connection.progressNs > this.idleNs) this.cut(connection, connection.path);
             try { Thread.sleep(Math.max(1L, TimeUnit.NANOSECONDS.toMillis(this.idleNs) / 10)); }
             catch (final InterruptedException e) { return; }
         }
     }
 
-    // A RESET IS A ZERO LINGER CLOSE (RST INSTEAD OF FIN); A SILENCED CONNECTION STAYS OPEN AND ITS HANDLER PARKS AT ITS NEXT STEP
-    private void cut(final Connection connection) {
+    // CUTS A CONNECTION IN THE MIDDLE OF THE BODY OF body, OR IDLE BETWEEN REQUESTS WHEN body IS NULL. A RESET IS A ZERO LINGER
+    // CLOSE (RST INSTEAD OF FIN); A SILENCED CONNECTION STAYS OPEN AND ITS HANDLER PARKS AT ITS NEXT STEP
+    private void cut(final Connection connection, final String body) {
         if (!this.connections.remove(connection)) return;
         this.cuts.incrementAndGet();
+        if (body != null) this.stalls.merge(body, 1, Integer::sum);
         if (this.silent) {
             this.silenced.add(connection);
             connection.silenced = true;
@@ -165,7 +170,7 @@ public final class IdleOrigin implements AutoCloseable {
                 try {
                     head = this.head(in);
                 } catch (final SocketTimeoutException idle) {
-                    this.cut(connection);
+                    this.cut(connection, null);
                     if (connection.silenced) this.park();
                     return;
                 }
@@ -218,6 +223,7 @@ public final class IdleOrigin implements AutoCloseable {
 
                 // THE BODY GOES IN CHUNKS, EACH ONE PROGRESS: A WRITE THE CLIENT'S BACKPRESSURE BLOCKS FOR THE IDLE LIMIT IS CUT
                 connection.progressNs = System.nanoTime();
+                connection.path = path;
                 connection.writing = true;
                 final long began = System.nanoTime();
                 for (int at = start; at <= end; at += CHUNK_BYTES) {
@@ -283,9 +289,10 @@ public final class IdleOrigin implements AutoCloseable {
     // A STREAMED BODY GOES CHUNKED WITHOUT RANGES; bytesPerSec 0 SENDS AT FULL SPEED
     private record Body(String type, byte[] bytes, boolean streamed, long bytesPerSec) {}
 
-    // ONE ACCEPTED SOCKET, THE PROGRESS OF THE BODY IT IS WRITING (READ BY THE WATCHDOG) AND WHETHER A SILENT ORIGIN CUT IT
+    // ONE ACCEPTED SOCKET, THE PATH AND PROGRESS OF THE BODY IT IS WRITING (READ BY THE WATCHDOG) AND WHETHER A SILENT ORIGIN CUT IT
     private static final class Connection {
         private final Socket socket;
+        private volatile String path;
         private volatile boolean writing;
         private volatile long progressNs;
         private volatile boolean silenced;

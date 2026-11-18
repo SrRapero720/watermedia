@@ -13,10 +13,10 @@ public class GFXEngineTest {
     @DisplayName("minBytes spares the last row its padding and refuses a stride shorter than a row")
     void minBytes() {
         assertEquals(12L, GFXEngine.minBytes(0, 4, 3), "a tight plane is rows times row bytes");
-        assertEquals(2L * 16 + 4, GFXEngine.minBytes(16, 4, 3));
+        assertEquals(2L * 16 + 4, GFXEngine.minBytes(16, 4, 3), "every row but the last carries its padding");
         assertEquals(4L, GFXEngine.minBytes(16, 4, 1), "a single row needs no stride at all");
-        assertEquals(12L, GFXEngine.minBytes(4, 4, 3));
-        assertEquals(-1L, GFXEngine.minBytes(3, 4, 3));
+        assertEquals(12L, GFXEngine.minBytes(4, 4, 3), "a stride of one row is a tight plane");
+        assertEquals(-1L, GFXEngine.minBytes(3, 4, 3), "a stride shorter than a row is refused");
         assertEquals(65_535L * 65_536 + 65_536, GFXEngine.minBytes(65_536, 65_536, 65_536), "large planes never wrap");
     }
 }

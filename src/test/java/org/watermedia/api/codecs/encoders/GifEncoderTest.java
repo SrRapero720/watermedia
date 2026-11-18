@@ -42,9 +42,9 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Verifies the house-made GIF encoder by decoding what it writes: exact palettes in every accepted layout, one-bit
+ * Verifies the house-made {@link GifEncoder} by decoding what it writes: exact palettes in every accepted layout, one-bit
  * transparency including pixels that turn transparent, quantized gradients with and without dithering, delays, loop
- * counts, cropped frames and the refusals of its contract.
+ * counts, cropped frames, a file target and the refusals of its contract.
  */
 @DisplayName("GIF encoder")
 public class GifEncoderTest {
@@ -205,7 +205,7 @@ public class GifEncoderTest {
     @DisplayName("Exact palettes")
     class Exact {
 
-        @ParameterizedTest(name = "{0}")
+        @ParameterizedTest(name = "{displayName}: {0}")
         @EnumSource(value = PixelFormat.class, names = { "RGBA", "BGRA", "RGB", "GRAY" })
         @DisplayName("Frames of at most 256 colors round-trip pixel-exact")
         void roundTrip(final PixelFormat format) throws IOException {
@@ -218,7 +218,7 @@ public class GifEncoderTest {
         @DisplayName("Exactly 256 opaque colors keep an exact palette")
         void fullPalette() throws IOException {
             final byte[] gray = new byte[256];
-            for (int i = 0; i < gray.length; i++) gray[i] = (byte) (i * 167);
+            for (int i = 0; i < gray.length; i++) gray[i] = (byte) (i * 167); // 167 IS ODD, SO EVERY BYTE VALUE SHOWS UP ONCE
             final byte[] gif = encode(16, 16, PixelFormat.GRAY, Encoder.DEFAULT_QUALITY, 0, steps(1), gray);
             assertComposition(gif, PixelFormat.GRAY, gray);
             assertEquals(7, images(gif).get(0).descriptor().localColorTableSize(), "256 colors take the full 8-bit table");
@@ -239,12 +239,12 @@ public class GifEncoderTest {
             }
             // THE SECOND FRAME SHIFTS A RUN OF 20000 PIXELS ONE PLACE LEFT
             final byte[] second = first.clone();
-            for (int p = 30_000; p < 90_000; p++) second[p] = first[p + 3];
+            System.arraycopy(first, 30_003, second, 30_000, 60_000);
             final byte[] gif = encode(256, 192, PixelFormat.RGB, Encoder.DEFAULT_QUALITY, 0, steps(2), first, second);
             assertComposition(gif, PixelFormat.RGB, first, second);
 
             final BufferedImage image = ImageIO.read(new ByteArrayInputStream(gif));
-            assertArrayEquals(argb(first, PixelFormat.RGB), image.getRGB(0, 0, 256, 192, null, 0, 256));
+            assertArrayEquals(argb(first, PixelFormat.RGB), image.getRGB(0, 0, 256, 192, null, 0, 256), "the JDK decoder reads the same first frame");
         }
     }
 
@@ -291,8 +291,8 @@ public class GifEncoderTest {
                 assertEquals(2, images.get(f).control().disposalMethod(), "frame " + f + " must clear");
                 assertTrue(images.get(f).control().transparentColorFlag(), "frame " + f + " clears to transparent");
             }
-            assertEquals(1, images.get(3).control().disposalMethod());
-            assertEquals(1, images.get(4).control().disposalMethod());
+            assertEquals(1, images.get(3).control().disposalMethod(), "frame 3 is kept, no pixel turns transparent after it");
+            assertEquals(1, images.get(4).control().disposalMethod(), "the last frame is kept");
         }
 
         @Test
@@ -336,7 +336,7 @@ public class GifEncoderTest {
             final List<Image> images = images(plain);
             assertEquals(7, images.get(0).descriptor().localColorTableSize(), "a lossy frame uses the whole table");
             final ImageDescriptor window = images.get(1).descriptor();
-            assertArrayEquals(new int[] { 48, 56, 40, 30 }, new int[] { window.left(), window.top(), window.width(), window.height() });
+            assertArrayEquals(new int[] { 48, 56, 40, 30 }, new int[] { window.left(), window.top(), window.width(), window.height() }, "only the shifted window is quantized again");
 
             final ImageData flatImage = CodecsAPI.decode(plain);
             final ImageData noisyImage = CodecsAPI.decode(dithered);
@@ -402,7 +402,7 @@ public class GifEncoderTest {
         void shortFrames() throws IOException {
             final byte[][] frames = { picture(8, 8, PixelFormat.RGB, 0), picture(8, 8, PixelFormat.RGB, 1), picture(8, 8, PixelFormat.RGB, 2) };
             final ImageData image = CodecsAPI.decode(encode(8, 8, PixelFormat.RGB, Encoder.DEFAULT_QUALITY, 0, new long[] { 0L, 4_000L, 8_000L }, frames));
-            assertArrayEquals(new long[] { 20L, 20L, 1_000L / FPS }, image.delays());
+            assertArrayEquals(new long[] { 20L, 20L, 1_000L / FPS }, image.delays(), "delays in ms");
         }
 
         @ParameterizedTest(name = "repeat {0}")
@@ -412,21 +412,22 @@ public class GifEncoderTest {
             final byte[][] frames = { picture(8, 8, PixelFormat.GRAY, 0), picture(8, 8, PixelFormat.GRAY, 1) };
             final byte[] gif = encode(8, 8, PixelFormat.GRAY, Encoder.DEFAULT_QUALITY, repeat, steps(2), frames);
             try (final ImageReader reader = CodecsAPI.reader(ByteBuffer.wrap(gif))) {
-                assertEquals(repeat, reader.repeat());
-                if (repeat == 1) assertNull(reader.metadata().value(CodecsAPI.METAKEY_LOOP_COUNT));
-                else assertEquals(Math.max(0, repeat - 1), reader.metadata().value(CodecsAPI.METAKEY_LOOP_COUNT));
+                assertEquals(repeat, reader.repeat(), "the play count reads back");
+                // NETSCAPE STORES THE LOOPS AFTER THE FIRST PLAY, 0 STILL MEANING FOREVER
+                if (repeat == 1) assertNull(reader.metadata().value(CodecsAPI.METAKEY_LOOP_COUNT), "a single play writes no NETSCAPE loop");
+                else assertEquals(Math.max(0, repeat - 1), reader.metadata().value(CodecsAPI.METAKEY_LOOP_COUNT), "the NETSCAPE loop counts the plays after the first");
             }
         }
 
         @Test
-        @DisplayName("A single frame is a still image without loop nor delay")
+        @DisplayName("A single frame is a still image without a loop or a delay")
         void still() throws IOException {
             final byte[] gif = encode(8, 8, PixelFormat.GRAY, Encoder.DEFAULT_QUALITY, 0, steps(1), picture(8, 8, PixelFormat.GRAY, 0));
             try (final ImageReader reader = CodecsAPI.reader(ByteBuffer.wrap(gif))) {
-                assertEquals(1, reader.repeat());
-                assertNull(reader.metadata().value(CodecsAPI.METAKEY_LOOP_COUNT));
+                assertEquals(1, reader.repeat(), "a still image plays once");
+                assertNull(reader.metadata().value(CodecsAPI.METAKEY_LOOP_COUNT), "a still image writes no NETSCAPE loop");
             }
-            assertEquals(0, images(gif).get(0).control().delayTime());
+            assertEquals(0, images(gif).get(0).control().delayTime(), "a still image has no delay");
         }
     }
 
@@ -442,8 +443,8 @@ public class GifEncoderTest {
             assertComposition(gif, PixelFormat.RGBA, frame, frame, frame, frame);
             final List<Image> images = images(gif);
             for (int f = 1; f < images.size(); f++) {
-                assertEquals(1, images.get(f).descriptor().width(), "frame " + f);
-                assertEquals(1, images.get(f).descriptor().height(), "frame " + f);
+                assertEquals(1, images.get(f).descriptor().width(), "frame " + f + " redraws one pixel");
+                assertEquals(1, images.get(f).descriptor().height(), "frame " + f + " redraws one pixel");
             }
         }
 
@@ -456,8 +457,8 @@ public class GifEncoderTest {
             assertComposition(gif, PixelFormat.BGRA, sprite, sprite, empty);
             final List<Image> images = images(gif);
             final ImageDescriptor cleared = images.get(1).descriptor();
-            assertArrayEquals(new int[] { 40, 20, 6, 6 }, new int[] { cleared.left(), cleared.top(), cleared.width(), cleared.height() });
-            assertEquals(2, images.get(1).control().disposalMethod());
+            assertArrayEquals(new int[] { 40, 20, 6, 6 }, new int[] { cleared.left(), cleared.top(), cleared.width(), cleared.height() }, "the unchanged frame covers only the sprite");
+            assertEquals(2, images.get(1).control().disposalMethod(), "the unchanged frame clears the sprite once shown");
             assertEquals(1, images.get(2).descriptor().width(), "nothing is left to draw once the sprite is cleared");
         }
 
@@ -470,7 +471,7 @@ public class GifEncoderTest {
             final byte[] gif = encode(40, 30, PixelFormat.RGB, Encoder.DEFAULT_QUALITY, 0, steps(2), first, second);
             assertComposition(gif, PixelFormat.RGB, first, second);
             final ImageDescriptor descriptor = images(gif).get(1).descriptor();
-            assertArrayEquals(new int[] { 20, 11, 5, 3 }, new int[] { descriptor.left(), descriptor.top(), descriptor.width(), descriptor.height() });
+            assertArrayEquals(new int[] { 20, 11, 5, 3 }, new int[] { descriptor.left(), descriptor.top(), descriptor.width(), descriptor.height() }, "the second frame covers the 5x3 change");
         }
     }
 
@@ -478,22 +479,22 @@ public class GifEncoderTest {
     @DisplayName("Contract")
     class Contract {
 
-        @ParameterizedTest(name = "{0}")
+        @ParameterizedTest(name = "{displayName}: {0}")
         @EnumSource(value = PixelFormat.class, names = { "YUYV", "NV12", "YUV420P", "YUVA444P" })
         @DisplayName("Layouts other than RGBA, BGRA, RGB and GRAY are refused")
         void refusedFormat(final PixelFormat format) {
             final Encoder.Video video = new Encoder.Video(VideoCodec.GIF, 16, 16, format, FPS);
-            assertThrows(IllegalArgumentException.class, () -> CodecsAPI.encoder(Container.GIF, new ByteArrayOutputStream(), video, null));
+            assertThrows(IllegalArgumentException.class, () -> CodecsAPI.encoder(Container.GIF, new ByteArrayOutputStream(), video, null), format + " is refused");
         }
 
         @Test
         @DisplayName("Sides above 65535 pixels and more than 65536 plays are refused")
         void refusedSize() {
             final ByteArrayOutputStream out = new ByteArrayOutputStream();
-            assertThrows(IllegalArgumentException.class, () -> new GifEncoder(out, new Encoder.Video(VideoCodec.GIF, 65_536, 1, PixelFormat.GRAY, FPS)));
-            assertThrows(IllegalArgumentException.class, () -> new GifEncoder(out, new Encoder.Video(VideoCodec.GIF, 1, 65_536, PixelFormat.GRAY, FPS)));
-            assertThrows(IllegalArgumentException.class, () -> new GifEncoder(out, new Encoder.Video(VideoCodec.GIF, 8, 8, PixelFormat.GRAY, FPS, 50, 65_537)));
-            assertDoesNotThrow(() -> new GifEncoder(out, new Encoder.Video(VideoCodec.GIF, 65_535, 1, PixelFormat.GRAY, FPS)));
+            assertThrows(IllegalArgumentException.class, () -> new GifEncoder(out, new Encoder.Video(VideoCodec.GIF, 65_536, 1, PixelFormat.GRAY, FPS)), "a width of 65536 is refused");
+            assertThrows(IllegalArgumentException.class, () -> new GifEncoder(out, new Encoder.Video(VideoCodec.GIF, 1, 65_536, PixelFormat.GRAY, FPS)), "a height of 65536 is refused");
+            assertThrows(IllegalArgumentException.class, () -> new GifEncoder(out, new Encoder.Video(VideoCodec.GIF, 8, 8, PixelFormat.GRAY, FPS, 50, 65_537)), "65537 plays are refused");
+            assertDoesNotThrow(() -> new GifEncoder(out, new Encoder.Video(VideoCodec.GIF, 65_535, 1, PixelFormat.GRAY, FPS)), "a side of 65535 is taken");
         }
 
         @Test
@@ -507,8 +508,8 @@ public class GifEncoderTest {
                 for (int f = 0; f < frames.length; f++) encoder.video(ByteBuffer.wrap(frames[f]), f * 100_000L);
             }
             final ImageData image = assertComposition(Files.readAllBytes(file), PixelFormat.RGBA, frames);
-            assertArrayEquals(new long[] { 100L, 100L, 40L }, image.delays());
-            assertEquals(ImageData.REPEAT_FOREVER, image.repeat());
+            assertArrayEquals(new long[] { 100L, 100L, 40L }, image.delays(), "delays in ms, the last one 1 / fps");
+            assertEquals(ImageData.REPEAT_FOREVER, image.repeat(), "the default track repeats forever");
         }
     }
 

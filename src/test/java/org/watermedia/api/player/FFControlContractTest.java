@@ -38,7 +38,11 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
-/** Verifies the {@link FFMediaPlayer} control contract: controls while loading, stops on held origins and terminal states. */
+/**
+ * Verifies the {@link FFMediaPlayer} control contract: a pause, a seek and a speed chosen before the source opens, stop() while a
+ * held HTTP origin keeps the load in FFmpeg or in the network cache, an unbounded HTTP source streamed past the cache, the
+ * restart of an ended player, a still image timed by displayTime, and a terminal callback that cannot release its player.
+ */
 @DisplayName("FFMediaPlayer control contract")
 public class FFControlContractTest {
 
@@ -52,14 +56,14 @@ public class FFControlContractTest {
     // PLAYBACK
     private static final long SEEK_LANDING_MS = 1_500L;  // A PAUSED RESTART LANDS ON THE KEYFRAME NEAREST THE TARGET
     private static final float SPEED = 2.0f;
-    private static final double RATE_FLOOR = 1.25;       // A 2x CLOCK MAY STALL A QUARTER OF THE WINDOW ON A SLOW HOST; A RESET TO 1x NEVER CLEARS THIS
+    private static final double RATE_FLOOR = 1.25;       // A 2x CLOCK MAY LOSE 3/8 OF THE WINDOW TO A STALL ON A SLOW HOST; A CLOCK RESET TO 1x NEVER REACHES IT
     private static final long RATE_WINDOW_MS = 1_000L;
     private static final int RATE_ATTEMPTS = 3;          // A CLOCK-DEPENDENT CASE GETS TWO MORE TRIES ON A STALLED HOST
     private static final long RATE_RETRY_MS = 5_000L;
     private static final long DISPLAY_MS = 400L;
     private static final int WEBM_FRAMES = 90;
 
-    private boolean cache;
+    private boolean cache; // THE PROCESS-WIDE CACHE SWITCH AS THE CASE FOUND IT
 
     // ==========================================================================
     // INTERNAL API
@@ -82,8 +86,8 @@ public class FFControlContractTest {
 
     // HOLDS THE ORIGIN UNTIL A NEW PIPELINE THREAD BLOCKS WHERE blocked SAYS, THEN STOPS THE LOADING PLAYER THERE. ONLY A
     // STOP INSIDE FFMPEG'S OPEN CUTS THAT OPEN SHORT ("Open aborted"); A STOP INSIDE THE CACHE WAIT NEVER REACHES THE OPEN
-    private static void stopWhileLoading(final boolean cache, final Predicate<StackTraceElement> blocked) throws Exception {
-        WaterMediaConfig.codecs.ffmpeg.cache = cache;
+    private static void stopWhileLoading(final boolean cached, final Predicate<StackTraceElement> blocked) throws Exception {
+        WaterMediaConfig.codecs.ffmpeg.cache = cached;
         try (final Origin origin = Origin.of(Fixtures.readAll(Fixtures.MP4_H264), "video/mp4")) {
             final MRL mrl = resolve(origin.uri(".mp4"));
             final Set<Thread> baseline = Set.copyOf(Thread.getAllStackTraces().keySet());
@@ -107,9 +111,9 @@ public class FFControlContractTest {
                     assertFalse(player.canPlay(), "the source never opened");
                     assertTrue(PlayerWait.awaitCondition(() -> pipeline(baseline).isEmpty(), THREAD_EXIT_MS),
                             () -> "pipeline threads left behind: " + pipeline(baseline));
-                    final boolean opened = capture.events().stream().anyMatch(event -> event.getThreadName().startsWith("FFThread-")
+                    final boolean aborted = capture.events().stream().anyMatch(event -> event.getThreadName().startsWith("FFThread-")
                             && event.getMessage().getFormattedMessage().startsWith("Open aborted"));
-                    assertEquals(!cache, opened, cache ? "the stopped load opened the source it abandoned" : "the stop must cut the open short");
+                    assertEquals(!cached, aborted, cached ? "the stopped load opened the source it abandoned" : "the stop must cut the open short");
                 }
             } finally {
                 origin.release();
@@ -121,8 +125,8 @@ public class FFControlContractTest {
     // RESOLVES A FRESH MRL; AN ORIGIN'S PROBE GOES THROUGH BEFORE ANY hold()
     private static MRL resolve(final URI uri) {
         final MRL mrl = PlayerAPI.mrl(uri);
-        assertTrue(mrl.await(MRL_TIMEOUT_MS));
-        assertEquals(MRL.Status.LOADED, mrl.status());
+        assertTrue(mrl.await(MRL_TIMEOUT_MS), "the MRL must resolve");
+        assertEquals(MRL.Status.LOADED, mrl.status(), () -> "the MRL failed: " + mrl.exception());
         return mrl;
     }
 
@@ -165,8 +169,8 @@ public class FFControlContractTest {
                     assertEquals(0L, player.time(), "the latched pause holds the start");
                     assertTrue(player.canSeek(), "an opened source is seekable");
                     assertTrue(player.resume());
-                    assertTrue(PlayerWait.awaitStatus(player, LOAD_TIMEOUT_MS, Status.PLAYING));
-                    assertTrue(PlayerWait.awaitCondition(() -> gfx.uploadCount() > 0, PLAY_OBSERVE_MS));
+                    assertTrue(PlayerWait.awaitStatus(player, LOAD_TIMEOUT_MS, Status.PLAYING), () -> "resumed to " + player.status());
+                    assertTrue(PlayerWait.awaitCondition(() -> gfx.uploadCount() > 0, PLAY_OBSERVE_MS), "the resumed video must reach the engine");
                 } finally {
                     origin.release();
                     player.release();
@@ -183,12 +187,12 @@ public class FFControlContractTest {
                 final FFMediaPlayer player = new FFMediaPlayer(mrl, 0, new HeadlessGFXEngine(false), null);
                 try {
                     assertTrue(player.start());
-                    assertTrue(PlayerWait.awaitStatus(player, LOAD_TIMEOUT_MS, Status.PLAYING));
+                    assertTrue(PlayerWait.awaitStatus(player, LOAD_TIMEOUT_MS, Status.PLAYING), () -> "landed " + player.status());
                     final long duration = player.duration();
                     assertTrue(duration > 2 * SEEK_LANDING_MS, "the fixture must be long enough to tell the target apart");
                     final long target = duration / 2;
                     assertTrue(player.stop());
-                    assertTrue(PlayerWait.awaitStatus(player, LOAD_TIMEOUT_MS, Status.STOPPED));
+                    assertTrue(PlayerWait.awaitStatus(player, LOAD_TIMEOUT_MS, Status.STOPPED), () -> "stopped to " + player.status());
 
                     origin.hold();
                     assertTrue(player.start());
@@ -221,9 +225,9 @@ public class FFControlContractTest {
                 try {
                     assertTrue(player.speed(SPEED), "a player that never ran takes a new speed");
                     assertTrue(player.start());
-                    assertTrue(PlayerWait.awaitStatus(player, LOAD_TIMEOUT_MS, Status.PLAYING));
-                    assertTrue(PlayerWait.awaitCondition(() -> gfx.uploadCount() > 0, PLAY_OBSERVE_MS));
-                    assertEquals(SPEED, player.speed());
+                    assertTrue(PlayerWait.awaitStatus(player, LOAD_TIMEOUT_MS, Status.PLAYING), () -> "landed " + player.status());
+                    assertTrue(PlayerWait.awaitCondition(() -> gfx.uploadCount() > 0, PLAY_OBSERVE_MS), "the video must reach the engine");
+                    assertEquals(SPEED, player.speed(), "the run keeps the chosen speed");
 
                     // BRACKET BOTH READINGS: THE CLOCK MUST RUN AT THE CHOSEN RATE, NOT AT THE 1x A FRESH RUN COULD RESET IT TO
                     final long before = System.nanoTime();
@@ -279,7 +283,7 @@ public class FFControlContractTest {
                     // A CACHE DOWNLOADING THE ENDLESS BODY WOULD HOLD THE LOAD UNTIL ITS READ TIMEOUT, LONG AFTER THIS WAIT
                     assertTrue(PlayerWait.awaitCondition(() -> gfx.uploadCount() > 0, PLAY_OBSERVE_MS),
                             () -> "no frame reached the engine, status " + player.status());
-                    assertNull(player.exception());
+                    assertNull(player.exception(), "the streamed source plays without a failure");
                     assertTrue(origin.requests() - probes >= 2, "the cache must ask first and FFmpeg then stream the source itself");
                 } finally {
                     player.release();
@@ -305,33 +309,33 @@ public class FFControlContractTest {
             };
             try {
                 assertTrue(player.start());
-                assertTrue(PlayerWait.awaitStatus(player, LOAD_TIMEOUT_MS, Status.PLAYING));
+                assertTrue(PlayerWait.awaitStatus(player, LOAD_TIMEOUT_MS, Status.PLAYING), () -> "landed " + player.status());
                 player.onStatus(collector[0]);
                 assertTrue(player.fps() > 0f, "a decoded video stream reports its rate");
                 assertTrue(player.canPlay());
                 final long duration = player.duration();
-                assertTrue(duration > 1_000L);
+                assertTrue(duration > 1_000L, "the fixture must outlast the seek to its end");
                 assertTrue(player.seek(duration - 500L));
-                assertTrue(PlayerWait.awaitStatus(player, LOAD_TIMEOUT_MS, Status.ENDED));
+                assertTrue(PlayerWait.awaitStatus(player, LOAD_TIMEOUT_MS, Status.ENDED), () -> "the seek to the end landed " + player.status());
                 assertTrue(player.canPlay(), "an ended media is still playable");
                 assertFalse(player.pause(), "nothing to pause after the end");
 
                 final long target = duration / 2;
-                assertTrue(player.seek(target));
-                assertTrue(PlayerWait.awaitStatus(player, LOAD_TIMEOUT_MS, Status.PAUSED));
+                assertTrue(player.seek(target), "a seek after the end restarts the player");
+                assertTrue(PlayerWait.awaitStatus(player, LOAD_TIMEOUT_MS, Status.PAUSED), () -> "the restart landed " + player.status());
                 assertTrue(Math.abs(player.time() - target) < SEEK_LANDING_MS, "the restart lands near the scrubbed position: " + player.time());
 
                 assertTrue(player.togglePlay());
-                assertTrue(PlayerWait.awaitStatus(player, LOAD_TIMEOUT_MS, Status.PLAYING));
+                assertTrue(PlayerWait.awaitStatus(player, LOAD_TIMEOUT_MS, Status.PLAYING), () -> "toggled to " + player.status());
                 assertTrue(player.stop());
-                assertTrue(PlayerWait.awaitStatus(player, LOAD_TIMEOUT_MS, Status.STOPPED));
-                assertEquals(0L, player.time());
+                assertTrue(PlayerWait.awaitStatus(player, LOAD_TIMEOUT_MS, Status.STOPPED), () -> "stopped to " + player.status());
+                assertEquals(0L, player.time(), "stop() rewinds");
                 assertFalse(player.stop(), "already stopped");
             } finally {
                 player.release();
             }
             assertEquals(Status.STOPPED, player.status());
-            assertFalse(player.canPlay());
+            assertFalse(player.canPlay(), "a released player has nothing to play");
             assertTrue(seen.contains(Status.LOADING) && seen.contains(Status.PAUSED), "intermediate transitions are published: " + seen);
             assertFalse(player.start(), "a released player refuses to start");
         }
@@ -347,16 +351,16 @@ public class FFControlContractTest {
                 player.displayTime(DISPLAY_MS);
                 assertTrue(player.start());
                 // THE DISPLAY WINDOW IS SHORT, SO THE FRAME UPLOAD IS THE SIGNAL THAT PLAYBACK STARTED, NOT A STATUS POLL
-                assertTrue(PlayerWait.awaitCondition(() -> gfx.uploadCount() > 0, LOAD_TIMEOUT_MS));
-                assertTrue(PlayerWait.awaitStatus(player, LOAD_TIMEOUT_MS, Status.ENDED));
-                assertEquals(DISPLAY_MS, player.duration());
+                assertTrue(PlayerWait.awaitCondition(() -> gfx.uploadCount() > 0, LOAD_TIMEOUT_MS), "the still must reach the engine");
+                assertTrue(PlayerWait.awaitStatus(player, LOAD_TIMEOUT_MS, Status.ENDED), () -> "the display time must end the still, it is " + player.status());
+                assertEquals(DISPLAY_MS, player.duration(), "a timed still lasts its display time");
                 assertEquals(1L, gfx.uploadCount(), "the still is uploaded once, never looped");
             } finally {
                 player.release();
             }
         }
 
-        @ParameterizedTest(name = "{0}")
+        @ParameterizedTest(name = "{displayName}: {0}")
         @EnumSource(value = Status.class, names = { "ENDED", "ERROR" })
         @DisplayName("A terminal callback cannot release the player from a playback thread, which keeps its graphics")
         void terminalCallbackCannotFreeItsOwnPlaybackResources(final Status terminal, @TempDir final Path directory) throws Exception {
@@ -365,8 +369,8 @@ public class FFControlContractTest {
             final MRL mrl = resolve(Fixtures.fileUri(input));
             // REMOVE ONLY THE TEMP COPY AFTER RESOLUTION TO EXERCISE A REAL DEMUX OPEN FAILURE
             if (terminal == Status.ERROR) Files.delete(input);
-            final HeadlessGFXEngine graphics = new HeadlessGFXEngine();
-            final FFMediaPlayer player = new FFMediaPlayer(mrl, 0, graphics, null);
+            final HeadlessGFXEngine gfx = new HeadlessGFXEngine();
+            final FFMediaPlayer player = new FFMediaPlayer(mrl, 0, gfx, null);
             final CompletableFuture<Throwable> callback = new CompletableFuture<>();
             final Thread[] callbackThread = new Thread[1];
             final boolean[] retained = new boolean[1];
@@ -376,22 +380,21 @@ public class FFControlContractTest {
                 Throwable failure = null;
                 try { player.release(); }
                 catch (final Throwable rejected) { failure = rejected; }
-                retained[0] = !graphics.released();
+                retained[0] = !gfx.released();
                 callback.complete(failure);
             });
             try {
                 assertTrue(player.start());
                 if (terminal == Status.ENDED) {
-                    assertTrue(PlayerWait.awaitCondition(() -> graphics.uploadCount() > 0, LOAD_TIMEOUT_MS));
-                    assertTrue(player.duration() > 0);
-                    assertTrue(player.seek(Math.max(0, player.duration() - 1_000)));
+                    assertTrue(PlayerWait.awaitCondition(() -> gfx.uploadCount() > 0, LOAD_TIMEOUT_MS), "the video must reach the engine");
+                    assertTrue(player.duration() > 0, "the fixture reports its duration");
+                    assertTrue(player.seek(Math.max(0L, player.duration() - 1_000L)));
                 }
-                assertInstanceOf(IllegalStateException.class, callback.get(LOAD_TIMEOUT_MS, TimeUnit.MILLISECONDS));
-                assertNotSame(Thread.currentThread(), callbackThread[0]);
-                assertTrue(retained[0], "Callback release must retain graphics");
-                assertFalse(Thread.currentThread().isInterrupted(), "Only the playback thread was interrupted");
+                assertInstanceOf(IllegalStateException.class, callback.get(LOAD_TIMEOUT_MS, TimeUnit.MILLISECONDS), "the release from the callback is refused");
+                assertNotSame(Thread.currentThread(), callbackThread[0], "the terminal callback runs on a playback thread");
+                assertTrue(retained[0], "the refused release keeps the graphics engine");
                 player.release();
-                assertTrue(graphics.released());
+                assertTrue(gfx.released(), "a release from the host thread frees the graphics engine");
             } finally {
                 player.release();
             }

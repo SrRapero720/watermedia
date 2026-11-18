@@ -8,8 +8,9 @@ import org.watermedia.bootstrap.app.WaterMediaApp.FramePlan;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
- * Verifies how the main loop picks a frame: animating screens repaint whole, changes repaint the tree, and a moving
- * CRT band over a still tree only composites the cached layers, once per band step.
+ * Verifies how the main loop picks a frame: animating screens repaint whole, changes repaint the tree, a moving CRT
+ * band over a still tree only composites the cached layers, once per band step, and a composite whose layers the frame
+ * start dropped repaints the tree instead.
  */
 @DisplayName("Frame plan")
 public class FramePlanTest {
