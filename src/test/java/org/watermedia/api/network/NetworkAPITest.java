@@ -20,6 +20,7 @@ import java.lang.reflect.Field;
 import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -34,7 +35,7 @@ import static org.watermedia.test.support.MediaBootstrap.runProbe;
  * Verifies how {@link NetworkAPI} learns that the file server is up: the root line {@code answers}
  * accepts, and {@code serverEnabled()} answering true at once on the host that started it and, elsewhere,
  * false while the remote server is silent, asking it once per pause, logging that once and keeping the
- * first true answer.
+ * first true answer; and the message an upload fails with when the server is off, silent or its address is wrong.
  */
 @DisplayName("NetworkAPI")
 public class NetworkAPITest {
@@ -216,6 +217,53 @@ public class NetworkAPITest {
                 assertTrue(PlayerWait.awaitCondition(() -> warnings(capture) == 1 && !probing.get(), WAIT_MS));
                 assertFalse(NetworkAPI.serverEnabled());
             }
+        }
+    }
+
+    @Nested
+    @DisplayName("upload")
+    class Upload {
+
+        @Test
+        @DisplayName("A file server that is off fails the upload naming its address instead of a raw exception")
+        void unreachableServerNamesItsAddress(@TempDir final Path directory) throws Exception {
+            final int port;
+            try (final ServerSocket free = new ServerSocket(0, 50, InetAddress.getByName("127.0.0.1"))) { port = free.getLocalPort(); }
+            WaterMediaConfig.network.remoteUrl = "http://127.0.0.1:" + port + "/";
+            final Path file = Files.write(directory.resolve("picture.png"), new byte[] { 1, 2, 3 });
+
+            final NetworkAPI.UploadStatus status = NetworkAPI.upload(file.toFile());
+            assertTrue(PlayerWait.awaitCondition(status::failed, WAIT_MS));
+            assertEquals("(wm_err:0714) Failed to upload, the file server at http://127.0.0.1:" + port + " is off or unreachable", status.error());
+        }
+
+        @Test
+        @DisplayName("A file server that takes the file and never answers fails the upload as silent, not as off")
+        void silentServerIsNotCalledOff(@TempDir final Path directory) throws Exception {
+            final int timeout = WaterMediaConfig.network.timeout;
+            // ACCEPTS THE CONNECTION AND NEVER READS NOR ANSWERS: THE SMALL FILE FITS THE SOCKET BUFFERS, SO ONLY THE ANSWER TIMES OUT
+            try (final ServerSocket silent = new ServerSocket(0, 50, InetAddress.getByName("127.0.0.1"))) {
+                WaterMediaConfig.network.timeout = 1_000;
+                WaterMediaConfig.network.remoteUrl = "http://127.0.0.1:" + silent.getLocalPort() + "/";
+                final Path file = Files.write(directory.resolve("picture.png"), new byte[] { 1, 2, 3 });
+
+                final NetworkAPI.UploadStatus status = NetworkAPI.upload(file.toFile());
+                assertTrue(PlayerWait.awaitCondition(status::failed, WAIT_MS));
+                assertEquals("(wm_err:0715) Failed to upload, the file server at http://127.0.0.1:" + silent.getLocalPort() + " did not answer in time", status.error());
+            } finally {
+                WaterMediaConfig.network.timeout = timeout;
+            }
+        }
+
+        @Test
+        @DisplayName("A remoteUrl that is no http(s) address fails the upload with its coded message alone")
+        void invalidRemoteFailsWithItsMessage(@TempDir final Path directory) throws Exception {
+            WaterMediaConfig.network.remoteUrl = "remote.invalid/upload";
+            final Path file = Files.write(directory.resolve("picture.png"), new byte[] { 1, 2, 3 });
+
+            final NetworkAPI.UploadStatus status = NetworkAPI.upload(file.toFile());
+            assertTrue(PlayerWait.awaitCondition(status::failed, WAIT_MS));
+            assertTrue(status.error().startsWith("(wm_err:0706) Failed to "), status.error());
         }
     }
 }

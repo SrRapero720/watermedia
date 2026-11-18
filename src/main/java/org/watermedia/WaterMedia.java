@@ -149,6 +149,8 @@ public final class WaterMedia {
     public static final int ERR_NETWORK_UPLOAD_SERVER_BUSY = 711;
     public static final int ERR_NETWORK_UPLOAD_HTTP_STATUS = 712;
     public static final int ERR_NETWORK_UPLOAD_LOG = 713;
+    public static final int ERR_NETWORK_UPLOAD_UNREACHABLE = 714;
+    public static final int ERR_NETWORK_UPLOAD_NO_ANSWER = 715;
     // NetworkServer 720-769
     public static final int ERR_SERVER_STOP_BUSY = 720;
     public static final int ERR_SERVER_ALREADY_RUNNING = 721;
@@ -507,7 +509,7 @@ public final class WaterMedia {
     public static final int ERR_YOUTUBE_BOTGUARD_PROVISION = 2414;
     public static final int ERR_YOUTUBE_NO_TOKEN = 2415;
     public static final int ERR_YOUTUBE_MATURE = 2416;
-    public static final int ERR_YOUTUBE_AGE_GATE = 2417;
+    public static final int ERR_YOUTUBE_AGE_RESTRICTED = 2417;
     public static final int ERR_YOUTUBE_NO_VISITOR_DATA = 2418;
     // YtDlpPlatform 2430-2459
     public static final int ERR_YTDLP_RESOLVE = 2430;

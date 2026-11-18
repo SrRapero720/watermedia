@@ -78,6 +78,8 @@ public final class FFMediaPlayer extends MediaPlayer {
     private static final long STARVATION_THRESHOLD_MS = 500;
     // BUFFER SETS OF THE ROTATING UPLOAD POOL (SEE planePool)
     private static final int PLANE_POOL_SETS = 4;
+    // A RESUME AFTER THIS LONG ON HOLD READS AN HLS INPUT AGAIN (SEE pause)
+    private static final long REREAD_HOLD_MS = 10_000L;
 
     private static int players; // GUARDED BY THREADS
 
@@ -162,7 +164,7 @@ public final class FFMediaPlayer extends MediaPlayer {
 
     // SERIAL OF THE LAST FRAME UPLOADED TO THE SFX ENGINE: WHEN IT CHANGES (SEEK,
     // QUALITY SWITCH) THE ENGINE QUEUE STILL HOLDS PRE-SEEK AUDIO AND MUST BE FLUSHED.
-    private int lastAudioUploadSerial = -1;
+    private volatile int lastAudioUploadSerial = -1;
 
     // PERFORMANCE COUNTERS
     private long perfLastCheckMs;
@@ -244,14 +246,21 @@ public final class FFMediaPlayer extends MediaPlayer {
 
     @Override
     public boolean pause(final boolean paused) {
-        final boolean changed = this.clock.paused(paused);
+        // THE ORIGIN CUTS A SEGMENT DOWNLOAD LEFT IDLE AND FFMPEG SKIPS ITS REST: A LONG HOLD RESUMES BY READING AGAIN
+        final FFDecoder decoder = this.decoder;
+        final long heldMs = this.clock.heldMs();
+        final boolean reread = !paused && heldMs >= REREAD_HOLD_MS && decoder != null && decoder.hls() && this.canSeek()
+                && !this.clock.demuxFinished() && this.clock.reread();
+        final boolean changed = reread || this.clock.paused(paused);
         // THE AUDIO ENGINE FOLLOWS, OR OPENAL PLAYS ITS QUEUE INTO AN UNDERRUN AND RESUMES FROM A STOPPED SOURCE (AUDIBLE
         // GAP). ONLY ON A REAL TRANSITION: play() ON A TERMINAL STATE (ENDED/STOPPED) WOULD REPLAY THE RESIDUAL QUEUE
         if (changed && this.sfx != null) {
             if (paused) this.sfx.pause();
-            else this.sfx.play();
+            // A STALE QUEUE (SEEK, REREAD) STAYS QUIET: drainAudio FLUSHES IT AND STARTS THE ENGINE
+            else if (this.lastAudioUploadSerial == this.clock.serial()) this.sfx.play();
         }
-        if (changed) LOGGER.debug(IT, "Pause -> {}", paused);
+        if (reread) LOGGER.debug(IT, "Resume after a {}ms hold reads the HLS input again from {}ms", heldMs, this.time());
+        else if (changed) LOGGER.debug(IT, "Pause -> {}", paused);
         return changed;
     }
 

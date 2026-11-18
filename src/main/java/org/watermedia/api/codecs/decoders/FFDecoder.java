@@ -70,12 +70,17 @@ public final class FFDecoder {
 
     // THREADING
     private static final int MAX_DECODE_THREADS = ThreadTool.processors() / 2;
+    private static final long PARK_MS = 50L; // A PARKED DEMUXER RECHECKS: A WAKEUP SENT RIGHT BEFORE ITS WAIT IS LOST
 
     // QUEUE CAPACITIES
     private static final long VIDEO_PACKET_QUEUE_BYTES = 16L * 1_024 * 1_024;
     private static final long AUDIO_PACKET_QUEUE_BYTES = 8L * 1_024 * 1_024;
     private static final int VIDEO_FRAME_QUEUE_SLOTS = 3;
     private static final int AUDIO_FRAME_QUEUE_SLOTS = 9;
+
+    // YOUTUBE CDN: A REQUEST OVER 10 MiB IS SERVED AT ABOUT TWICE THE BITRATE
+    private static final String YOUTUBE_CDN = "googlevideo.com";
+    private static final long YOUTUBE_REQUEST_BYTES = 10L * 1_024 * 1_024;
 
     // HW DECODE HEALTH: FALL BACK TO SOFTWARE WHEN THE GPU PATH MISBEHAVES; SOME DRIVERS (NOTABLY AMD D3D11VA) DECODE FINE
     // BUT STALL ON THE GPU→CPU FRAME TRANSFER, MAKING HW DECODE SLOWER THAN SOFTWARE
@@ -323,9 +328,14 @@ public final class FFDecoder {
     // ==========================================================================
     // MAIN AND SEPARATE AUDIO INPUTS SHARE TRANSPORT AND PROBING POLICY; FFMPEG EXPECTS MICROSECONDS/BYTES WHERE THE CONFIG
     // USES MILLISECONDS/MEBIBYTES
-    void applyInputOptions(final AVDictionary options) {
+    void applyInputOptions(final AVDictionary options, final URI input) {
+        final String scheme = input.getScheme() == null ? "" : input.getScheme().toLowerCase(Locale.ROOT);
+        final String host = input.getHost() == null ? "" : input.getHost().toLowerCase(Locale.ROOT);
         FFTool.configureTLS(options);
-        av_dict_set(options, "headers", this.headers.toRawString(), 0);
+        // HLS AND DASH SEGMENTS ONLY TAKE protocol_opts; reconnect_streamed WOULD RESTART AN UNRANGED ONE AT BYTE 0
+        av_dict_set(options, "protocol_opts", ":reconnect=1:reconnect_delay_max=5", AV_DICT_APPEND);
+        // AN EMPTY headers ENDS THE REQUEST HEAD EARLY
+        if (!this.headers.empty()) av_dict_set(options, "headers", this.headers.toRawString(), 0);
         final long analyzeMs = WaterMediaConfig.codecs.ffmpeg.analyzeDuration;
         if (analyzeMs > 0) av_dict_set(options, "analyzeduration", String.valueOf(analyzeMs * 1_000L), 0);
         av_dict_set(options, "probesize", String.valueOf(DataTool.megabytes(WaterMediaConfig.codecs.ffmpeg.probeSize)), 0);
@@ -333,10 +343,17 @@ public final class FFDecoder {
         av_dict_set(options, "rtbufsize", "15000000", 0);
         av_dict_set(options, "http_persistent", "1", 0);
         av_dict_set(options, "multiple_requests", "0", 0);
+        // ONLY YOUTUBE'S CDN: ANYWHERE ELSE EACH RANGE WOULD BE ONE MORE REQUEST
+        if (host.equals(YOUTUBE_CDN) || host.endsWith("." + YOUTUBE_CDN)) av_dict_set(options, "request_size", String.valueOf(YOUTUBE_REQUEST_BYTES), 0);
         av_dict_set(options, "reconnect", "1", 0);
         av_dict_set(options, "reconnect_streamed", "1", 0);
         av_dict_set(options, "reconnect_delay_max", "5", 0);
-        av_dict_set(options, "timeout", "10000000", 0);
+        // RTMP TAKES timeout AS THE WAIT FOR AN INCOMING CONNECTION AND TURNS INTO A SERVER
+        if (!scheme.startsWith("rtmp")) av_dict_set(options, "timeout", "10000000", 0);
+        // THE ONLY TIMEOUT HLS AND DASH COPY TO THEIR SEGMENTS
+        av_dict_set(options, "rw_timeout", "10000000", 0);
+        // AN HLS SEGMENT THAT FAILS TO OPEN IS ASKED FOR AGAIN BEFORE IT IS SKIPPED
+        av_dict_set(options, "seg_max_retry", "2", 0);
         av_dict_set(options, "rtsp_transport", "tcp", 0);
         av_dict_set(options, "max_delay", "5000000", 0);
     }
@@ -357,7 +374,7 @@ public final class FFDecoder {
         final AVDictionary trackOptions = new AVDictionary();
 
         try {
-            this.applyInputOptions(trackOptions);
+            this.applyInputOptions(trackOptions, trackUri);
 
             if (avformat.avformat_open_input(this.trackFormatContext, trackUrl, null, trackOptions) < 0) {
                 if (!this.aborted) LOGGER.error(IT, DataTool.errCode(WaterMedia.ERR_FFDECODER_TRACK_OPEN) + "Failed to open audio track input: {}", trackUrl);
@@ -514,7 +531,7 @@ public final class FFDecoder {
 
                 // PAUSE HANDLING
                 if (this.timeline.holding()) {
-                    this.timeline.awaitChange(0);
+                    this.timeline.awaitChange(PARK_MS);
                     continue;
                 }
 
@@ -564,7 +581,7 @@ public final class FFDecoder {
                     LOGGER.debug(IT, "Demux finished; the player handles ENDED/repeat after drain");
 
                     while (!this.timeline.seekPending() && !Thread.currentThread().isInterrupted()) {
-                        this.timeline.awaitChange(0);
+                        this.timeline.awaitChange(PARK_MS);
                     }
                     if (!this.timeline.seekPending()) break;
 
@@ -1235,7 +1252,7 @@ public final class FFDecoder {
     private boolean openInput(final String url) {
         final AVDictionary options = new AVDictionary();
         try {
-            this.applyInputOptions(options);
+            this.applyInputOptions(options, this.uri);
 
             final int ret = avformat.avformat_open_input(this.formatContext, url, null, options);
             if (ret < 0) {

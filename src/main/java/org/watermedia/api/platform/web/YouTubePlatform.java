@@ -30,9 +30,10 @@ import static org.watermedia.tools.JSONTool.str;
 
 /**
  * YouTube platform on the {@link YtDlpPlatform} engine, plus what YouTube alone needs: a retry of the "Sign in to
- * confirm you're not a bot" gate with a BotGuard po_token for the web-family clients, bound to a fresh InnerTube
+ * confirm you're not a bot" restriction with a BotGuard po_token for the web-family clients, bound to a fresh InnerTube
  * {@code visitorData}. The token comes from rustypipe-botguard ({@link BotGuardBinary}), run out of process so a
- * crash in its bundled JS engine never takes down the JVM.
+ * crash in its bundled JS engine never takes down the JVM. A restriction that survives the token is retried over IPv4, which
+ * then stays on for as long as it gets links through.
  */
 public final class YouTubePlatform extends YtDlpPlatform {
     private static final Marker IT = MarkerManager.getMarker(YouTubePlatform.class.getSimpleName());
@@ -54,6 +55,16 @@ public final class YouTubePlatform extends YtDlpPlatform {
 
     private final BotGuardBinary botGuard = new BotGuardBinary();
     private final Object botGuardLock = new Object(); // SERIALISE MINTS: THE BOTGUARD RUNS SHARE A SNAPSHOT FILE
+    private final URI visitorEndpoint;
+    // YOUTUBE FLAGS WHOLE IPv6 BLOCKS AS BOTS, WHICH NO po_token LIFTS: IPv4 IS THE LAST RESORT
+    private volatile boolean ipv4;      // IT GOT A LINK THROUGH: EVERY REQUEST STARTS OVER IPv4
+    private volatile boolean ipv4Only; // DO NOT RETRY
+
+    /** Creates the platform on YouTube's own visitor_id endpoint. */
+    public YouTubePlatform() { this(VISITOR_ENDPOINT); }
+
+    // TEST SEAM: POINTS THE visitor_id ENDPOINT AT A LOCAL SERVER
+    YouTubePlatform(final URI visitorEndpoint) { this.visitorEndpoint = visitorEndpoint; }
 
     @Override
     public String name() { return NAME; }
@@ -68,15 +79,16 @@ public final class YouTubePlatform extends YtDlpPlatform {
         // A VIDEO LINK PLAYS THE VIDEO (EVEN IF IT CARRIES &list=); A PURE PLAYLIST LINK PLAYS THE PLAYLIST
         final List<String> args = new ArrayList<>();
         if (YOUTUBE_VIDEO_ID.matcher(uri.toString()).find()) args.add("--no-playlist");
+        if (this.ipv4) args.add("--force-ipv4");
 
         final JsonObject info;
         try {
             info = this.info(uri.toString(), args);
         } catch (final IOException e) {
-            final PlatformException gate = ageGate(uri, e);
-            if (gate != null) throw gate;
+            final PlatformException restricted = ageRestricted(uri, e);
+            if (restricted != null) throw restricted;
 
-            // yt-dlp'S MESSAGES FOR THE BOT GATE THAT A po_token CAN BYPASS
+            // yt-dlp'S MESSAGES FOR THE BOT RESTRICTS THAT A po_token CAN BYPASS
             final String message = e.getMessage() == null ? "" : e.getMessage().toLowerCase(Locale.ROOT);
             if (message.contains("not a bot") || message.contains("sign in to confirm") || message.contains("po_token"))
                 return this.retryWithPoToken(uri, args);
@@ -91,7 +103,7 @@ public final class YouTubePlatform extends YtDlpPlatform {
         // (NO PER-VIDEO STREAM EXTRACTION), SO IT IS FAST AND NEEDS NO PO_TOKEN/BOTGUARD RETRY
         final JsonObject info;
         try {
-            info = this.info("ytsearch" + limit + ":" + query, List.of("--flat-playlist"), PlatformAPI.SEARCH_TIMEOUT_MS);
+            info = this.info("ytsearch" + limit + ":" + query, this.ipv4 ? List.of("--flat-playlist", "--force-ipv4") : List.of("--flat-playlist"), PlatformAPI.SEARCH_TIMEOUT_MS);
         } catch (final IOException e) {
             throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_YOUTUBE_SEARCH) + "Failed to search '" + query + "' with yt-dlp: " + e.getMessage(), e);
         }
@@ -133,7 +145,7 @@ public final class YouTubePlatform extends YtDlpPlatform {
         LOGGER.warn(IT, "YouTube bot check hit for '{}'; retrying with a BotGuard po_token", uri);
         final JsonObject info;
         try {
-            final String visitorData = visitorData();
+            final String visitorData = this.visitorData();
             final String token = this.mintToken(visitorData);
             final List<String> args = new ArrayList<>(baseArgs);
             args.add("--extractor-args");
@@ -142,15 +154,41 @@ public final class YouTubePlatform extends YtDlpPlatform {
                     + ";visitor_data=" + visitorData + ";player_skip=webpage,configs");
             args.add("--extractor-args");
             args.add("youtubetab:skip=webpage");
-            info = this.info(uri.toString(), args);
+            info = this.tokenInfo(uri, args);
         } catch (final IOException retry) {
-            final PlatformException gate = ageGate(uri, retry);
-            if (gate != null) throw gate;
+            final PlatformException restricted = ageRestricted(uri, retry);
+            if (restricted != null) throw restricted;
             throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_YOUTUBE_RETRY_IO) + "Failed to retry the blocked request with a po_token: " + retry.getMessage(), retry);
         } catch (final RuntimeException retry) {
             throw new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_YOUTUBE_RETRY_RUNTIME) + "Failed to retry the blocked request with a po_token: " + retry.getMessage(), retry);
         }
         return this.extract(info);
+    }
+
+    // RUNS yt-dlp WITH THE po_token IN args; A BOT RESTRICTION THAT SURVIVES IT GETS ONE MORE RUN OVER IPv4
+    private JsonObject tokenInfo(final URI uri, final List<String> args) throws IOException {
+        try {
+            return this.info(uri.toString(), args);
+        } catch (final IOException e) {
+            // RESTRICTION OVER IPv4 TOO: THE NEXT LINK STARTS WITHOUT IT
+            final boolean overIpv4 = args.contains("--force-ipv4");
+            if (overIpv4 && botRestricted(e)) this.ipv4 = false;
+            if (overIpv4 || this.ipv4Only || !botRestricted(e)) throw e;
+
+            args.add("--force-ipv4");
+            final JsonObject info;
+            try {
+                info = this.info(uri.toString(), args);
+            } catch (final IOException failed) {
+                // ONLY THE RESTRICTION RULES IPv4 OUT
+                if (botRestricted(failed)) this.ipv4Only = true;
+                failed.addSuppressed(e);
+                throw failed;
+            }
+            this.ipv4 = true;
+            LOGGER.warn(IT, "YouTube refuses this network over IPv6, resolving over IPv4...");
+            return info;
+        }
     }
 
     // MINTS A po_token FOR visitorData WITH rustypipe-botguard, WHOSE ONLY OUTPUT LINE STARTS WITH THE TOKEN. RUNS ARE
@@ -180,24 +218,10 @@ public final class YouTubePlatform extends YtDlpPlatform {
         throw new IOException(DataTool.errCode(WaterMedia.ERR_YOUTUBE_NO_TOKEN) + "Failed to mint a po_token due to no token from rustypipe-botguard");
     }
 
-    // ==========================================================================
-    // UTILITY
-    // ==========================================================================
-
-    // THE AGE GATE NEEDS A SIGNED-IN SESSION NO TOKEN CAN REPLACE: A MATURE BLOCK WHEN MATURE CONTENT IS OFF, A PLAIN
-    // FAILURE OTHERWISE, AND null WHEN yt-dlp'S MESSAGE IS NOT AN AGE GATE
-    private static PlatformException ageGate(final URI uri, final IOException e) {
-        final String message = e.getMessage() == null ? "" : e.getMessage().toLowerCase(Locale.ROOT);
-        if (!message.contains("confirm your age") && !message.contains("age-restricted") && !message.contains("inappropriate for some users"))
-            return null;
-        if (!WaterMediaConfig.platforms.allowMatureContent) return new MatureContentException(NAME, DataTool.errCode(WaterMedia.ERR_YOUTUBE_MATURE) + "Failed to resolve " + uri + " due to age restriction", e);
-        return new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_YOUTUBE_AGE_GATE) + "Failed to resolve video " + uri + " due to age restriction, it needs a signed-in session, which WaterMedia cannot provide", e);
-    }
-
     // A FRESH visitorData FROM YOUTUBE'S INNERTUBE visitor_id ENDPOINT; THE po_token MUST BE BOUND TO THE SAME
     // visitorData HANDED TO yt-dlp
-    private static String visitorData() throws IOException {
-        final JsonObject json = WebRequests.fetchJson(NAME, new NetRequest(VISITOR_ENDPOINT)
+    private String visitorData() throws IOException {
+        final JsonObject json = WebRequests.fetchJson(NAME, new NetRequest(this.visitorEndpoint)
                 .method("POST")
                 .accept(NetRequest.ACCEPT_JSON)
                 .contentType(NetRequest.MIMETYPE_JSON)
@@ -207,5 +231,24 @@ public final class YouTubePlatform extends YtDlpPlatform {
         final String visitorData = str(obj(json, "responseContext"), "visitorData");
         if (visitorData == null) throw new IOException(DataTool.errCode(WaterMedia.ERR_YOUTUBE_NO_VISITOR_DATA) + "Failed to fetch visitorData due to visitor_id endpoint answer without it");
         return visitorData;
+    }
+
+    // ==========================================================================
+    // UTILITY
+    // ==========================================================================
+
+    // "Sign in to confirm you're not a bot"
+    private static boolean botRestricted(final IOException e) {
+        return e.getMessage() != null && e.getMessage().toLowerCase(Locale.ROOT).contains("not a bot");
+    }
+
+    // THE AGE RESTRICTION NEEDS A SIGNED-IN SESSION NO TOKEN CAN REPLACE: A MATURE BLOCK WHEN MATURE CONTENT IS OFF, A PLAIN
+    // FAILURE OTHERWISE, AND null WHEN yt-dlp'S MESSAGE IS NOT AN AGE RESTRICTION
+    private static PlatformException ageRestricted(final URI uri, final IOException e) {
+        final String message = e.getMessage() == null ? "" : e.getMessage().toLowerCase(Locale.ROOT);
+        if (!message.contains("confirm your age") && !message.contains("age-restricted") && !message.contains("inappropriate for some users"))
+            return null;
+        if (!WaterMediaConfig.platforms.allowMatureContent) return new MatureContentException(NAME, DataTool.errCode(WaterMedia.ERR_YOUTUBE_MATURE) + "Failed to resolve " + uri + " due to age restriction", e);
+        return new PlatformException(NAME, DataTool.errCode(WaterMedia.ERR_YOUTUBE_AGE_RESTRICTED) + "Failed to resolve video " + uri + " due to age restriction, unsupported.", e);
     }
 }

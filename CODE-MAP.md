@@ -246,8 +246,11 @@ Package map (`src/main/java/org/watermedia`):
   `release=true` makes `X.Y.Z` an exact match and resumes at `X.Y.Z+1`). Outputs `<name>range` (Maven),
   `<name>depends` and `<name>breaks` (Fabric JSON predicates). Examples: `forgerange=[40.3.10,41),...,[64,67)`,
   `neorange=[21.1.0,21.2),...`, `neofmlrange=[4,5),[10,13)`, `javarange=[17,26)`,
-  `minecraftrange=[1.18.2],[1.19.2],...` (exact), `binariesrange=[3.0.0],[3.0.1,3.1)`. Forge 66 and NeoForge 26.3.0.x
+  `minecraftrange=[1.18.2],[1.19.2],...` (exact), `binariesrange=[3.0.1],[3.0.2,3.1)`. Forge 66 and NeoForge 26.3.0.x
   (FML 12) are MC 26.3. The Binaries build computes `watermediarange` the same way.
+  ⚠ Both companion minimums are 3.0.1: that version moved the base class Binaries extends (`WaterMedia.Module`), so a
+  3.0.0 half fails to link (`NoClassDefFoundError`, watermedia#278). Raise both `binariesversions` and the Binaries
+  `watermediaversions` whenever a release changes a member the other half links (list in §5 "Binaries module").
 - `openranges=true` (Binaries only) turns every game, loader and Java interval into one `[low, null)` span from its
   oldest minimum: Maven `[40.3.10,)`, Fabric `>=1.18.2`, no gap above. Its loader lists keep only that minimum;
   `minecraftversions` and `javaversions` stay full because the stores publish them. The companion `watermediarange`
@@ -590,8 +593,27 @@ requested, and SVG yields RGBA when RGBA is requested (everything else is conver
   - Input options: `FFTool.configureTLS`, `headers` (`HttpHeaders.toRawString`), `analyzeduration`/`probesize` from
     config, `buffer_size`, `reconnect*`, `timeout=10 s`, `rtsp_transport=tcp`, `max_delay`. Separate audio `Track` →
     second format context (`codecs.ffmpeg.trackPacketReads` per iteration; falls back to the main audio stream).
-  - Demux loop: seek → pause park (`holding()`) → track reads → `av_read_frame` → route (video `tryPut` spin, audio
-    `put`). EOF: `finish()` both packet queues, `signalDemuxFinished()`, park until a seek (repeat is driven by the
+  - Input options (`applyInputOptions(options, input)`, shared by the main input and the separate audio track):
+    `headers` only when the source has any (an empty value makes FFmpeg end the request head early); `timeout` and
+    `rw_timeout` are both 10 s: ⚠ `timeout` stays on
+    the input's own connections and is left out of `rtmp*` inputs, where it means the seconds to wait for an incoming
+    connection and turns the input into a server (no RTMP link played in 3.0.0 and 3.0.1); HLS/DASH copy only
+    `rw_timeout` to their segment requests (overwriting anything seeded through `protocol_opts`); `protocol_opts`
+    gets `:reconnect=1:reconnect_delay_max=5` appended to the TLS policy, because the top-level `reconnect` never
+    reaches segment connections and a segment whose download was cut (server reset or a silent router drop while
+    paused) was skipped without any error (watermedia#275). ⚠ No `reconnect_streamed` there: it would restart a
+    segment served without ranges at byte 0, so that reconnect resumes only the segments served with ranges.
+    `seg_max_retry=2`: an HLS segment that fails to open is asked for twice more before the demuxer skips it (the
+    open of a segment nothing fetched ahead; hls.c asks for the next segment on every read of the current one).
+    `request_size` = `YOUTUBE_REQUEST_BYTES` (10 MiB) only when the host is `YOUTUBE_CDN` (`googlevideo.com` and its
+    subdomains): YouTube paces a longer or open-ended range to
+    about twice the bitrate (waterframes#313, long videos froze while their audio played). Every other host keeps one
+    open request, because each bounded range is a new request, which a file server out of slots answers with 503.
+    ⚠ The separate audio track is read `trackPacketReads` packets per main packet on the same blocking demux thread,
+    so a slow track download caps the video speed (PENDING D10).
+  - Demux loop (parked waits last `PARK_MS=50` at most, so a seek or a resume that lands between the check and the
+    wait still wakes it): seek → pause park (`holding()`) → track reads → `av_read_frame` → route (video `tryPut`
+    spin, audio `put`). EOF: `finish()` both packet queues, `signalDemuxFinished()`, park until a seek (repeat is driven by the
     player). Seek ladder `av_seek_frame(BACKWARD)` → `avformat_seek_file` → `av_seek_frame(0)` → `reopenFormat()`;
     precise seeks stop decode threads, `reset()` queues (serial++), flush codecs and `syncDrain` on the demux thread.
   - Video decode: `receive_frame` → GPU→RAM transfer when a non-Vulkan hwaccel (`HW_TRANSFER_FAIL_LIMIT=30`, perf window
@@ -755,7 +777,10 @@ requested, and SVG yields RGBA when RGBA is requested (everything else is conver
   `reset()` own the rest (STOPPED terminal until `reset()`); `halt()`, `reload()`, `start()`, `requestSeek(ms, precise)`
   (serial++, BUFFERING), `paused(boolean)`, `holding()`, `awaitChange`, `awaitNotStatus`, `speed(double)`, `fps(float)`
   (`frameDurationSec`, `skipThresholdMs` ≈ 5 frames), events drained in order to one listener after the lock is
-  released.
+  released. `heldMs()` (time since the clock entered PAUSED by request, set by `exchange`/`update`/`start`; 0 when not
+  holding) and `reread()` (a holding clock clears its pause intent and requests a precise seek to its frozen position
+  under one lock hold, PAUSED → BUFFERING without a PLAYING in between, so the parked demuxer wakes with the seek
+  pending and never reads first from a connection the origin cut).
 - `ServerMediaPlayer` (`PlayerAPI.serverPlayer()`): pure `System.nanoTime` clock, no engines, allowed on servers;
   `syncDuration(ms)` (the first non-zero report wins for the lifetime; later reports are ignored and a divergence >
   `DURATION_DIVERGENCE_MS=500` warns once), `syncTime(ms)`,
@@ -783,6 +808,15 @@ requested, and SVG yields RGBA when RGBA is requested (everything else is conver
   EOF: zero frames decoded → ERROR "emitted no frames", stills honour `displayTime`, `repeat()` → `requestSeek(0)`,
   else ENDED. `quality(q)` or `audioTrack(AudioTrack)` on a live run sets `switchRequest` → `switchSource()` (rebuild
   decoder, VOD re-seeks, LIVE restarts at the edge).
+- `pause(false)` after a hold of `REREAD_HOLD_MS` or more (10 s) on an
+  `hls()` decoder that `canSeek()` and has not `demuxFinished()` resumes through `clock.reread()`: the HLS seek closes
+  the cut segment connection and the one of the next segment FFmpeg fetched ahead, reopens the segment from byte 0 and
+  the precise drain lands on the paused frame (measured: about 0.1 to 0.6 s to the first new frame). Any resume
+  starts the sfx only while its queue is of the clock's serial (`lastAudioUploadSerial`); after a seek or a reread the
+  first fresh audio flushes the stale queue and starts it (`drainAudio`). ⚠ Without the reread a segment served like YouTube's (200
+  chunked, no ranges, which FFmpeg marks streamed and never reconnects) and cut while paused lost its rest plus the
+  next segment, freezing the picture with no BUFFERING (watermedia#275); a lost span over `PTS_DISCONTINUITY_SEC`
+  shows as a content cut instead. A cut in the middle of playback is still lost (PENDING D15).
 - Audio tracks: the ctor lists one provisional entry (`stream=-1`) per separate track (none without an sfx); `opened`
   rebuilds `audioTracks` from `decoder.audioStreams()` (main input's entries replaced on every open, an opened track's
   streams replace its provisional entry for the player's life) and sets `audioTrack`. `audioPick` (volatile) survives
@@ -972,12 +1006,19 @@ requested, and SVG yields RGBA when RGBA is requested (everything else is conver
   or dot-boundary suffixes through `WebRequests.hostMatches(host, suffixes...)`, Gson-bound private records last;
   durations in seconds converted to ms unless noted):
   `YtDlpPlatform` (sealed base, hosts soundcloud/snd.sc/facebook/fb.watch/instagram; runs `yt-dlp -J` out of
-  process, `PROCESS_TIMEOUT_SECONDS=120`, playlists skip bad items, age limit gate, expiry `DataTool.expiry` else 4 h /
+  process (about 3 requests to the site per run; without a JS runtime yt-dlp 2026.10.26 answers YouTube through its
+  VISIONOS client: HLS video plus https DASH audio), `PROCESS_TIMEOUT_SECONDS=120`, playlists skip bad items, age limit gate, expiry `DataTool.expiry` else 4 h /
   live 30 min; one audio `Track` per `language`, each its best `abr`/`tbr`, ranked by yt-dlp's `language_preference`
   (YouTube: 10 original, 5 default, -1 other, -10 descriptive) then bitrate, named from the head of `format_note`
   without `(default)`/`(original)`; untagged formats drop once any is tagged; audio-only sources take the top one)
   → `YouTubePlatform` (youtube.com/youtu.be, `--no-playlist` for video ids, bot-check retry with a
-  BotGuard `po_token` from `rustypipe-botguard` under `botGuardLock`, search `ytsearchN:`); `TwitchPlatform` (GQL with
+  BotGuard `po_token` from `rustypipe-botguard` under `botGuardLock`; a gate that survives the token is retried with
+  `--force-ipv4` (`tokenInfo`), which then stays on for every later run and search while it gets links through
+  (`ipv4`), is dropped when the gate reaches it too and is not tried again once it gated a first attempt
+  (`ipv4Gated`); any other failure over IPv4 is reported with the gate suppressed and leaves it for the next link.
+  YouTube flags whole IPv6 blocks; ⚠ FFmpeg still picks the family of the media request (one link resolved over IPv4
+  answered 206 over IPv6 on the test host; not verified on a flagged network); a package-private
+  constructor takes the visitor_id endpoint for tests; search `ytsearchN:`); `TwitchPlatform` (GQL with
   the public web client id, Usher HLS, clips, VOD, live; mature classification first and fail-closed; TTL 30 min;
   search keeps live channels only, those with a `stream`, through package-private `hits(data, limit)`);
   `BiliBiliPlatform` (www/m./live./b23.tv: video BV/parts, bangumi ep/ss, live rooms; every API call
@@ -1008,6 +1049,11 @@ requested, and SVG yields RGBA when RGBA is requested (everything else is conver
   `upload(File...)`/`upload(File)` (validated up front, `IllegalStateException` before `loaded()`) → `UploadStatus`
   (`totalBytes()`, `uploadedBytes()`, `speed()`, `id()`, `uri()` = `water://remote/<id>`, `completed()`, `failed()`,
   `error()`, `percentage()`, `displaySpeed()`, `cancel()`; ⚠ a cancelled status reads as failed with "Cancelled").
+  `error()` is text for the user: a server that is off or unreachable reads `(wm_err:0714) Failed to upload, the file
+  server at <remoteUrl> is off or unreachable` (`ERR_NETWORK_UPLOAD_UNREACHABLE`: refused, no route, unresolved or
+  a connect timeout), one that took the connection and went silent `(wm_err:0715) ... did not answer in time`
+  (`ERR_NETWORK_UPLOAD_NO_ANSWER`), a wrong `remoteUrl` its own coded message; only unexpected failures keep the
+  exception's `toString()`.
   POST `<remoteUrl>/upload` with `network.token`, filename and content-type headers, fixed-length streaming in 8 KiB
   chunks; 503 → "busy server" failure (`ERR_NETWORK_UPLOAD_SERVER_BUSY`). `remoteUrl()` validates `network.remoteUrl`
   (http(s), trailing slash stripped; else ISE `ERR_NETWORK_REMOTE_URL`). `start(...)`: upload pool, then
@@ -1419,7 +1465,7 @@ System properties: `watermedia.engine`, `watermedia.app` (child JVM flag), `wate
   symlink refusal (`NOFOLLOW_LINKS`), TLauncher refusal, `DEFAULT_NETWORK_TOKEN` guard off loopback.
 
 ## 16. Tests (`src/test`)
-- Layout mirrors the main packages (112 files, 15 of them support helpers). Root: `ApiGuideExampleTest` (runs the public-only `ApiGuideExample`),
+- Layout mirrors the main packages (132 files, 16 of them support helpers). Root: `ApiGuideExampleTest` (runs the public-only `ApiGuideExample`),
   `BootstrapProcessTest` and `ServiceLifecycleProcessTest` (child JVMs through `MediaBootstrap.runProbe`),
   `LoggerRedactionTest`, `ErrorCodeInventoryTest` (parses the `ERR_*` declarations of `WaterMedia.java`; every site
   carries a declared constant used once, inside its package range, and every constant but `ERR_UNKNOWN` has a site;
@@ -1432,17 +1478,29 @@ System properties: `watermedia.engine`, `watermedia.app` (child JVM flag), `wate
   `PlatformSmokeTest` is a manual network harness, not a JUnit test.
 - Test classes by area: codecs `CodecsApiContractTest`, `ImageDataTest`, `ImageMetadataTest`, `MediaTypeSniffTest`,
   `ScanTest`, `PentestTest` (hostile corpus), `BcReaderTest`, `DdsHeaderTest`, PNG/GIF `ChunkContractTest`,
-  `FFDecoderTest`, `QueueLifecycleTest`, `FFEncoderTest`, `GifEncoderTest`, `PngEncoderTest`, readers `GifTest`,
+  `FFDecoderTest` (incl. `Idle connections`: a segment download reset or left silent while the demuxer is held
+  resumes at its offset, the silent one after the real 10 s timeout; `InputOptions`: transport policy, headers only
+  when present, `request_size` for YouTube's CDN alone, the options of a CDN link reading a loopback file past 10 MiB
+  through bounded requests (raw `avformat`, so a fork that drops `request_size` fails), open requests for any other
+  host, an RTMP input that connects; `Segment retries`: a first segment refused twice still decodes),
+  `QueueLifecycleTest`, `FFHoldResumeTest`
+  (player package: an HLS VOD of MPEG-TS segments served like YouTube's by an `IdleOrigin` that resets idle
+  connections; a pause in the middle of a segment and a paused launch held the real 10 s keep playing from the paused
+  frame, a short pause resumes without BUFFERING or a second request of the segment), `FFEncoderTest`,
+  `GifEncoderTest`, `PngEncoderTest`, readers `GifTest`,
   `JpegTest`, `NetpbmTest`, `PngTest`, `WebpTest`, `WebpMalformedTest`, `SvgTest`, `AlphaDecoderTest`,
   `HuffmanTableTest`, `VP8LosslessDecoderTest`, `FFmpegLogRoutingTest` (disabled); network `NetworkServerTest`
   (snapshots and restores `remoteUrl` with the other `network.*` keys; `Port`: a busy port fails before the storage
   exists, a port `remoteUrl` reaches starts, an unreachable `remoteUrl` gives the port and the storage lock back, a
   foreign answer and an invalid `remoteUrl` fail), `NetworkServerGateTest` (`NetworkAPI.enable`), `NetworkAPITest`
-  (`answers` and `serverEnabled`; it resets `serverUp`, `probeWarned` and `probeAt` by reflection), `UploadStatusTest`;
+  (`answers`, `serverEnabled` and the coded message of an upload to a server that is off or silent; it resets
+  `serverUp`, `probeWarned` and `probeAt` by reflection), `UploadStatusTest`;
   platform `PlatformApiTest`, `PlatformSearchTest`, `PlatformClaimTest`,
   `WaterPlatformTest`, offline handler tests `BiliBiliPlatformTest`, `KickPlatformTest`, `NewgroundsPlatformTest`,
   `OdyseePlatformTest` (loopback proxy through `LocalHttp`), `TwitchPlatformTest` (search hits), `TwitterPlatformTest`,
-  `YtDlpPlatformTest` (dubbed JSON offline); player `MediaPlayerBaseTest`, `MasterClockTest`, `MrlTest`,
+  `YtDlpPlatformTest` (dubbed JSON offline), `YouTubePlatformTest` (the bot gate ladder with scripts standing in for
+  yt-dlp and rustypipe-botguard through `watermedia.ytdlp.binary` / `watermedia.botguard.binary`);
+  player `MediaPlayerBaseTest`, `MasterClockTest` (incl. `Hold`: the hold time and `reread()`), `MrlTest`,
   `SiteListsTest` (the `checkSite` matrix with disguised hosts, `file:` shares and `jar:` links, BLOCKED MRLs
   without a request, player revalidation, Windows share strings; it snapshots and restores the
   `player.whitelist`/`player.blacklist` fields and gives every case its own URI), `NetworkCacheTest`, `PlayerStateTest`,
@@ -1464,11 +1522,20 @@ System properties: `watermedia.engine`, `watermedia.app` (child JVM flag), `wate
   (`assertEquals("(wm_err:0410) Failed to pick the quality ...", ...)`), so renumbering a site breaks them.
   ⚠ `LogUploaderTest` expects a test JVM that loads classes from a directory (`LogUploader.DEV`), and its stage cases
   scan the real working directory and read the real system (`SystemInfo.read`).
+- ⚠ Test seams: main code never changes shape for a test beyond a package-private constructor that points a class at
+  a local server (`// TEST SEAM: ...`, as `OdyseePlatform` and `YouTubePlatform`). No mutable statics, no fields a
+  test sets by reflection: a test waits a constant out (the 10 s I/O timeout, `REREAD_HOLD_MS`) or drives FFmpeg with
+  the options `applyInputOptions` built.
 - Support helpers (`org.watermedia.test.support`): `Fixtures` (resource paths and constants `MP4_H264`, `PNG_STATIC`,
   `GIF_ANIMATED`, ...; `readAll`, `fileUri`, `wav` (plain, or WAVE_FORMAT_EXTENSIBLE with a channel mask), `tone`,
-  `level`, `dubbed` (tagged multi-stream Matroska), `segment` (HLS-ready Matroska), `webm`), `MediaBootstrap` (`client()`, `ffmpegAvailable()` one shared
+  `level`, `dubbed` (tagged multi-stream Matroska), `segment` (HLS-ready Matroska), `transportSegments` (intra-only
+  MPEG-2 noise cut into `segment<i>.ts` with continuous timestamps and continuity counters, PAT/PMT per segment),
+  `webm`), `MediaBootstrap` (`client()`, `ffmpegAvailable()` one shared
   bootstrap in a temp dir, `runProbe(type, dir, scenario, omitBindings)`), `PlayerWait` (`awaitStatus`, `awaitLoaded`,
-  `awaitCondition`), `LocalHttp` (loopback `HttpServer`, `respond`, `respondRange`, `expiresIn`), `Origin` (range/
+  `awaitCondition`), `LocalHttp` (loopback `HttpServer`, `respond`, `respondRange`, `expiresIn`), `IdleOrigin`
+  (keep-alive HTTP/1.1 with byte ranges that resets, `resetting`, or goes silent, `silent`, on an idle connection;
+  `serve`, `stream` (a body served like YouTube's segments: 200 chunked, no ranges, paced), `uri`, `requests`,
+  `requests(path)`, `cuts`, `connections`, `strays`), `Origin` (range/
   endless/held origins), `LogCapture` (TRACE capture of a named logger), `OpenALContext` (skips without OpenAL),
   `YuvFrames` (planes and expected colours incl. PQ/HLG), `ImageBytes` (PNG/RIFF builders, bit writer), `PamImage`,
   `PixelDiff`, `FrameReplay` (frame hashes across two `reset()`), `DdsFixture`, `RecordingBackend` (GPU-less

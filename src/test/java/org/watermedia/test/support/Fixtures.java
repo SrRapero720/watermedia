@@ -1,14 +1,19 @@
 package org.watermedia.test.support;
 
+import org.bytedeco.ffmpeg.avcodec.AVCodec;
+import org.bytedeco.ffmpeg.avcodec.AVCodecContext;
 import org.bytedeco.ffmpeg.avcodec.AVPacket;
 import org.bytedeco.ffmpeg.avformat.AVFormatContext;
 import org.bytedeco.ffmpeg.avformat.AVIOContext;
 import org.bytedeco.ffmpeg.avformat.AVStream;
 import org.bytedeco.ffmpeg.avutil.AVDictionary;
+import org.bytedeco.ffmpeg.avutil.AVFrame;
 import org.bytedeco.ffmpeg.avutil.AVRational;
 import org.bytedeco.ffmpeg.global.avcodec;
 import org.bytedeco.ffmpeg.global.avformat;
 import org.bytedeco.ffmpeg.global.avutil;
+import org.bytedeco.javacpp.BytePointer;
+import org.bytedeco.javacpp.PointerPointer;
 import org.watermedia.api.codecs.CodecsAPI;
 import org.watermedia.api.codecs.Container;
 import org.watermedia.api.codecs.Encoder;
@@ -30,6 +35,9 @@ import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.SplittableRandom;
 
 /** Catalog of on-disk test fixtures, resolved against the working directory (Gradle runs tests from the module root). */
 public final class Fixtures {
@@ -145,6 +153,93 @@ public final class Fixtures {
             }
         }
         return out.toByteArray();
+    }
+
+    /** Writes one MPEG-2 video of fresh noise as {@code count} MPEG-TS files {@code segment<i>.ts}, cut the way an HLS segmenter cuts it; needs the FFmpeg natives. */
+    public static List<Path> transportSegments(final Path directory, final int width, final int height, final int fps,
+                                               final int seconds, final int count, final int qscale) throws IOException {
+        // INTRA-ONLY, SO TIMESTAMPS AND CONTINUITY COUNTERS RUN ON ACROSS THE FILES AND EACH ONE OPENS WITH ITS TABLES;
+        // A LOWER qscale (2..31) MAKES LARGER FRAMES
+        final AVCodec codec = avcodec.avcodec_find_encoder(avcodec.AV_CODEC_ID_MPEG2VIDEO);
+        if (codec == null || codec.isNull()) throw new IOException("No MPEG-2 encoder");
+        final AVCodecContext encoder = avcodec.avcodec_alloc_context3(codec);
+        final AVFormatContext muxer = new AVFormatContext(null);
+        final AVFrame frame = avutil.av_frame_alloc();
+        final AVPacket packet = avcodec.av_packet_alloc();
+        final List<Path> files = new ArrayList<>();
+        for (int i = 0; i < count; i++) files.add(directory.resolve("segment" + i + ".ts"));
+        try {
+            // EVERY FRAME A KEYFRAME AT A FIXED QUANTIZER: A SEGMENT OPENS ON ONE WHEREVER IT IS CUT, AND qscale SETS ITS SIZE
+            encoder.width(width).height(height).pix_fmt(avutil.AV_PIX_FMT_YUV420P).time_base(avutil.av_make_q(1, fps))
+                    .framerate(avutil.av_make_q(fps, 1)).gop_size(1).max_b_frames(0)
+                    .flags(encoder.flags() | avcodec.AV_CODEC_FLAG_QSCALE).global_quality(qscale * avutil.FF_QP2LAMBDA);
+            if (avcodec.avcodec_open2(encoder, codec, (PointerPointer<?>) null) < 0) throw new IOException("The MPEG-2 encoder refused the picture");
+            frame.format(avutil.AV_PIX_FMT_YUV420P).width(width).height(height);
+            if (avutil.av_frame_get_buffer(frame, 0) < 0) throw new IOException("No memory for a picture");
+            if (avformat.avformat_alloc_output_context2(muxer, null, "mpegts", files.get(0).toAbsolutePath().toString()) < 0 || muxer.isNull())
+                throw new IOException("No MPEG-TS muxer");
+            final AVStream stream = avformat.avformat_new_stream(muxer, null);
+            if (avcodec.avcodec_parameters_from_context(stream.codecpar(), encoder) < 0) throw new IOException("MPEG-TS refused the stream");
+            stream.time_base(encoder.time_base());
+
+            final SplittableRandom random = new SplittableRandom(275);
+            final byte[] row = new byte[width];
+            final int frames = fps * seconds;
+            int open = -1; // THE SEGMENT WHOSE FILE THE MUXER WRITES
+            for (int f = 0; f <= frames * count; f++) {
+                // THE LAST PASS SENDS NO PICTURE, WHICH FLUSHES THE ENCODER
+                final boolean last = f == frames * count;
+                if (!last) {
+                    if (avutil.av_frame_make_writable(frame) < 0) throw new IOException("The picture stays read-only");
+                    for (int plane = 0; plane < 3; plane++) {
+                        final BytePointer data = frame.data(plane);
+                        final int columns = plane == 0 ? width : (width + 1) / 2;
+                        final int rows = plane == 0 ? height : (height + 1) / 2;
+                        for (int y = 0; y < rows; y++) {
+                            random.nextBytes(row);
+                            data.position((long) y * frame.linesize(plane)).put(row, 0, columns);
+                        }
+                    }
+                    frame.pts(f).quality(qscale * avutil.FF_QP2LAMBDA);
+                }
+                if (avcodec.avcodec_send_frame(encoder, last ? null : frame) < 0) throw new IOException("The MPEG-2 encoder refused a picture");
+                while (avcodec.avcodec_receive_packet(encoder, packet) >= 0) {
+                    // THE FIRST PACKET OF A SEGMENT CLOSES THE FILE BEFORE IT; THE MUXER GOES ON IN THE NEXT ONE, TABLES FIRST
+                    final int segment = (int) (packet.pts() / frames);
+                    if (segment != open) {
+                        if (open >= 0) {
+                            avformat.av_write_frame(muxer, null);
+                            avformat.avio_close(muxer.pb());
+                            muxer.pb(null);
+                        }
+                        final AVIOContext pb = new AVIOContext(null);
+                        if (avformat.avio_open(pb, files.get(segment).toAbsolutePath().toString(), avformat.AVIO_FLAG_WRITE) < 0)
+                            throw new IOException("Cannot write " + files.get(segment));
+                        muxer.pb(pb);
+                        if (open < 0 && avformat.avformat_write_header(muxer, (AVDictionary) null) < 0) throw new IOException("MPEG-TS refused the header");
+                        if (open >= 0) avutil.av_opt_set(muxer.priv_data(), "mpegts_flags", "resend_headers", 0);
+                        open = segment;
+                    }
+                    packet.stream_index(0);
+                    avcodec.av_packet_rescale_ts(packet, encoder.time_base(), stream.time_base());
+                    final int wrote = avformat.av_write_frame(muxer, packet);
+                    avcodec.av_packet_unref(packet);
+                    if (wrote < 0) throw new IOException("MPEG-TS refused a packet");
+                }
+            }
+            if (avformat.av_write_trailer(muxer) < 0) throw new IOException("MPEG-TS refused the trailer");
+            return files;
+        } finally {
+            avcodec.av_packet_free(packet);
+            avutil.av_frame_free(frame);
+            avcodec.avcodec_free_context(encoder);
+            if (!muxer.isNull()) {
+                final AVIOContext pb = muxer.pb();
+                if (pb != null && !pb.isNull()) avformat.avio_close(pb);
+                muxer.pb(null);
+                avformat.avformat_free_context(muxer);
+            }
+        }
     }
 
     // ==========================================================================

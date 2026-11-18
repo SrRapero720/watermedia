@@ -40,6 +40,7 @@ final class MasterClock implements FFDecoder.Timeline {
     // SEEK STATE: ACCESSED UNDER LOCK
     private volatile FFDecoder.Seek pendingSeek;
     private volatile boolean pauseIntent;
+    private volatile long heldSinceNs; // WHEN THE CLOCK LAST ENTERED PAUSED
 
     // PIPELINE STATE
     private volatile boolean demuxFinished;
@@ -95,6 +96,7 @@ final class MasterClock implements FFDecoder.Timeline {
             // IF BUFFERING → FIRST VALID UPDATE → TRANSITION TO PLAYING/PAUSED
             if (this.status == Status.BUFFERING) {
                 this.status = this.pauseIntent ? Status.PAUSED : Status.PLAYING;
+                if (this.pauseIntent) this.heldSinceNs = System.nanoTime();
                 this.events.addLast(new Status[] { Status.BUFFERING, this.status });
                 this.condition.signalAll();
             }
@@ -166,6 +168,7 @@ final class MasterClock implements FFDecoder.Timeline {
             }
             // STOPPED MEANS "BACK AT THE BEGINNING" FOR EVERY PLAYER
             if (newStatus == Status.STOPPED) this.pts = 0;
+            if (newStatus == Status.PAUSED) this.heldSinceNs = System.nanoTime();
 
             this.status = newStatus;
             this.events.addLast(new Status[] { current, newStatus });
@@ -231,6 +234,7 @@ final class MasterClock implements FFDecoder.Timeline {
             this.ptsDrift = this.pts - now;
             this.lastUpdated = now;
             this.status = pending != null ? Status.BUFFERING : this.pauseIntent ? Status.PAUSED : Status.PLAYING;
+            if (this.status == Status.PAUSED) this.heldSinceNs = System.nanoTime();
             if (prev != this.status) this.events.addLast(new Status[] { prev, this.status });
             this.condition.signalAll();
         } finally {
@@ -317,6 +321,24 @@ final class MasterClock implements FFDecoder.Timeline {
     // PLAYBACK IS HELD PAUSED BY REQUEST, SO THE DEMUXER PARKS
     @Override
     public boolean holding() { return this.pauseIntent && this.status == Status.PAUSED; }
+
+    /** Returns how long the clock has been holding in milliseconds, or 0 when it is not holding. */
+    public long heldMs() { return this.holding() ? TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - this.heldSinceNs) : 0L; }
+
+    /** Resumes a holding clock into buffering through a precise seek to its frozen position; false when it was not holding. */
+    public boolean reread() {
+        this.lock.lock();
+        try {
+            // ONE STEP UNDER THE LOCK: THE PARKED DEMUXER WAKES TO THE SEEK, NEVER TO A READ OF THE CUT CONNECTION
+            if (!this.holding()) return false;
+            this.pauseIntent = false;
+            this.requestSeek(this.timeMs(), true);
+        } finally {
+            this.lock.unlock();
+        }
+        this.drain(); // THE NESTED SEEK QUEUED ITS EVENT WHILE THE LOCK WAS HELD
+        return true;
+    }
 
     // ==========================================================================
     // PUBLIC API: THREAD COORDINATION

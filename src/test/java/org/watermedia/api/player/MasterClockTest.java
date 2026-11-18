@@ -8,6 +8,7 @@ import org.watermedia.api.player.MediaPlayer.Status;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -15,7 +16,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** Verifies {@link MasterClock}: the state machine, seek lifecycle, serial invalidation and speed/time linearity. */
+/** Verifies {@link MasterClock}: the state machine, seek lifecycle, serial invalidation, the timed hold and its reread, and speed/time linearity. */
 @DisplayName("MasterClock")
 public class MasterClockTest {
 
@@ -222,6 +223,92 @@ public class MasterClockTest {
             // NO PROMOTION TO PLAYING, AND THE TIME STAYS FROZEN AT THE SEEK TARGET
             assertEquals(Status.BUFFERING, clock.status());
             assertEquals(before, clock.timeMs());
+        }
+    }
+
+    // ==========================================================================
+    // NESTED TYPES: HOLD TESTS
+    // ==========================================================================
+
+    @Nested
+    @DisplayName("Hold")
+    class HoldTests {
+
+        @Test
+        @DisplayName("A hold is timed from the moment the clock pauses, by request, as a seek settles or at a paused start, and ends with the pause")
+        void testHoldTimedFromThePause() throws InterruptedException {
+            final MasterClock clock = new MasterClock();
+            clock.start();
+            assertEquals(0L, clock.heldMs(), "a playing clock holds nothing");
+
+            // BRACKETED: THE HOLD LIES BETWEEN THE TIME SINCE THE PAUSE RETURNED AND THE TIME SINCE IT WAS CALLED
+            final long called = System.nanoTime();
+            assertTrue(clock.paused(true));
+            final long returned = System.nanoTime();
+            Thread.sleep(ADVANCE_MS);
+            final long before = System.nanoTime();
+            final long held = clock.heldMs();
+            final long after = System.nanoTime();
+            assertTrue(held >= TimeUnit.NANOSECONDS.toMillis(before - returned) && held <= TimeUnit.NANOSECONDS.toMillis(after - called),
+                    "the hold must be timed from the pause, it reports " + held + " ms");
+
+            // A SEEK WHILE PAUSED READS AGAIN, SO THE HOLD STARTS OVER WHEN IT SETTLES PAUSED
+            assertTrue(clock.requestSeek(1_000L, true));
+            assertEquals(0L, clock.heldMs(), "a buffering clock holds nothing");
+            final long settling = System.nanoTime();
+            clock.updateMs(1_000L, clock.serial());
+            assertEquals(Status.PAUSED, clock.status());
+            assertTrue(clock.heldMs() <= TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - settling), "the hold restarts as the seek settles");
+            assertTrue(clock.paused(false));
+            assertEquals(0L, clock.heldMs(), "the resume ends the hold");
+
+            // A PAUSED START HOLDS FROM THE START, NOT FROM THE LATCHED INTENT
+            final MasterClock launched = new MasterClock();
+            launched.transition(Status.LOADING);
+            assertTrue(launched.paused(true));
+            assertEquals(0L, launched.heldMs(), "a loading clock holds nothing yet");
+            Thread.sleep(ADVANCE_MS);
+            final long starting = System.nanoTime();
+            launched.start();
+            assertTrue(launched.holding());
+            assertTrue(launched.heldMs() <= TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - starting), "the hold starts with the run");
+        }
+
+        @Test
+        @DisplayName("A reread resumes a holding clock straight into BUFFERING with a precise seek to the paused position, and refuses any other clock")
+        void testRereadSeeksThePausedPosition() throws InterruptedException {
+            final MasterClock clock = new MasterClock();
+            final List<Status> seen = new ArrayList<>();
+            clock.listener((prev, next) -> seen.add(next));
+            clock.start();
+            assertFalse(clock.reread(), "a playing clock is not holding");
+            clock.requestSeek(3_000L, true);
+            clock.updateMs(3_000L, clock.serial());
+            Thread.sleep(ADVANCE_MS);
+            assertTrue(clock.paused(true));
+            final long paused = clock.timeMs();
+            final int serial = clock.serial();
+            seen.clear();
+
+            assertTrue(clock.reread());
+            assertEquals(List.of(Status.BUFFERING), seen, "the reread never passes through PLAYING");
+            assertFalse(clock.pauseRequested(), "the reread resumes");
+            assertFalse(clock.holding());
+            assertTrue(clock.serial() > serial, "the frames queued before the hold are stale");
+            assertEquals(paused, clock.timeMs(), 1.0, "the clock stays frozen at the paused position");
+            final FFDecoder.Seek seek = clock.consumeSeek();
+            assertNotNull(seek, "the seek is pending before the demuxer wakes");
+            assertEquals(paused, seek.targetMs());
+            assertTrue(seek.precise());
+            clock.updateMs(paused, clock.serial());
+            assertEquals(Status.PLAYING, clock.status(), "the first fresh frame plays");
+            assertFalse(clock.reread(), "only a holding clock reads again");
+
+            final MasterClock loading = new MasterClock();
+            loading.transition(Status.LOADING);
+            assertTrue(loading.paused(true));
+            assertFalse(loading.reread(), "a loading clock has no input to read again");
+            assertTrue(loading.pauseRequested(), "a refused reread keeps the pause intent");
         }
     }
 

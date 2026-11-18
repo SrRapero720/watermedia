@@ -139,10 +139,11 @@ public final class NetworkAPI extends WaterMedia.Module {
             remote = remoteUrl();
         } catch (final IllegalStateException misconfigured) { // A WRONG network.remoteUrl IS AN EXPECTED CONDITION, NOT A BUG: NO TRACE
             LOGGER.warn(IT, "Could not upload '{}': {}", file.getName(), misconfigured.getMessage());
-            status.fail(misconfigured.toString());
+            status.fail(misconfigured.getMessage());
             return;
         }
         HttpURLConnection conn = null;
+        boolean connected = false;
         try {
             // STREAMING UPLOADS WITH BYTE-LEVEL PROGRESS ARE OUT OF SCOPE FOR NetRequest, SO THIS DRIVES HttpURLConnection
             final URL url = URI.create(remote + "/upload").toURL();
@@ -159,6 +160,7 @@ public final class NetworkAPI extends WaterMedia.Module {
 
             try (final var fis = new FileInputStream(file);
                  final var os = conn.getOutputStream()) {
+                connected = true;
                 final byte[] buffer = new byte[NetworkServer.CHUNK_BYTES];
                 long uploaded = 0;
                 long lastTime = System.nanoTime();
@@ -196,11 +198,13 @@ public final class NetworkAPI extends WaterMedia.Module {
             } else {
                 status.fail(DataTool.errCode(WaterMedia.ERR_NETWORK_UPLOAD_HTTP_STATUS) + "Failed to upload, the server returned HTTP " + code);
             }
-        } catch (final ConnectException | UnknownHostException | SocketTimeoutException unreachable) {
+        } catch (final ConnectException | NoRouteToHostException | UnknownHostException | SocketTimeoutException unreachable) {
             if (status.cancelled) return;
-            // A REMOTE SERVER THAT IS DOWN OR UNRESOLVABLE IS AN EXPECTED CONDITION, NOT A BUG: NO TRACE
+            // A REMOTE SERVER THAT IS DOWN, UNRESOLVABLE OR SILENT IS AN EXPECTED CONDITION, NOT A BUG: NO TRACE
             LOGGER.warn(IT, "Could not reach the remote file server to upload '{}': {}", file.getName(), unreachable.getMessage());
-            status.fail(unreachable.toString());
+            // ONCE CONNECTED ONLY ITS ANSWER CAN TIME OUT: THE SERVER IS THERE AND WENT SILENT
+            if (connected) status.fail(DataTool.errCode(WaterMedia.ERR_NETWORK_UPLOAD_NO_ANSWER) + "Failed to upload, the file server at " + remote + " did not answer in time");
+            else status.fail(DataTool.errCode(WaterMedia.ERR_NETWORK_UPLOAD_UNREACHABLE) + "Failed to upload, the file server at " + remote + " is off or unreachable");
         } catch (final Exception e) {
             if (status.cancelled) return; // THE POOL CLEARS A LATE CANCEL INTERRUPT BEFORE ITS NEXT UPLOAD
             // e.getMessage() IS OFTEN null (E.G. NPE); e.toString() KEEPS THE EXCEPTION TYPE FOR DIAGNOSIS
