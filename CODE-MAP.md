@@ -87,7 +87,8 @@ Where to look (task → section → entry point):
   - Every logger comes from `WaterMedia.logger(id)` (the core uses the shared `WaterMedia.LOGGER`, Binaries its own
     `WaterMedia.logger("watermedia_binaries")`), so every message is redacted by `DataTool.redact`.
   - Natives are optional in tests unless `-Prequire_natives=true` (the CI native matrix sets it); GPU and OpenAL tests
-    skip without a device.
+    skip without a device. ⚠ Except the child-JVM `BootstrapProcessTest` scenarios `native`, `tls` and `tls-empty`:
+    they always need the host's bundled FFmpeg zip and fail on a platform without one (e.g. windows-arm64).
 
 ## 1. Project direction
 
@@ -188,7 +189,7 @@ The generic version of these rules lives in AGENTS.md → "Code pattern"; this i
 |---|---|
 | `src/main/java/org/watermedia/` | `WaterMedia` (entry), `WaterMediaConfig` (TOML spec), `api/` (public API), `bootstrap/` (loader entry points, launcher, app), `tools/` (internal utilities) |
 | `src/main/resources/` | `META-INF/mods.toml`, `META-INF/neoforge.mods.toml`, `fabric.mod.json`, `pack.mcmeta`, `icon.png`, `pack.png`, `assets/watermedia/{shaders,font,textures,sounds,catalog}`, `META-INF/licenses/{javacpp,jetbrainsmono}-LICENSE.txt` |
-| `src/test/java/org/watermedia/` | Tests mirroring the main packages, child-JVM probes (`*Probe.java` + `*ProcessTest`), `test/support` helpers; `src/test/resources` fixtures (`pentest/` hostile corpus); `src/test/tools/GeneratePngReference.java` |
+| `src/test/java/org/watermedia/` | Tests mirroring the main packages, child-JVM probes (`*Probe.java`, started by the `*ProcessTest` classes and `AppConfigTest`, plus the `main` of `NetworkServerTest` and `NetworkAPITest`), `test/support` helpers; `src/test/resources` fixtures (`pentest/` hostile corpus); `src/test/tools/GeneratePngReference.java` |
 | `binaries/` | Included build of "WaterMedia: Binaries": `src/main/java/org/watermedia/binaries` (module + provisioning), `src/main/resources/libs/ffmpeg-*.zip`, `libs/ffmpeg-<ver>.jar`, `tools/` (rebuild and verification scripts), own `gradle.properties`, `CHANGELOG.md`, `.github/workflows`, `docs/assets` (OS icons of its README) |
 | `modloaders/` | Compile-only stubs of Forge/NeoForge/Fabric loader classes (bodies throw "Stub!"), never shipped |
 | `gradle/common.gradle` | Shared Java/JUnit setup, loader range math, `processResources` expansion, jar manifest, `publishMods` validation, store description sync |
@@ -309,6 +310,9 @@ Package map (`src/main/java/org/watermedia`):
   after `SetupJava.ps1` and the Linux media runtime packages); job `native` matrix (linux x64/arm64, windows, macOS
   x64/arm64, plus a Java 17 "compatibility" leg) running `gradle test -Prequire_natives=true` with explicit `--tests`
   filters (FF players, decoders, encoders; the compat leg: bootstrap, network, AL/AWT/SFX/spatial, NetRequest).
+  Both jobs set `ALSOFT_DRIVERS=null`, so OpenAL opens its null device and the `OpenALContext` cases run.
+  ⚠ No filter reaches the FFmpeg cases of `ColorimetryTest` (`StreamTests`) and `StatusDeliveryTest`
+  (`LockFreeRelease`): only the `build` job runs them, where natives are optional and a failed load skips them.
 - `build-release.yml` (tags), one job per step over a single build: `build` (fails unless the tag is `version`,
   `gradle build`, keeps `build/libs` as artifact `libs`) → `release` (`publishGithub`) → `curseforge` and `modrinth`
   (`publish<Store>` over the artifact, `-x jar -x sourcesJar`) → `<store>-description` after its own store's upload.
@@ -399,9 +403,10 @@ Package map (`src/main/java/org/watermedia`):
   `AppBootstrap` or `WaterMedia.start`.
 
 ### `AppBootstrap` (`bootstrap/AppBootstrap.java`): standalone launcher (`Main-Class`)
-- Launcher JVM: `prepare()` extracts `META-INF/jarjar/*` to `<tmpdir>/watermedia/libs`, downloads every `Dependency`
-  listed in `bootstrap.properties` (Maven Central, `User-Agent: WaterMedia`, ≤ `MAX_DOWNLOAD_BYTES=256 MiB`, exact
-  length, SHA-256 pin, atomic move; optional `lwjgl-vulkan`/`lwjgl-shaderc`), adds extension jars from the CWD named
+- Launcher JVM: `prepare()` extracts the `nested` jars that `bootstrap.properties` lists from `META-INF/jarjar/` to
+  `<tmpdir>/watermedia/libs`, downloads the `Dependency` list coded in `dependencies(Properties)` (versions and SHA-256
+  pins from `bootstrap.properties`; Maven Central, `User-Agent: WaterMedia`, ≤ `MAX_DOWNLOAD_BYTES=256 MiB`, exact
+  length, atomic move; optional `lwjgl-vulkan`/`lwjgl-shaderc`), adds extension jars from the CWD named
   `watermedia_*`, `wm_*`, `waterm_*`, `wmedia_*`, then `relaunch(...)` a child `java --enable-native-access=ALL-UNNAMED
   -Dwatermedia.app=true -Dwatermedia.engine=<opengl|vulkan> ... AppBootstrap`. Exit code `RELAUNCH_EXIT=42` relaunches;
   errors show the Swing `BootstrapWindow` (Relaunch/Close) unless headless.
@@ -421,11 +426,14 @@ Package map (`src/main/java/org/watermedia`):
   `IOTool.publishGeneration` (atomic `current` pointer); a valid current generation is reused (re-hashed every start).
   Old generations are never deleted. `windows-arm64` and unknown platforms → `IOException`.
 - `ExecutableBinary` (sealed, permits `YtDlpBinary`, `BotGuardBinary`): `executable()` (synchronized, blocking) resolves
-  a system-property override (`watermedia.ytdlp.binary`, `watermedia.botguard.binary`), else verifies the cached
-  release (`installed.properties`), else downloads `latest()` with `NetRequest.httpsOnly().maxBytes(512 MiB)
-  .deadline(180 s)` + `download(path, sha256)`, extracts, `makeExecutable`, publishes a generation. yt-dlp: GitHub
-  latest release + `SHA2-256SUMS`; a failed `latest()` keeps the cached release. BotGuard (`rustypipe-botguard`): local
-  pin manifest `/META-INF/botguard-pins.properties` (fails closed), ZIP or `.tar.xz` extraction, `snapshot()` file.
+  a system-property override (`watermedia.ytdlp.binary`, `watermedia.botguard.binary`), else the executable it already
+  returned (re-hashed), else verifies the cached release (`installed.properties`) and always asks `latest()`: the cache
+  stays when it equals `latest()` (version, origin, archive SHA-256) or the lookup fails, otherwise it downloads
+  `latest()` with `NetRequest.httpsOnly().maxBytes(512 MiB).deadline(180 s)` + `download(path, sha256)`, extracts,
+  `makeExecutable`, publishes a generation. yt-dlp: GitHub latest release + `SHA2-256SUMS`, so the first resolve of each
+  resolver instance asks GitHub. BotGuard (`rustypipe-botguard`): local pin manifest
+  `/META-INF/botguard-pins.properties` (fails closed, even with a cache), ZIP or `.tar.xz` extraction, `snapshot()`
+  file.
 - ⚠ Binaries links core members that must keep their semantics: `IOTool.{platform, platformClassifier,
   currentGeneration, publishGeneration, deleteTree, makeExecutable, sha256, requireSha256, verifySha256}`,
   `JSONTool.parse(String, Class)`, `NetRequest` (`httpsOnly`, `maxBytes`, `deadline`, `maxRedirects`, timeouts,
@@ -496,7 +504,8 @@ status queries `ffmpegLoaded`, `ffmpegError` and `vulkanDecode` stay supported. 
 `decodedFormat()` is BGRA for PNG, GIF, Netpbm and WebP; JPEG yields GRAY for one-component images unless BGRA is
 requested, and SVG yields RGBA when RGBA is requested (everything else is converted by `ImageReader.next()`).
 - `PngReader` (PNG 3rd edition + APNG): constructor `scan()` (frame count/delays/repeat from `acTL`/`fcTL` without CRC),
-  `parseUntilFirstFrame()`, skips the default image when `fcTL` precedes it, allocates the ARGB canvas. `decode()`
+  `parseUntilFirstFrame()`, skips the default image of an animated stream (an `IDAT` ahead of the first `fcTL`; an
+  `fcTL` ahead of the `IDAT` makes it frame 0), allocates the ARGB canvas. `decode()`
   collects `IDAT`/`fdAT` until the next `fcTL`/`IEND`, inflates with a reused `Inflater` (expected size gate →
   `ERR_PNGREADER_INFLATE_OVERSIZE` "Failed to inflate the PNG image data due to size over the expected (N bytes)"),
   unfilters (None/Sub/Up/Average/Paeth, Adam7), converts depths 1/2/4/8/16 (16 → 8), applies gamma LUT
@@ -590,14 +599,15 @@ requested, and SVG yields RGBA when RGBA is requested (everything else is conver
   - Threads (`ThreadTool.workerFactory("FFThread")`, named `<group>-demux|video|audio`); `decodeLock` guards decode
     thread creation/teardown. Queues: `PacketQueue` video 16 MiB / audio 8 MiB, `FrameQueue` video 3 / audio 9 slots.
     One static `INTERRUPT` callback (JavaCPP caps live callback instances at 10).
-  - Input options: `FFTool.configureTLS`, `headers` (`HttpHeaders.toRawString`), `analyzeduration`/`probesize` from
-    config, `buffer_size`, `reconnect*`, `timeout=10 s`, `rtsp_transport=tcp`, `max_delay`. Separate audio `Track` →
-    second format context (`codecs.ffmpeg.trackPacketReads` per iteration; falls back to the main audio stream).
+  - Separate audio `Track` → second format context (`codecs.ffmpeg.trackPacketReads` per iteration; falls back to the
+    main audio stream).
   - Input options (`applyInputOptions(options, input)`, shared by the main input and the separate audio track):
-    `headers` only when the source has any (an empty value makes FFmpeg end the request head early); `timeout` and
-    `rw_timeout` are both 10 s: ⚠ `timeout` stays on
-    the input's own connections and is left out of `rtmp*` inputs, where it means the seconds to wait for an incoming
-    connection and turns the input into a server (no RTMP link played in 3.0.0 and 3.0.1); HLS/DASH copy only
+    `FFTool.configureTLS`, `analyzeduration`/`probesize` from config, `buffer_size`, `rtbufsize`, `http_persistent=1`,
+    `multiple_requests=0`, `reconnect`/`reconnect_streamed`/`reconnect_delay_max=5`, `rtsp_transport=tcp`, `max_delay`;
+    `headers` (`HttpHeaders.toRawString`) only when the source has any (an empty value makes FFmpeg end the request
+    head early); `timeout` and `rw_timeout` are both 10 s: ⚠ `timeout` stays on the input's own connections and is
+    left out of `rtmp*` inputs, where it means the seconds to wait for an incoming connection and turns the input into
+    a server (no RTMP link played in 3.0.0 and 3.0.1); HLS/DASH copy only
     `rw_timeout` to their segment requests (overwriting anything seeded through `protocol_opts`); `protocol_opts`
     gets `:reconnect=1:reconnect_delay_max=5` appended to the TLS policy, because the top-level `reconnect` never
     reaches segment connections and a segment whose download was cut (server reset or a silent router drop while
@@ -613,8 +623,10 @@ requested, and SVG yields RGBA when RGBA is requested (everything else is conver
     so a slow track download caps the video speed (PENDING D10).
   - Demux loop (parked waits last `PARK_MS=50` at most, so a seek or a resume that lands between the check and the
     wait still wakes it): seek → pause park (`holding()`) → track reads → `av_read_frame` → route (video `tryPut`
-    spin, audio `put`). EOF: `finish()` both packet queues, `signalDemuxFinished()`, park until a seek (repeat is driven by the
-    player). Seek ladder `av_seek_frame(BACKWARD)` → `avformat_seek_file` → `av_seek_frame(0)` → `reopenFormat()`;
+    spin, audio `put`). EOF: the main input's EOF finishes the video queue (and the audio queue without a separate
+    track), the track's own EOF finishes the audio queue; once both ended, `signalDemuxFinished()` and park until a seek
+    (repeat is driven by the player). ⚠ A read an abort cut short ends the decoder and is never reported as EOF.
+    Seek ladder `av_seek_frame(BACKWARD)` → `avformat_seek_file` → `av_seek_frame(0)` → `reopenFormat()`;
     precise seeks stop decode threads, `reset()` queues (serial++), flush codecs and `syncDrain` on the demux thread.
   - Video decode: `receive_frame` → GPU→RAM transfer when a non-Vulkan hwaccel (`HW_TRANSFER_FAIL_LIMIT=30`, perf window
     120 frames at 0.75 of the frame budget → software fallback `reinitVideoCodecSoftware()`) → optional `Placebo` →
@@ -659,11 +671,11 @@ requested, and SVG yields RGBA when RGBA is requested (everything else is conver
 ## 7. Player API (`api/player`)
 
 ### 7.1 `MediaPlayer` (abstract sealed, permits `ServerMediaPlayer`, `FFMediaPlayer`, `TxMediaPlayer`)
-- Constructors are package-private: create only through `PlayerAPI`. Ctor checks `WaterMedia.checkIsClientSideOrThrow`,
-  `mrl.source(index)` non-null, at least one engine. ⚠ Every concrete constructor ends with `arm()` (throws if
-  `!WaterMedia.loaded()` when the player has an MRL; `ServerMediaPlayer` is exempt); the shared 50 ms `MediaSync` ticker
-  (`TICK_MS=50`, single daemon thread) only ticks armed
-  players.
+- Constructors are package-private: create only through `PlayerAPI`. The MRL ctor checks
+  `WaterMedia.checkIsClientSideOrThrow`, `mrl.source(index)` non-null, at least one engine; the headless ctor of
+  `ServerMediaPlayer` checks nothing. ⚠ Every concrete constructor ends with `arm()` (no gate: it only publishes the
+  player to the ticker and backdates the seek cooldown; the before-load refusal lives in `PlayerAPI.mrl`, §5); the
+  shared 50 ms `MediaSync` ticker (`TICK_MS=50`, single daemon thread) only ticks armed players.
 - Site lists (owner, 2026-11-17): `static checkSite(URI)` (box `UTILITY: SITE LISTS`, helpers `host`, `listed`,
   `local`) judges a link against `player.blacklist` and `player.whitelist` by the host it was written with, never by
   the hosts a platform, playlist or redirect leads to. Callers: `MRL.doLoad` before `PlatformAPI.fetch` (no request
@@ -702,8 +714,9 @@ requested, and SVG yields RGBA when RGBA is requested (everything else is conver
   on the pipeline/caller thread; never call `release()` from a listener.
 - Control surface (boolean controls answer "did this call change this player's own state"): `start()`,
   `startPaused()` (final, → `launch(paused, -1)`; legal from any status, restarts ENDED/STOPPED/ERROR), `pause()`,
-  `resume()`, `pause(boolean)` (latched while LOADING), `stop()` (everyone lands STOPPED, time 0), `togglePlay()`,
-  `seek(ms)` (clamped; from ENDED/STOPPED restarts PAUSED at the target), `seekQuick(ms)`, `skipTime(delta)`,
+  `resume()`, `pause(boolean)` (latched while LOADING), `stop()` (lands STOPPED, time 0; false on a never-started
+  player, which stays WAITING), `togglePlay()`, `seek(ms)` (clamped; from ENDED/STOPPED restarts PAUSED at the target,
+  except that Tx frame textures turn an ENDED player PAUSED in place), `seekQuick(ms)`, `skipTime(delta)`,
   `forward()`/`rewind()` (±5 s, Tx uses 1 s), `previousFrame()`/`nextFrame()` (refused while following),
   `speed(float)` in (0, 4] (needs `canSpeed()` and the sfx to accept), `repeat(boolean)`, `spatialAudio(SpatialAudio)`.
   Void setters: `volume(int 0..100)`, `mute(boolean)`, `quality(MediaQuality)` (FF switches hot, Tx on next start),
@@ -727,13 +740,17 @@ requested, and SVG yields RGBA when RGBA is requested (everything else is conver
   `tolerance(ms)` default 1 s): latest snapshot wins (no revision compare); the ticker mirrors status (start/
   startPaused/pause/resume/stop), adopts `repeat` and `speed`, and corrects time with `seekQuick(authorityTime)` when
   `|drift| > tolerance` and the 1 s `SEEK_COOLDOWN_NS` elapsed; no rate trimming; ERROR players are left alone.
+  A BUFFERING session holds the follower like a pause; a dormant (WAITING/STOPPED/ENDED) follower is started once per
+  dormancy, an ENDED one only while the session sits before its own media's end; a STOPPED session stops only a
+  running follower, never an ENDED one; live or durationless sessions get no time correction.
 - Subclass helpers: `launch(paused, seekMs)` (abstract), `holdStatus()`, `tick()`, `queueStatus(prev, next)` +
   `deliverStatus()`, `exception(Throwable)`, `resolveQuality(w, h)` (relabels the MRL's UNKNOWN bucket via
   `MRL.moveQuality`), static `scaled(native, max, percent)`, `mergeFailure`, `nowMs()` (monotonic ms).
 
 ### 7.2 `PlayerAPI` (final utility)
 - `mrl(String)` (existing file relative to `WaterMedia.cwd()` → file URI, else `URI.create`; malformed → uncached
-  `MRL.error`), `mrl(URI)`, `preload(URI...)`: throw `IllegalStateException` before `loaded()` or on a server.
+  `MRL.error`), `mrl(URI)`, `preload(URI...)`: throw `IllegalStateException` before `loaded()` or on a server. A
+  relative URI (`mrl(URI)`, or a string naming no file) yields an uncached MRL born in ERROR (`ERR_MRL_RELATIVE_URI`).
   ⚠ A string resolving to a Windows share (`\\server\share\x`) is never probed with the file system (that already
   connects to its server): it becomes the link `file://server/share/x` for the loader, where the site lists judge it.
 - `player(MRL, [int sourceIndex,] Supplier<GFXEngine>, Supplier<SFXEngine>)`: null when the source is missing (FETCHING
@@ -773,19 +790,23 @@ requested, and SVG yields RGBA when RGBA is requested (everything else is conver
 - `MasterClock` (package-private, `implements FFDecoder.Timeline`, one per `FFMediaPlayer`): ffplay-style pts drift in
   seconds; `time()`/`timeMs()` lock-free; `update(ptsSec, serial)` recalibrates when BUFFERING or drift >
   `DRIFT_RECALIBRATION_SEC=0.050`; `transition`/`exchange` accept only `Status.allows(next)` moves (no table of its own),
-  while `start()` (LOADING→PLAYING/PAUSED/BUFFERING), `reload()` (running→LOADING), `requestSeek`, `update`, `halt()` and
-  `reset()` own the rest (STOPPED terminal until `reset()`); `halt()`, `reload()`, `start()`, `requestSeek(ms, precise)`
-  (serial++, BUFFERING), `paused(boolean)`, `holding()`, `awaitChange`, `awaitNotStatus`, `speed(double)`, `fps(float)`
-  (`frameDurationSec`, `skipThresholdMs` ≈ 5 frames), events drained in order to one listener after the lock is
-  released. `heldMs()` (time since the clock entered PAUSED by request, set by `exchange`/`update`/`start`; 0 when not
-  holding) and `reread()` (a holding clock clears its pause intent and requests a precise seek to its frozen position
-  under one lock hold, PAUSED → BUFFERING without a PLAYING in between, so the parked demuxer wakes with the seek
-  pending and never reads first from a connection the origin cut).
+  while `start()` (LOADING or WAITING→PLAYING/PAUSED/BUFFERING), `reload()` (running→LOADING), `requestSeek`,
+  `update`, `halt()` and `reset()` own the rest (STOPPED terminal until `reset()`); `halt()`, `reload()`, `start()`,
+  `requestSeek(ms, precise)` (serial++, BUFFERING), `paused(boolean)`, `holding()`, `awaitChange`, `awaitNotStatus`,
+  `speed(double)`, `fps(float)` (`frameDurationSec`, `skipThresholdMs` ≈ 5 frames), events drained in order to one
+  listener after the lock is released. `heldMs()` (time since the clock entered PAUSED by request, set by
+  `exchange`/`update`/`start`; 0 when not holding) and `reread()` (a holding clock clears its pause intent and
+  requests a precise seek to its frozen position under one lock hold, PAUSED → BUFFERING without a PLAYING in
+  between, so the parked demuxer wakes with the seek pending and never reads first from a connection the origin cut).
 - `ServerMediaPlayer` (`PlayerAPI.serverPlayer()`): pure `System.nanoTime` clock, no engines, allowed on servers;
   `syncDuration(ms)` (the first non-zero report wins for the lifetime; later reports are ignored and a divergence >
   `DURATION_DIVERGENCE_MS=500` warns once), `syncTime(ms)`,
-  `live(boolean)`, `revision()` (AtomicInteger bumped on every change), `snapshot()` → `PlayerState`; held while
-  `duration <= 0 && !live`; non-repeat → ENDED at the duration, repeat wraps with carried overshoot.
+  `live(boolean)`, `revision()` (AtomicInteger seeded from `(int) System.currentTimeMillis()`, bumped by every clock
+  mutation, the loop wrap and `release()`; `volume`/`mute` never bump it), `snapshot()` → `PlayerState`; held while
+  `duration <= 0 && !live`; non-repeat → ENDED at the duration, repeat wraps with carried overshoot. A live session
+  never ends or wraps, even with a latched duration; `live(false)` without a duration keeps the counted time and
+  holds. Fed snapshots (`sync`), it adopts the session duration (while its own is unknown) and the live flag in
+  `tick()`.
 - `MediaPlayer.PlayerState(int revision, Status status, long time, long duration, float speed, boolean repeat, boolean
   live)` nested record (was the top-level `Sync`): `BYTES=27` big-endian wire form (`VERSION=3`), `toBytes()`,
   `read(ByteBuffer)` (IAE on malformed, position advanced only after a full parse). Transport is the host's; feed with
@@ -805,7 +826,8 @@ requested, and SVG yields RGBA when RGBA is requested (everything else is conver
   `Colorimetry` (matrix BT709/BT601/BT2020, range, siting, PQ/HLG transfer, BT.2020 primaries) with `Colorimetry.guess`
   fallback. Video drives the clock only without audio.
 - Starvation → BUFFERING after `STARVATION_THRESHOLD_MS=500` (never a seek); rate monitor warns once outside 0.9..1.1;
-  EOF: zero frames decoded → ERROR "emitted no frames", stills honour `displayTime`, `repeat()` → `requestSeek(0)`,
+  EOF: zero frames decoded → ERROR (`ERR_FFPLAYER_NO_FRAMES` "Failed to decode video due to no frames emitted, the
+  stream is unsupported or broken"), stills honour `displayTime`, `repeat()` → `requestSeek(0)`,
   else ENDED. `quality(q)` or `audioTrack(AudioTrack)` on a live run sets `switchRequest` → `switchSource()` (rebuild
   decoder, VOD re-seeks, LIVE restarts at the edge).
 - `pause(false)` after a hold of `REREAD_HOLD_MS` or more (10 s) on an
@@ -824,8 +846,9 @@ requested, and SVG yields RGBA when RGBA is requested (everything else is conver
 - `Callbacks` (`FFDecoder.Host`): `cached(uri)` → `NetworkCache.readFile` (skips `.m3u8`/`.mpd`, gated by
   `codecs.ffmpeg.cache` and `cacheMaxResponse`), `vulkan(codecId)` → `new FFDecoder.Device(vk.hwDevice(codecId),
   vk.placebo())` when `gfx instanceof VKEngine`, `audio(...)` negotiates channels/type with `SFXEngine`
-  (exact → closest; type kept if supported, else S16, else first), `opened` (HLS probe thread, fps, source size,
-  `resolveQuality`, pre-`gfx.format`), `failed` → ERROR.
+  (exact → closest; type kept if supported, else S16, else first), `duration(ms)` → `mediaDurationMs` (on every
+  open and reopen, 0 when unknown), `opened` (HLS probe thread, fps, source size, `resolveQuality`, pre-`gfx.format`),
+  `failed` → ERROR.
 - `release()`: throws `IllegalStateException` from the lifecycle or decoder threads; aborts, joins outside the lock,
   frees the plane pool, `clock.halt()`, `super.release()`, delivers STOPPED last. `hwAccel()` public extra.
 - `live()` = HLS probe result else "opened with unknown duration" (may flip once the probe lands).
@@ -837,8 +860,9 @@ requested, and SVG yields RGBA when RGBA is requested (everything else is conver
   1. Still → `showStatic` (upload once; `displayTime(ms)` arms a passive clock that ends in ENDED; never loops).
   2. Frame textures when `1 < frameCount ≤ MAX_FRAME_TEXTURES=256`, `gfx.preload()` and
      `frames × outW × outH × 4 ≤ player.watertx.texturesBudget` MB → `readAll()` (+`DownscaleFilter`),
-     `gfx.preload(frames)`, passive clock resolved inside `texture()` (`frameAt` binary search → `gfx.frame(i)`); ⚠ an
-     undrawn animation does not advance.
+     `gfx.preload(frames)`, passive clock `texTime()` read from the wall clock by `time()` and `status()` (ENDED lands
+     without a draw); `texture()` picks the frame (`frameAt` binary search → `gfx.frame(i)`), ⚠ so the engine's frame
+     and `fps()` (`currentDelayMs`) follow only drawn frames.
   3. Streaming (`TxPlayer-Stream` thread): prefetch queue (`PREFETCH_MAX=6`, `PREFETCH_BUDGET_BYTES=64 MiB`, pooled
      frame-sized direct buffers, `IN_FLIGHT_KEEP=2`), decode permits shared across players (`DECODE_PERMITS =
      Semaphore(max(2, baseThreads))`), hot `scale`/`lod`, seek by decoding forward from frame 0 (`reader.reset()` or
@@ -846,8 +870,9 @@ requested, and SVG yields RGBA when RGBA is requested (everything else is conver
 - Locks: `signals` (status writes, triggers, `prepareActive`), `clock` (passive clock pair; order `clock` → `signals`),
   `releaseLock`; `lifecycleSerial` makes stale passes unable to publish status.
 - Overrides: `forward/rewind` 1 s, `canSeek()` = `playable && animated`, `fps()` from the current delay, `duration()` =
-  known duration (0 for stills). `stop()` keeps the texture; `release()` throws from its own threads and after a 5 s
-  wait for I/O ("release must be retried").
+  known duration (a timed still reports its `displayTime`, an untimed one 0). `stop()` keeps the texture; `release()`
+  throws from its own threads (`ERR_TXPLAYER_RELEASE_CALLBACK`) and after a 5 s wait for image preparation
+  (`ERR_TXPLAYER_RELEASE_BUSY` "..., retry after I/O finishes").
 
 ### 7.7 `NetworkCache` (package-private, lives in `api/player`)
 - `start(Path dir)`: loads `index.dat` (`MAGIC=0x574D4943`, `VERSION=5`), one startup sweep deletes `*.part` and
@@ -856,7 +881,8 @@ requested, and SVG yields RGBA when RGBA is requested (everything else is conver
   `readFile(...)` → `CachedFile(path, cached, contentType)` or null for playlists (`mpegurl`, `dash+xml`), non-HTTP,
   uncacheable headers or a disabled cache; bounded fetch fails (IOException → caller streams directly) without
   `Content-Length`, over `maxBytes` or on ICY streams.
-- Key = SHA-256 of URI + lowercased headers (+ accept); expiry from `Cache-Control`/`Pragma`/`Expires` else
+- Key = SHA-256 of URI + header lines (names lowercased, values verbatim) (+ `accept:` when the headers carry no
+  `Accept`); expiry from `Cache-Control`/`Pragma`/`Expires` else
   `DEFAULT_TTL_MS=7 days`; in-flight downloads shared per key (`fetchShared` on the cached pool `MediaCache`); access-ordered
   LRU under the store monitor evicted to `player.cacheBudget` MB after each write; index rewritten atomically on every
   mutation; store failures never fail the download (`writeWarned` once).
@@ -885,7 +911,9 @@ requested, and SVG yields RGBA when RGBA is requested (everything else is conver
   and later restores texture bindings, PBO, unpack state, program, FBOs, VAO, viewport, blend/scissor/cull/... so host
   state caches stay truthful) → `renderSubmission` (texture sub-uploads through `nglTexSubImage2D` from ring offsets with fences, or legacy
   `NUM_PBOS=2` double buffering) → `convertToRGBA()` (fullscreen quad into the RGBA8 `managedTexture` through the
-  per-context `Kit` program) → `Env.restore()` → `sweepOrphans()`.
+  per-context `Kit` program) → `Env.restore()` → `sweepOrphans()`. Without a thread contract (both nulls), or with the
+  producer on `renderThread`, `push` renders at once (`Env.save` → `renderSubmission` of the client buffers through
+  the `NUM_PBOS` PBOs; no `pending`, no `Hub`), and an engine built with both nulls never maps a ring.
 - Conversion kinds and shaders (`opengl/`): GRAY → `gray.frag`, NV12/NV21 (P010/P016 as NV12 16-bit) → `nv.frag`,
   YUV420P/422P/444P → `yuv3.frag`, YUVA* → `yuva.frag`, YUYV/UYVY → `yuyv.frag` (`texelFetch` pairs); BGRA/RGBA/RGB
   upload directly. Uniform scheme `plane0..3`, `bitScale`, `uvSwap`, `outputWidth`, `colorimetry[4]`. A compile failure
@@ -941,7 +969,7 @@ requested, and SVG yields RGBA when RGBA is requested (everything else is conver
   `DataTool.premultiply`, `Platform.runLater(updateBuffer)`), `repaint()`.
 - `HeadlessGFXEngine` (`PlayerAPI.headlessEngine([preload])`): records `uploadCount()`, `activeFrame()`,
   `preloadedFrames()`, `lastUpload()` (aliases the producer buffer); the inherited `texture()` returns the sentinel after
-  the first upload.
+  the first upload or an accepted `preload(frames)` (only with `preload` true).
 - `Colorimetry(Matrix matrix, boolean full, boolean cositedX, boolean cositedY, Transfer transfer, boolean wide)`
   (package-private record): `Matrix {BT601, BT709, BT2020}` with `kr/kb`, `Transfer {SDR, PQ, HLG}`; `guess(format,
   w, h)` (BT.709 when `w ≥ 1280 || h > 576`), `constants(format, w, h, bits)` → 16 floats (range, matrix, chroma
@@ -955,13 +983,15 @@ requested, and SVG yields RGBA when RGBA is requested (everything else is conver
   spatial sound mod adapter; owner 2026-11-05: docs name no specific mod). Public: `supportedChannels()`, `supportedTypes()`, `channelSupport(int)`,
   `closestChannelSupport(int)`, `source()`, `spatial()`, `spatialAudio([SpatialAudio])`, `sampleType()`, `channels()`,
   `sampleRate()`, `speed()`, `volume()`, `canSpeed()`, `released()`, `release()`. Driver API: `format(type, channels,
-  rate)`, `pause()`, `play()`, `speed(float)`, `volume(float)`, `upload(ByteBuffer)` (direct, whole frames; false =
-  queue full), `flush()`, `pendingMs()` (audible position = last pts + duration − pending).
+  rate)`, `pause()`, `play()`, `speed(float)`, `volume(float)`, `upload(ByteBuffer)` (direct, nonempty, whole frames;
+  false when the queue is full, unconfigured or released, checked before the IAE `ERR_SFX_AUDIO_DATA` of a bad chunk),
+  `flush()`, `pendingMs()` (audible position = last pts + duration − pending).
 - `ALEngine(buffers=DEFAULT_BUFFER_COUNT=8, spatial)`: needs the host's OpenAL context current on every mutating call
   (`ALC_EXT_thread_local_context` honoured); table mono/stereo U8/S16 (+FLT/DBL when the driver exposes them), 4/6/7/8
-  channels with `AL_EXT_MCFORMATS` on a plain engine; buffer queue with duration FIFO, `AL_PITCH` speed, `pendingMs`
-  via `AL_SOFT_source_latency` on the primary; AL errors throw `IllegalStateException`. No device reload or listener
-  API. Every source starts dry and listener-relative (`clearSpatial`), plain ones included.
+  channels U8/S16/FLT with `AL_EXT_MCFORMATS` on a plain engine (FLT even without `AL_EXT_FLOAT32`, never DBL); buffer
+  queue with duration FIFO, `AL_PITCH` speed, `pendingMs` via `AL_SOFT_source_latency` on the primary; AL errors
+  throw `IllegalStateException`. No device reload or listener API. Every source starts dry and listener-relative
+  (`clearSpatial`), plain ones included.
   - Sinks (spatial only): `ALEngine.Sink` (inner class: `source()`, `mix()`/`mix(Mix)`, `primary()`, `released()`,
     `spatialAudio([SpatialAudio])`, `release()`) and `ALEngine.Mix { MONO, LEFT, RIGHT }`; `sinks()` (immutable, primary
     first, empty when plain or released), `addSink(Mix)` (null when plain or released). The spatial table is mono +
@@ -975,8 +1005,9 @@ requested, and SVG yields RGBA when RGBA is requested (everything else is conver
     replays its whole queue). The primary cannot be released alone; `destroy` resets every sink's environment, then
     deletes all sources.
 - `JSEngine(bufferMs=DEFAULT_BUFFER_MS=300)`: Java Sound `SourceDataLine`, mono/stereo U8/S16 only, no speed, no
-  native handle, non-blocking writes (`available() < len` → false), `MASTER_GAIN` volume. Kept as core API; the app uses
-  OpenAL only.
+  native handle, non-blocking writes (`available() < len` → false), `MASTER_GAIN` volume. A chunk wider than the line
+  buffer reopens the line at 2×len (dropping what it queued, resuming if it ran); without a wider line the chunk is
+  dropped (`dropWarned`). Kept as core API; the app uses OpenAL only.
 
 ## 9. Platforms API (`api/platform`)
 - `Platform` interface: `name()`, `resolve(URI)` → `Resolution` | null (foreign host) | `PlatformException` (own host,
@@ -990,7 +1021,7 @@ requested, and SVG yields RGBA when RGBA is requested (everything else is conver
   hit (raw page URL).
 - `PlatformAPI` (static registry, no bootstrap needed): `fetch(URI)` probes CUSTOM newest first, then BUILTIN newest
   first (so `YouTube` → `YtDlp` → `Newgrounds` → `DTube` → ... → `WaterPlatform`); `register(Platform)`/`unregister(Platform)`
-  (permanent for the process, clears the search cache), `platforms()`. Search: `search(query[, limit][, reSearch])`
+  (permanent for the process, clears the search cache), `platforms()`. Search: `search(query[[, limit], reSearch])`
   returns at once a live read-only list filled by 4 `PlatformAPI-Search` workers (one task per platform,
   `SEARCH_TIMEOUT_MS=5_000`, per-platform limit `min(limit, platforms.searchLimit)`), typing debounce 300 ms when the
   query is ≥ 0.7 Jaro-Winkler similar to the previous one, LRU cache of 32 queries cleared every
@@ -1046,7 +1077,8 @@ requested, and SVG yields RGBA when RGBA is requested (everything else is conver
 
 ## 10. Network API (`api/network`) and `NetRequest`
 - `NetworkAPI`: constants `PROTOCOL_WATER="water"`, `X_WATERMEDIA_TOKEN`, `X_WATERMEDIA_FILENAME`, `UPLOAD_THREADS=4`.
-  `upload(File...)`/`upload(File)` (validated up front, `IllegalStateException` before `loaded()`) → `UploadStatus`
+  `upload(File...)`/`upload(File)` (validated up front, `IllegalStateException` `ERR_NETWORK_UPLOAD_NOT_LOADED` until
+  `NetworkAPI.start` created the upload pool) → `UploadStatus`
   (`totalBytes()`, `uploadedBytes()`, `speed()`, `id()`, `uri()` = `water://remote/<id>`, `completed()`, `failed()`,
   `error()`, `percentage()`, `displaySpeed()`, `cancel()`; ⚠ a cancelled status reads as failed with "Cancelled").
   `error()` is text for the user: a server that is off or unreachable reads `(wm_err:0714) Failed to upload, the file
@@ -1100,8 +1132,9 @@ requested, and SVG yields RGBA when RGBA is requested (everything else is conver
 ## 11. Utilities (`api/util` + `tools`)
 
 ### `api/util` (public)
-- `MediaType {IMAGE, VIDEO, AUDIO, SUBTITLES, UNKNOWN}`: `of(mime)` (HLS/DASH → VIDEO, subtitle mimes), `mime(ext)`,
-  `ofExtension(path)` (right-to-left extensions). No byte sniffing here (that is `CodecsAPI.sniff`).
+- `MediaType {IMAGE, VIDEO, AUDIO, SUBTITLES, UNKNOWN}`: `of(mime)` (HLS/DASH/RealMedia → VIDEO, subtitle mimes incl.
+  `application/x-subrip`), `mime(ext)`, `ofExtension(path)` (right-to-left extensions). No byte sniffing here (that
+  is `CodecsAPI.sniff`).
 - `MediaQuality {UNKNOWN(0), LOWEST(144), LOWER(240), LOW(360), LOWISH(480), MEDIUM(720), HIGH(1080), HIGHER(1440),
   HIGHEST(2160), ULTRA_8K(4320)}`: `height()`, `of(resolution)`, `of(width, height)` (smallest known dimension),
   `closest(Set, preferred)`.
@@ -1142,7 +1175,8 @@ requested, and SVG yields RGBA when RGBA is requested (everything else is conver
   `Rendition`, `Channel`.
 - `ThreadTool`: `thread(name, task)` (daemon, `name-N`), `factory(name, priority)`, `workerFactory(name, priority)`
   (marks owned workers; `workerThread()` lets `WaterMedia.start` refuse callbacks), `tryAcquire(Semaphore, timeout,
-  unit)`, `join(Thread)` (uninterruptible, restores the flag), `sleep(ms)`, `processors()`, `baseThreads()`.
+  unit)`, `join(Thread)` (uninterruptible, restores the flag), `sleep(ms)`, `processors()`, `baseThreads()`,
+  `silentCall(SilentRunnable)` (swallows), `safeCall(SilentRunnable, Marker, log)` (logs ERROR with the given message).
 
 ## 12. Standalone app (`bootstrap/app`, internal)
 
@@ -1230,15 +1264,17 @@ requested, and SVG yields RGBA when RGBA is requested (everything else is conver
   LINE_LOOP flush), logical px through `setupOrtho`, scissor and line width scaled by `uiScale`, SDF soft rects for
   glow/shadow when the backend's `supportsSoftRect()` is true, two offscreen layers for the cached tree (`LAYER_BASE`, `LAYER_TOP`),
   `bindMediaTexture(long)` sentinel for 64-bit handles.
-- `RenderBackend` interface (`init`, `cleanup`, `clear`, `viewport`, `createTexture`, `deleteTexture`, `bindTexture`,
-  `useProjection`, `draw(DrawMode, float[], count, textured)`, `lineWidth`, `clip`, `clearClip`, optional; its nested
-  `RenderBackend.DrawMode` and `RenderBackend.TextureHandle` are the shared vocabulary of the backends and `RenderEngine`,
-  `softRect`, `beginFrame/present`, layers, `bindMediaTexture`, `deviceName/Version`). `OpenGLRenderBackend` (GL 3.2
-  core, `opengl/ui.*` + `sdf.*` shaders, stream VBO, FBO layers, `-Dwatermedia.gldebug`). `VulkanRenderBackend`
-  (also the `VKContext`: instance 1.1..1.4, device scored by discrete GPU and host import, queue plan lending FFmpeg
-  decode/compute/transfer queues and a second render-family queue, video decode extensions when available, swapchain
-  FIFO, two frames in flight, shaderc-compiled `vulkan/ui.*`/`sdf.*`, push constants 68/104 bytes, `retire(Runnable)`
-  deferred destruction, `queueLock` around every submit/present/wait; ⚠ no validation layers).
+- `RenderBackend` interface (`init`, `cleanup`, `configureFrameState`, `clear`, `viewport`, `createTexture`,
+  `deleteTexture`, `bindTexture`, `useProjection`, `draw(DrawMode, float[], count, textured)`, `lineWidth`, `clip`,
+  `clearClip`, `mediaEngineSupplier(Thread, Executor)`; optional `supportsSoftRect`/`softRect`, `beginFrame/present`,
+  layers, `bindMediaTexture`, `deviceName/Version`); its nested `RenderBackend.DrawMode` and
+  `RenderBackend.TextureHandle` are the shared vocabulary of the backends and `RenderEngine`.
+  `OpenGLRenderBackend` (GL 3.2 core, `opengl/ui.*` + `sdf.*` shaders, stream VBO, FBO layers, `-Dwatermedia.gldebug`).
+  `VulkanRenderBackend` (also the `VKContext`: instance 1.1..1.4, device scored by discrete GPU and host import, queue
+  plan lending FFmpeg decode/compute/transfer queues and a second render-family queue, video decode extensions when
+  available, swapchain FIFO, two frames in flight, shaderc-compiled `vulkan/ui.*`/`sdf.*`, push constants 68/104
+  bytes, `retire(Runnable)` deferred destruction, `queueLock` around every submit/present/wait; ⚠ no validation
+  layers).
 
 ### 12.3 Element toolkit (`app/element`, `app/ui`)
 - `Element<T>` (self-typed fluent base): sizes `MAX_PARENT=-1`/`WRAP_CONTENT=-2`, `margin`, `padding`, `gravity`,
@@ -1275,16 +1311,18 @@ requested, and SVG yields RGBA when RGBA is requested (everything else is conver
   `Theme` (spacing, heights, glow/shadow), `AppTheme` (colours, `FONT_PLAIN`/`FONT_BOLD` font resources, type ramp,
   `alpha(color, a)` cache), `Spacing`, `Gravity`.
 - Conventions for a new widget: `public final class X extends Element<X>`, fluent setters returning `this`, never
-  override `measure/layout/draw`, draw only through `Canvas`, animations `invalidate()` from `onUpdate` until done,
-  act on key RELEASE for ENTER/ESC and swallow the paired release.
+  override `measure/layout/draw`, draw only through `Canvas`, animations `invalidate()` from `onUpdate` until done.
+  An ENTER/ESC that leaves the widget acts on RELEASE (`TextField` `onSubmit`/`onEscape`, `Dialog`); an in-place edit
+  acts on PRESS (`Spinner` commit/cancel; `TextArea` on PRESS and REPEAT) and swallows the paired release, which
+  `Dialog.childConsumedKey` also mutes.
 
 ### 12.4 Screens (`app/screen`)
-- `Screen extends Group<Screen>`: lazy `build()`, `overlay()` for dialogs (`showDialog/hideDialog`), hooks `onEnter`,
-  `onExit`, `keybinds()` (⚠ return constant lists of the nested `Screen.Keybind(key, label)`), `continuous()` (⚠ true
-  repaints every frame; a screen holding text inputs ORs `textInputActive()` into it, or the caret stops blinking),
-  `under()`, `releaseMedia()`; screens that override `dispatchKey` call `super` first and act on `GLFW_RELEASE`.
-  `RootScreen` hosts `Background`, `TitleBar`, the center slot, `KeybindsBar`, global dialogs; renders/composites the
-  tree and routes input.
+- `abstract BaseScreen extends Group<BaseScreen>`: lazy `build()`, `overlay()` for dialogs (`showDialog/hideDialog`),
+  hooks `onEnter`, `onExit`, `keybinds()` (⚠ return constant lists of the nested `BaseScreen.Keybind(key, label)`),
+  `continuous()` (⚠ true repaints every frame; a screen holding text inputs ORs `textInputActive()` into it, or the
+  caret stops blinking), `under()`, `releaseMedia()`; screens that override `dispatchKey` call `super` first and act
+  on `GLFW_RELEASE`. `RootScreen` hosts `Background`, `TitleBar`, the center slot, `KeybindsBar`, global dialogs;
+  renders/composites the tree and routes input.
 - `HomeScreen` (`enum Action {OPEN_MULTIMEDIA, UPLOAD_LOGS, CLEANUP, SETTINGS, REGION_SELECTOR, MRL_SELECTOR, PLAYER,
   EXIT, BACK}` is the navigation vocabulary; catalog tiles create every group MRL with `PlayerAPI.mrl`; dialogs below),
   `OpenMultimediaScreen` (URL/path vs search by `loadable(text)`; metadata preview MRL; `PlatformAPI.search`
@@ -1483,18 +1521,15 @@ System properties: `watermedia.engine`, `watermedia.app` (child JVM flag), `wate
   when present, `request_size` for YouTube's CDN alone, the options of a CDN link reading a loopback file past 10 MiB
   through bounded requests (raw `avformat`, so a fork that drops `request_size` fails), open requests for any other
   host, an RTMP input that connects; `Segment retries`: a first segment refused twice still decodes),
-  `QueueLifecycleTest`, `FFHoldResumeTest`
-  (player package: an HLS VOD of MPEG-TS segments served like YouTube's by an `IdleOrigin` that resets idle
-  connections; a pause in the middle of a segment and a paused launch held the real 10 s keep playing from the paused
-  frame, a short pause resumes without BUFFERING or a second request of the segment), `FFEncoderTest`,
-  `GifEncoderTest`, `PngEncoderTest`, readers `GifTest`,
+  `QueueLifecycleTest`, `FFEncoderTest`, `GifEncoderTest`, `PngEncoderTest`, readers `GifTest`,
   `JpegTest`, `NetpbmTest`, `PngTest`, `WebpTest`, `WebpMalformedTest`, `SvgTest`, `AlphaDecoderTest`,
   `HuffmanTableTest`, `VP8LosslessDecoderTest`, `FFmpegLogRoutingTest` (disabled); network `NetworkServerTest`
   (snapshots and restores `remoteUrl` with the other `network.*` keys; `Port`: a busy port fails before the storage
   exists, a port `remoteUrl` reaches starts, an unreachable `remoteUrl` gives the port and the storage lock back, a
   foreign answer and an invalid `remoteUrl` fail), `NetworkServerGateTest` (`NetworkAPI.enable`), `NetworkAPITest`
-  (`answers`, `serverEnabled` and the coded message of an upload to a server that is off or silent; it resets
-  `serverUp`, `probeWarned` and `probeAt` by reflection), `UploadStatusTest`;
+  (`answers`, `serverEnabled` and the coded message of an upload to a server that is off, silent or behind a wrong
+  `remoteUrl`; it reads `PROBING` and resets `serverUp`, `probeWarned` and `probeAt` by reflection, `probeAt` also
+  in the middle of a case to end the pause between probes), `UploadStatusTest`;
   platform `PlatformApiTest`, `PlatformSearchTest`, `PlatformClaimTest`,
   `WaterPlatformTest`, offline handler tests `BiliBiliPlatformTest`, `KickPlatformTest`, `NewgroundsPlatformTest`,
   `OdyseePlatformTest` (loopback proxy through `LocalHttp`), `TwitchPlatformTest` (search hits), `TwitterPlatformTest`,
@@ -1504,56 +1539,82 @@ System properties: `watermedia.engine`, `watermedia.app` (child JVM flag), `wate
   `SiteListsTest` (the `checkSite` matrix with disguised hosts, `file:` shares and `jar:` links, BLOCKED MRLs
   without a request, player revalidation, Windows share strings; it snapshots and restores the
   `player.whitelist`/`player.blacklist` fields and gives every case its own URI), `NetworkCacheTest`, `PlayerStateTest`,
-  `ServerMediaPlayerTest`, `FollowerClockTest`, `FollowerPlayerStateTest`, `StatusDeliveryTest`, `FFMediaPlayerTest`,
-  `FFControlContractTest`, `FFAudioTracksTest` (pick, language, hot switch), `ColorimetryTest`, `Tx*Test` (animated, control contract, display time, frame step, frame
+  `ServerMediaPlayerTest`, `FollowerClockTest`, `FollowerPlayerStateTest`, `StatusDeliveryTest`, `FFMediaPlayerTest`
+  (upload size, native and scaled), `FFHoldResumeTest` (an HLS VOD of MPEG-TS segments served like YouTube's by an
+  `IdleOrigin` that resets idle connections; a pause in the middle of a segment and a paused launch held the real
+  10 s keep playing from the paused frame, a short pause resumes without BUFFERING or a second request of the
+  segment), `FFControlContractTest`, `FFAudioTracksTest` (pick, language, hot switch), `ColorimetryTest`,
+  `Tx*Test` (animated, control contract, display time, frame step, frame
   textures, release, scaling, static image), engines `GFXEngineTest`, `GLEngineTest`, `VKEngineTest`,
   `HeadlessGFXEngineTest`, `AWTEngineTest`, `JFXEngineTest`, `SFXEngineTest`, `ALCapabilitiesTest`, `ALSinkTest`, `SpatialAudioTest`;
   util `HttpHeadersTest`, `NetRequestTest`, `MediaTypeTest`, `MediaQualityTest`, `PixelFormatTest`, `MathUtilTest`,
   `MathEasesTest`; bootstrap `AppBootstrapDependenciesTest`, `DefensiveCheckTest`, app `AppConfigTest`,
   `FramePlanTest`, `LogUploaderTest` (stages with the stage 3 resume and the report retry, both scan layouts in a
-  `@TempDir`, masked reads, collected `wm_err` codes, body with `## Error codes`, link limit), `SystemInfoTest`
-  (extension alerts), `HomeScreenTest` (`IssueKeys`, `EarlierKeys`, `Status`: a windowless `HomeScreen` whose
-  navigator only records the fired `Action`s, so nothing is scanned, uploaded or opened), `CanvasLiveTest`,
+  `@TempDir`, masked reads and user names, collected `wm_err` codes, body with `## Error codes`, link limit),
+  `SystemInfoTest` (extension alerts), `HomeScreenTest` (`IssueKeys`, `EarlierKeys`, `Status`: a windowless
+  `HomeScreen` whose navigator only records the fired `Action`s, so nothing is uploaded or opened; ⚠ `onEnter`
+  still starts the `WaterMedia-CacheSize` walk of the cache folder on its own thread), `CanvasLiveTest`,
   `DialogTest` (panel height against the bands), `ListRowTest`,
   `ListViewInteractionTest` (+ `ScrollbarChannel`), `SpinnerTest`, `TextFieldTest`, `TextAreaTest` (+ `SingleLine`;
-  headless through the package-private `TextArea.metrics` hook), `RenderEngineBatchTest`, `RenderEngineCacheTest`,
+  headless through the package-private `TextArea.metrics` hook), `RenderEngineBatchTest` (its own counting
+  backend), `RenderEngineCacheTest`,
   `VulkanRenderBackendTest`; tools `DataToolTest` (incl. `errCode` padding), `IOToolTest`, `JSONToolTest`,
   `M3UToolTest`, `ThreadToolTest`. ⚠ Many tests that match an error message match its code too
   (`assertEquals("(wm_err:0410) Failed to pick the quality ...", ...)`), so renumbering a site breaks them.
-  ⚠ `LogUploaderTest` expects a test JVM that loads classes from a directory (`LogUploader.DEV`), and its stage cases
-  scan the real working directory and read the real system (`SystemInfo.read`).
-- ⚠ Test seams: main code never changes shape for a test beyond a package-private constructor that points a class at
-  a local server (`// TEST SEAM: ...`, as `OdyseePlatform` and `YouTubePlatform`). No mutable statics, no fields a
-  test sets by reflection: a test waits a constant out (the 10 s I/O timeout, `REREAD_HOLD_MS`) or drives FFmpeg with
-  the options `applyInputOptions` built.
+  ⚠ `LogUploaderTest` expects a test JVM that loads classes from a directory (`LogUploader.DEV`; its `Stages` group
+  asserts it before every case); `Stages.startsOver` scans the real working directory and
+  `Stages.retriesFailedReport` reads the real system (`SystemInfo.read`).
+- ⚠ Test seams: main code never gets a member, a mutable static or a looser constant so a test can reach it. The one
+  accepted seam is a package-private constructor that points a class at a local server (`// TEST SEAM: ...`, as
+  `OdyseePlatform` and `YouTubePlatform`); a test waits a constant out (the 10 s I/O timeout, `REREAD_HOLD_MS`) or
+  drives FFmpeg with the options `applyInputOptions` built. ⚠ `TextArea.metrics`, `TextArea.Metrics` and
+  `TextArea.scrollOffset()` are older hooks that only `TextAreaTest` uses.
+- ⚠ Reflection by name: these tests read or reset existing private state through `getDeclaredField` /
+  `getDeclaredMethod`, so a rename compiles and fails at run time. `NetworkAPI` (`PROBING`, `serverUp`,
+  `probeWarned`, `probeAt`), `NetworkServer` (`running`, `Running.executor`), `PlatformAPI` (`searchRemaining`,
+  `searchQuery`, `searchGeneration`, `nextCacheClean`, `HISTORY`, `SEARCH_CACHE`, `searchProbes`, `SEARCH_LOCK`),
+  `MRL` (`owner`, `nextClean`, `loadLock`, `loading`), `FFDecoder` (`init`, `reopenFormat`), `FFMediaPlayer` (`colorimetry`,
+  `planeAlign`, `planePool`), `TxMediaPlayer.SINGLE_FRAME_POOL`, `ALEngine` (`alFormat`, `primary`,
+  `Sink.freeCount`, `totalQueuedUs`, `channelTable`, `render`), `GLEngine` (`ringAddr`, `ringBufferId`, `kit`,
+  `Kit.programs`), `VKEngine` (`ycbcrFmt`, `ycbcrFilter`, `ycbcr`, `importCache`, `ctx`, `kit`, `decodedFrames`,
+  `importedFrames`), `RenderSystem.engine` (set by `RecordingBackend`), `AppBootstrap` (`PREFERENCES`, `engine`,
+  `download`, `dependencies`, `versions`, `extract`, `Dependency`), `WaterMediaBinaries.paths`, and WaterConfig's
+  `ConfigSpec.save`.
 - Support helpers (`org.watermedia.test.support`): `Fixtures` (resource paths and constants `MP4_H264`, `PNG_STATIC`,
   `GIF_ANIMATED`, ...; `readAll`, `fileUri`, `wav` (plain, or WAVE_FORMAT_EXTENSIBLE with a channel mask), `tone`,
   `level`, `dubbed` (tagged multi-stream Matroska), `segment` (HLS-ready Matroska), `transportSegments` (intra-only
   MPEG-2 noise cut into `segment<i>.ts` with continuous timestamps and continuity counters, PAT/PMT per segment),
   `webm`), `MediaBootstrap` (`client()`, `ffmpegAvailable()` one shared
-  bootstrap in a temp dir, `runProbe(type, dir, scenario, omitBindings)`), `PlayerWait` (`awaitStatus`, `awaitLoaded`,
-  `awaitCondition`), `LocalHttp` (loopback `HttpServer`, `respond`, `respondRange`, `expiresIn`), `IdleOrigin`
-  (keep-alive HTTP/1.1 with byte ranges that resets, `resetting`, or goes silent, `silent`, on an idle connection;
-  `serve`, `stream` (a body served like YouTube's segments: 200 chunked, no ranges, paced), `uri`, `requests`,
-  `requests(path)`, `cuts`, `connections`, `strays`), `Origin` (range/
-  endless/held origins), `LogCapture` (TRACE capture of a named logger), `OpenALContext` (skips without OpenAL),
+  bootstrap in a temp dir, `runProbe(type, dir, scenario, omitBindings)`), `PlayerWait` (`awaitStatus`,
+  `awaitCondition`), `LocalHttp` (loopback `HttpServer`, one context with any handler, `respond`, `respondRange`,
+  `expiresIn`), `IdleOrigin`
+  (keep-alive HTTP/1.1 with bodies per path and byte ranges that resets, `resetting`, or goes silent, `silent`, on an
+  idle connection; `serve`, `stream` (a body served like YouTube's segments: 200 chunked, no ranges, paced), `uri`,
+  `requests(path)`, `cuts`, `connections`, `strays`), `Origin` (one body under every path: ranges with `of`, a feed
+  that never ends with `endless`, `hold`/`awaitEntered`/`release` to park requests before their headers,
+  `requests()`, a fresh path per `uri(ext)`), `LogCapture` (TRACE capture of a named logger), `OpenALContext`
+  (skips without OpenAL),
   `YuvFrames` (planes and expected colours incl. PQ/HLG), `ImageBytes` (PNG/RIFF builders, bit writer), `PamImage`,
   `PixelDiff`, `FrameReplay` (frame hashes across two `reset()`), `DdsFixture`, `RecordingBackend` (GPU-less
   `RenderBackend`), `MaliciousImages` (pentest corpus generator, not a test).
-- Fixtures: `gif/`, `jpeg/` (+`raw/*.pam` references), `png/` (+`raw/`), `webp/{animated,lossless,lossy}` (+`raw/`),
-  `netpbm/`, `svg/` (+`png/` renders), `mp4/fibonaccisongh264.mp4`, `m3u/iptv_sample.m3u8`, `pentest/{dds,gif,jpeg,
-  netpbm,png,svg,webp}`, `log4j2.xml` (console, `watermedia` DEBUG). `src/test/tools/GeneratePngReference.java`
+- Fixtures: `gif/`, `jpeg/` (+`raw/*.pam` references), `png/` (+`raw/` with a `README.md` of provenance and
+  SHA-256), `webp/{lossless,lossy}` (+`raw/`), `webp/animated`, `netpbm/`, `svg/` (+`png/` renders),
+  `mp4/fibonaccisongh264.mp4`, `m3u/iptv_sample.m3u8`, `pentest/{dds,gif,jpeg,netpbm,png,svg,webp}`, `log4j2.xml`
+  (console, `watermedia` and `watermedia_binaries` DEBUG). `src/test/tools/GeneratePngReference.java`
   regenerates PNG references with ImageIO. `.gitattributes` marks `pentest/**` and every `*.pam` under
   `src/test/resources` `-text`: ⚠ a byte-exact fixture without a zero byte in its first 8000 bytes is sniffed as text
   and rewritten to CRLF by a checkout with `core.autocrlf=true` (it broke `PngTest [1.png]` with `png/raw/1.pam`).
 - Gates: natives optional unless `watermedia.test.requireNatives`; GPU tests need a real GL/VK context (LWJGL stack
-  `test_lwjgl_stack`); `VKEngineTest.Decoded.playerDecodesOnTheDevice` is skipped with the Khronos validation layer
-  installed (run with `VK_LOADER_LAYERS_DISABLE=~all~`); symlink tests skip without the Windows privilege;
+  `test_lwjgl_stack`); `VKEngineTest.Decoded.playerDecodesOnTheDevice` and `twinDecodesForADeviceWithoutQueues` are
+  skipped with the Khronos validation layer installed (run with `VK_LOADER_LAYERS_DISABLE=~all~`; ⚠ no CI leg has a
+  Vulkan device, so they only run on a dev machine without the layer); symlink tests skip without the Windows
+  privilege; `SiteListsTest.ShareStrings` and the share cases of `WaterPlatformTest` are Windows only;
+  `FFAudioTracksTest` aborts its `Embedded` and `Separate` cases when no Java Sound line plays mono S16 at 48 kHz;
   `FFmpegLogRoutingTest` is `@Disabled`. CI native matrix filters are listed in §4.
 - Clock-dependent cases that a slow host can stall retry up to 3 times with 5 s pauses and rethrow the last failure
   (owner rule): `PlatformSearchTest.testTypingDelay`, `FFControlContractTest.Loading.speedBeforeStart` (2x rate window,
-  which failed once on the macOS Intel runner). Bracketed system-clock checks (`ServerMediaPlayerTest`,
-  `FollowerClockTest`) need none.
+  which failed once on the macOS Intel runner) and the rendering check of `FFHoldResumeTest.LongHold` (both cases).
+  Bracketed system-clock checks (`ServerMediaPlayerTest`, `FollowerClockTest`) need none.
 - Binaries tests (`binaries/src/test/java`): `NativeProvisionTest` (checksums, generations, interrupted installs,
   overrides, BotGuard archives), `RepackToolTest` (runs `RepackFFmpeg.java` in a child JVM).
 
