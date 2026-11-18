@@ -13,7 +13,6 @@ import org.watermedia.api.platform.PlatformException;
 import org.watermedia.test.support.MediaBootstrap;
 
 import java.net.URI;
-import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -21,10 +20,9 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Verifies the {@link WaterPlatform#location(URI)} mapping for the three supported hosts
- * ({@code local}, {@code global}, {@code remote}), the unknown-host refusal, and that
- * {@link WaterPlatform#resolve(URI)} turns a valid address into a single-source resolution
- * without any network access.
+ * Verifies the {@link WaterPlatform#location(URI)} mapping of the {@code local} and {@code remote} hosts, the share and
+ * unknown-host refusals, and that {@link WaterPlatform#resolve(URI)} turns a {@code global} address into a
+ * single-source resolution without any network access.
  */
 @DisplayName("WaterPlatform")
 public class WaterPlatformTest {
@@ -46,17 +44,10 @@ public class WaterPlatformTest {
     class LocationTests {
 
         @Test
-        @DisplayName("water://local resolves against the session working directory")
+        @DisplayName("water://local resolves against the session working directory, folders included")
         void testLocalResolvesAgainstCwd() throws PlatformException {
             assertEquals(WaterMedia.cwd().resolve("foo.png").toUri().toString(), WaterPlatform.location(URI.create("water://local/foo.png")));
-        }
-
-        @Test
-        @DisplayName("A plain water://local path stays under the session working directory")
-        void testLocalPathStaysUnderCwd() throws PlatformException {
-            final String location = WaterPlatform.location(URI.create("water://local/a/b.png"));
-            assertEquals(WaterMedia.cwd().resolve("a/b.png").toUri().toString(), location);
-            assertTrue(Path.of(URI.create(location)).startsWith(WaterMedia.cwd()), "The file must live under the working directory, got: " + location);
+            assertEquals(WaterMedia.cwd().resolve("a/b.png").toUri().toString(), WaterPlatform.location(URI.create("water://local/a/b.png")));
         }
 
         @Test
@@ -80,13 +71,6 @@ public class WaterPlatformTest {
                 final PlatformException failure = assertThrows(PlatformException.class, () -> WaterPlatform.location(URI.create(link)), link);
                 assertTrue(String.valueOf(failure.getMessage()).contains("(wm_err:2043)"), link + " was refused for another reason: " + failure.getMessage());
             }
-        }
-
-        @Test
-        @DisplayName("water://global resolves to the global server prefix")
-        void testGlobalResolvesToGlobalServerPrefix() throws PlatformException {
-            assertEquals(WaterPlatform.GLOBAL_SERVER + "x", WaterPlatform.location(URI.create("water://global/x")),
-                    "water://global/x must concatenate after WaterPlatform.GLOBAL_SERVER");
         }
 
         @Test

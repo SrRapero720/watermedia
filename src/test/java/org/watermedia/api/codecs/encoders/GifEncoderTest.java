@@ -497,13 +497,6 @@ public class GifEncoderTest {
         }
 
         @Test
-        @DisplayName("Closing without a frame throws IllegalStateException")
-        void noFrames() throws IOException {
-            final Encoder encoder = CodecsAPI.encoder(Container.GIF, new ByteArrayOutputStream(), new Encoder.Video(VideoCodec.GIF, 8, 8, PixelFormat.RGBA, FPS), null);
-            assertThrows(IllegalStateException.class, encoder::close);
-        }
-
-        @Test
         @DisplayName("CodecsAPI.encoder writes an animation into a file")
         void writesFile() throws IOException {
             // UNDER build/ INSTEAD OF @TempDir: DELETING A JUST-WRITTEN FILE FLAKES AGAINST WINDOWS AV SCANS

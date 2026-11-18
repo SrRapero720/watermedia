@@ -98,6 +98,8 @@ public class IOToolTest {
             assertEquals(generation, IOTool.currentGeneration(directory));
             Files.writeString(directory.resolve("current"), "../outside");
             assertNull(IOTool.currentGeneration(directory));
+            Files.writeString(directory.resolve("current"), directory.toAbsolutePath().toString());
+            assertNull(IOTool.currentGeneration(directory), "an absolute path is no generation name");
             final Path outside = Files.createDirectory(directory.getParent().resolve("outside-" + System.nanoTime()));
             try {
                 assertThrows(IOException.class, () -> IOTool.publishGeneration(directory, outside));

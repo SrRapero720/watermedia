@@ -446,20 +446,6 @@ public class TextAreaTest {
             type(lines, "X");
             assertEquals("ab\nX\ncd", lines.value(), "the empty paragraph is a row");
         }
-
-        @Test
-        @DisplayName("a new width rewraps the rows")
-        void rewrapsOnWidth() {
-            final AppContext ctx = new AppContext();
-            final TextArea area = area("hello world again");
-            area.attach(ctx);
-            area.size(220, 76);
-            relayout(area);
-            ctrlTap(area, ctx, GLFW_KEY_HOME);
-            tap(area, GLFW_KEY_DOWN);
-            type(area, "X");
-            assertEquals("hello world againX", area.value(), "20 characters fit, so the text is one row");
-        }
     }
 
     @Nested

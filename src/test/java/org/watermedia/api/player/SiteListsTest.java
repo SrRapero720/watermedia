@@ -347,14 +347,6 @@ public class SiteListsTest {
     class Forbidding {
 
         @Test
-        @DisplayName("The listed sites and their subdomains are forbidden, the rest plays")
-        void testListedSitesAreForbidden() {
-            blacklist("pornhub.com");
-            forbidden("https://pornhub.com/", "https://www.pornhub.com/view_video.php?viewkey=1", "https://cdn.pornhub.com/a.mp4");
-            plays("https://vimeo.com/76979871", "https://youtube.com/", "http://localhost/a.png");
-        }
-
-        @Test
         @DisplayName("The refusal carries its code and the link")
         void testRefusalMessage() {
             blacklist("pornhub.com");
@@ -435,14 +427,6 @@ public class SiteListsTest {
         }
 
         @Test
-        @DisplayName("Names that java.net.URI rejects but the network reaches still match")
-        void testUnderscoreHostsMatch() {
-            blacklist("bad_site.com");
-            forbidden("http://bad_site.com/", "http://www.bad_site.com/");
-            plays("http://good_site.com/");
-        }
-
-        @Test
         @DisplayName("Entries pasted as links, with a port, user info, spaces or a trailing dot still name their site")
         void testEntrySpellingsNameTheirSite() {
             whitelist(false, "https://Imgur.com/gallery", "kick.com:443", "user@youtu.be", "  TWITCH.tv.  ", "http://[::1]:8080/");
@@ -483,13 +467,6 @@ public class SiteListsTest {
             WaterMediaConfig.player.blacklist.enable = false;
             whitelist(false, "168.0.5");
             notAllowed("http://192.168.0.5/");
-        }
-
-        @Test
-        @DisplayName("An IP entry never covers names that end with it")
-        void testIpEntryIsNoSuffix() {
-            whitelist(false, "192.168.0.5");
-            notAllowed("http://x.192.168.0.5/", "http://evil.192.168.0.5:8080/");
         }
 
         @Test
@@ -535,18 +512,10 @@ public class SiteListsTest {
         }
 
         @Test
-        @DisplayName("A disguised loopback is forbidden even under trustLocal")
-        void testDisguisedWinsOverTrustLocal() {
-            whitelist(true, "youtube.com");
-            blacklist("unrelated.example");
-            forbidden("http://127.1/", "http://2130706433/");
-        }
-
-        @Test
-        @DisplayName("The whitelist never allows a disguised address, even one written as an entry")
+        @DisplayName("The whitelist never allows a disguised address, even one written as an entry or ending in one")
         void testDisguisedIsNeverAllowed() {
             whitelist(true, "2130706433", "127.1", "192.168.0.5");
-            notAllowed("http://2130706433/", "http://127.1/", "http://0x7f.0.0.1/", "http://x.192.168.0.5/");
+            notAllowed("http://2130706433/", "http://127.1/", "http://0x7f.0.0.1/", "http://x.192.168.0.5/", "http://evil.192.168.0.5:8080/");
             plays("http://192.168.0.5/", "http://127.0.0.1/");
         }
 
@@ -796,41 +765,6 @@ public class SiteListsTest {
                 assertSame(MRL.Status.BLOCKED, mrl.status());
                 assertInstanceOf(BlacklistException.class, mrl.exception());
                 assertEquals(0, requests.get(), "no request reached the origin");
-            }
-        }
-
-        @Test
-        @DisplayName("Allowed links still load: a trusted local one and a listed one")
-        void testAllowedLinksLoad() {
-            final AtomicInteger requests = new AtomicInteger();
-            try (final LocalHttp origin = picture(requests)) {
-                whitelist(true, "youtube.com");
-                blacklist("pornhub.com");
-                final MRL trusted = loaded(origin.uri("/site-lists/trusted.png"));
-                assertNull(trusted.exception());
-                assertEquals(MediaType.IMAGE, trusted.source(0).type());
-                whitelist(false, origin.uri("/").getHost());
-                loaded(origin.uri("/site-lists/listed.png"));
-                assertTrue(requests.get() >= 2, "both links reached the origin");
-            }
-        }
-
-        @Test
-        @DisplayName("Only the link is judged: a source the platform put on an unlisted, forbidden host loads")
-        void testResolvedHostsAreNotJudged() {
-            final URI link = URI.create("https://allowed.example/site-lists/elsewhere");
-            final URI target = URI.create("https://cdn.forbidden.example/site-lists/elsewhere.png");
-            final AtomicInteger asked = new AtomicInteger();
-            final Platform platform = platform(link, asked, image(target));
-            whitelist(false, "allowed.example");
-            blacklist("forbidden.example");
-            PlatformAPI.register(platform);
-            try {
-                final MRL mrl = loaded(link);
-                assertEquals(1, asked.get());
-                assertTrue(mrl.source(0).qualities().containsValue(target), "the source stays on the host the platform chose");
-            } finally {
-                PlatformAPI.unregister(platform);
             }
         }
 

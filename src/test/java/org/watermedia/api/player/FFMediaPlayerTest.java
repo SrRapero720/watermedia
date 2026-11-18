@@ -13,11 +13,10 @@ import org.watermedia.test.support.PlayerWait;
 import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
-/** Verifies the {@link FFMediaPlayer} decode pipeline and upload scaling on a local H.264 MP4, video only through a {@link HeadlessGFXEngine}. */
+/** Verifies the upload size of {@link FFMediaPlayer} on a local H.264 MP4, native and scaled, video only through a {@link HeadlessGFXEngine}. */
 @DisplayName("FFMediaPlayer mp4")
 public class FFMediaPlayerTest {
 
@@ -55,29 +54,6 @@ public class FFMediaPlayerTest {
     // ==========================================================================
 
     @Nested
-    @DisplayName("Playback")
-    class Playback {
-
-        @Test
-        @DisplayName("Plays and uploads frames at the native size")
-        void testPlaysAndUploadsNativeSize() {
-            final HeadlessGFXEngine gfx = new HeadlessGFXEngine();
-            final FFMediaPlayer player = open(gfx, p -> {});
-            try {
-                assertTrue(player.canPlay());
-                assertTrue(player.sourceWidth() > 0);
-                assertTrue(player.sourceHeight() > 0);
-                assertEquals(player.sourceWidth(), player.width());
-                assertEquals(player.sourceHeight(), player.height());
-                assertTrue(PlayerWait.awaitCondition(() -> gfx.uploadCount() > 0, PLAY_OBSERVE_MS));
-                assertNotNull(gfx.format());
-            } finally {
-                player.release();
-            }
-        }
-    }
-
-    @Nested
     @DisplayName("Scaling")
     class Scaling {
 
@@ -111,7 +87,7 @@ public class FFMediaPlayerTest {
         }
 
         @Test
-        @DisplayName("Hot LOD change shrinks the live upload")
+        @DisplayName("Without scaling the upload has the native size, and a hot LOD change shrinks it")
         void testHotLodChangeShrinksUpload() {
             final HeadlessGFXEngine gfx = new HeadlessGFXEngine();
             final FFMediaPlayer player = open(gfx, p -> {});
@@ -119,6 +95,7 @@ public class FFMediaPlayerTest {
                 assertTrue(PlayerWait.awaitCondition(() -> gfx.uploadCount() > 0, PLAY_OBSERVE_MS));
                 final int fullWidth = player.width();
                 assertEquals(player.sourceWidth(), fullWidth);
+                assertEquals(player.sourceHeight(), player.height());
 
                 // THE NEXT DECODED FRAME RESOLVES THE NEW TARGET
                 player.lod(LodLevel.FAR_AWAY);

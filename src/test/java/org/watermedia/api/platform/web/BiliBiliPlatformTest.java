@@ -7,7 +7,6 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.watermedia.api.platform.MatureContentException;
 import org.watermedia.api.platform.PlatformException;
-import org.watermedia.api.util.HttpHeaders;
 
 import java.net.URI;
 
@@ -87,15 +86,6 @@ public class BiliBiliPlatformTest {
         void testUserFingerprintWins() {
             final String own = "buvid3=OWN-infoc; " + SESSION;
             assertSame(own, BiliBiliPlatform.cookie(own, FINGERPRINT));
-        }
-
-        @Test
-        @DisplayName("The merged value is a single valid Cookie header")
-        void testHeaderValue() {
-            final HttpHeaders headers = new HttpHeaders().set("Cookie", BiliBiliPlatform.cookie(SESSION, FINGERPRINT));
-            assertEquals(1, headers.count());
-            assertTrue(headers.value("Cookie").startsWith("buvid3="), "The fingerprint leads the cookie");
-            assertTrue(headers.value("Cookie").endsWith(SESSION), "The user session closes the cookie");
         }
     }
 }

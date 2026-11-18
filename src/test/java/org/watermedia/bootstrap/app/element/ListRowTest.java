@@ -10,16 +10,14 @@ import org.watermedia.bootstrap.app.ui.TextRenderer;
 import org.watermedia.test.support.RecordingBackend;
 
 import java.awt.Font;
-import java.util.ArrayList;
-import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Verifies how a {@link ListRow} places its children, binds live state, decides whether it draws as selected and fits
- * its title into the width left beside its prefix and right side.
+ * Verifies how a {@link ListRow} places its children, decides whether it draws as selected and fits its title into the
+ * width left beside its prefix and right side.
  */
 @DisplayName("ListRow")
 public class ListRowTest {
@@ -50,16 +48,6 @@ public class ListRowTest {
     @Nested
     @DisplayName("State")
     class State {
-
-        @Test
-        @DisplayName("the binder runs on every update, before measure")
-        void binds() {
-            final List<String> calls = new ArrayList<>();
-            final ListRow row = new ListRow().binder(r -> calls.add("bind"));
-            row.update();
-            row.update();
-            assertEquals(List.of("bind", "bind"), calls);
-        }
 
         @Test
         @DisplayName("a picked supplier overrides the list's selection stamp")

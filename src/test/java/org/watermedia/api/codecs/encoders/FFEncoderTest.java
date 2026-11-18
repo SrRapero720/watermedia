@@ -323,7 +323,7 @@ public class FFEncoderTest {
             final MediaPlayer player = PlayerAPI.player(mrl, () -> gfx, () -> null);
             try {
                 player.start();
-                assertTrue(PlayerWait.awaitLoaded(player, 15_000L));
+                assertTrue(PlayerWait.awaitCondition(player::canPlay, 15_000L));
                 assertTrue(PlayerWait.awaitStatus(player, 15_000L, Status.PLAYING, Status.BUFFERING, Status.PAUSED, Status.ENDED));
                 assertTrue(Math.abs(player.duration() - SECONDS * 1_000L) <= 150L, "duration " + player.duration() + " ms");
                 assertTrue(PlayerWait.awaitCondition(() -> gfx.uploadCount() > 0, 8_000L), "decoded frames reach the engine");

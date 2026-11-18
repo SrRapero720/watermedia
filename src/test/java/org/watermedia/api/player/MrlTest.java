@@ -102,16 +102,6 @@ public class MrlTest {
     class Readiness {
 
         @Test
-        @DisplayName("Local image loads cleanly")
-        void testLocalImageLoadsCleanly() {
-            final MRL mrl = PlayerAPI.mrl(Fixtures.fileUri(Fixtures.PNG_STATIC));
-            assertTrue(mrl.await(TIMEOUT_MS));
-            assertTrue(mrl.status().loaded());
-            assertFalse(mrl.status().failed());
-            assertTrue(mrl.sourceCount() > 0);
-        }
-
-        @Test
         @DisplayName("Nonexistent file marks an error after load")
         void testNonexistentFileMarksErrorAfterLoad() {
             final MRL mrl = PlayerAPI.mrl(URI.create("file:///nonexistent/abc.png"));

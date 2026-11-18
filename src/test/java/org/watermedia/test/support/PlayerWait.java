@@ -21,11 +21,6 @@ public final class PlayerWait {
         return awaitCondition(() -> targets.contains(player.status()), timeoutMs);
     }
 
-    /** Waits until {@code player.canPlay()} returns true, or {@code timeoutMs} elapses. */
-    public static boolean awaitLoaded(final MediaPlayer player, final long timeoutMs) {
-        return awaitCondition(player::canPlay, timeoutMs);
-    }
-
     /** Returns whether the condition holds within {@code timeoutMs}, polling every 5 ms. */
     public static boolean awaitCondition(final BooleanSupplier condition, final long timeoutMs) {
         // MONOTONIC: A WALL-CLOCK ADJUSTMENT MUST NEVER STRETCH OR CUT A WAIT

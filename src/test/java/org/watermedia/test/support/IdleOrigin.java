@@ -44,7 +44,6 @@ public final class IdleOrigin implements AutoCloseable {
     private final Set<Connection> connections = ConcurrentHashMap.newKeySet(); // SERVED, NOT CUT
     private final Set<Connection> silenced = ConcurrentHashMap.newKeySet();    // CUT BY A SILENT ORIGIN, STILL OPEN
     private final CountDownLatch closing = new CountDownLatch(1);
-    private final AtomicInteger requests = new AtomicInteger();
     private final AtomicInteger cuts = new AtomicInteger();
     private final AtomicInteger strays = new AtomicInteger();
     private volatile boolean closed;
@@ -74,8 +73,6 @@ public final class IdleOrigin implements AutoCloseable {
     /** Returns the absolute URI of a path served by this origin. */
     public URI uri(final String path) { return URI.create("http://" + this.server.getInetAddress().getHostAddress() + ":" + this.server.getLocalPort() + path); }
 
-    /** Returns the number of requests the origin answered or refused. */
-    public int requests() { return this.requests.get(); }
     /** Returns the number of requests the origin answered or refused for {@code path}. */
     public int requests(final String path) { return this.paths.getOrDefault(path, 0); }
     /** Returns the number of connections the origin cut for idling. */
@@ -173,7 +170,6 @@ public final class IdleOrigin implements AutoCloseable {
                     return;
                 }
                 if (head == null) return;
-                this.requests.incrementAndGet();
 
                 // REQUEST LINE AND THE TWO HEADERS THE ORIGIN HONOURS
                 final String[] lines = head.split("\r\n");

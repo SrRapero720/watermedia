@@ -28,7 +28,6 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /** Verifies the {@link ALEngine.Sink} model: one decode feeding aligned positional sinks; every case skips without an OpenAL output device. */
 @DisplayName("ALEngine sinks")

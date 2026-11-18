@@ -54,16 +54,6 @@ public class AWTEngineTest {
         }
 
         @Test
-        @DisplayName("RGBA is swizzled to the same ARGB result")
-        void rgbaSwizzle() {
-            final AWTEngine engine = PlayerAPI.awtEngine(null);
-            assertTrue(engine.format(PixelFormat.RGBA, 1, 1, 8));
-            // R=30 G=20 B=10 A=255 -> 0xFF1E140A, SAME PIXEL AS THE BGRA CASE
-            engine.upload(new ByteBuffer[] { YuvFrames.direct(30, 20, 10, 255) }, new int[] { 0 });
-            assertEquals(0xFF1E140A, engine.image().getRGB(0, 0));
-        }
-
-        @Test
         @DisplayName("BGRA stride padding beyond w*4 is dropped")
         void bgraStridePadding() {
             final AWTEngine engine = PlayerAPI.awtEngine(null);

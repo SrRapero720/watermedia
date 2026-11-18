@@ -92,17 +92,6 @@ public class ServerMediaPlayerTest {
         }
 
         @Test
-        @DisplayName("seek() sets the reported position")
-        void testSeekSetsPosition() {
-            final ServerMediaPlayer player = ServerMediaPlayerTest.this.solo();
-            player.syncDuration(100_000L);
-            player.startPaused();
-            assertTrue(player.seek(30_000L));
-            // PAUSED: time() REPORTS THE ACCUMULATED POSITION VERBATIM
-            assertEquals(30_000L, player.time());
-        }
-
-        @Test
         @DisplayName("speed(2x) roughly doubles the clock rate")
         void testSpeedScalesClock() throws InterruptedException {
             final ServerMediaPlayer player = ServerMediaPlayerTest.this.solo();

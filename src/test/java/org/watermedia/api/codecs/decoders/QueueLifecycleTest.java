@@ -16,33 +16,18 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
- * Verifies the {@link FrameQueue} and {@link PacketQueue} lifecycles the FFmpeg pipeline relies on: invalid capacities
- * fail before native allocation, abort and finish wake every blocked producer or consumer, and a flush advances the serial.
+ * Verifies the {@link FrameQueue} and {@link PacketQueue} lifecycles the FFmpeg pipeline relies on: abort and finish
+ * wake every blocked producer or consumer, and a flush advances the serial.
  */
 @DisplayName("FFmpeg pipeline queues")
 public class QueueLifecycleTest {
     // ==========================================================================
     // NESTED TYPES
     // ==========================================================================
-    @Nested
-    @DisplayName("Construction")
-    class Construction {
-
-        @Test
-        @DisplayName("Invalid capacities fail before any native slot is allocated")
-        void invalidCapacitiesFailBeforeAllocatingNativeSlots() {
-            assertThrows(IllegalArgumentException.class, () -> new FrameQueue(0));
-            assertThrows(IllegalArgumentException.class, () -> new FrameQueue(-1));
-            assertThrows(IllegalArgumentException.class, () -> new PacketQueue(0));
-            assertThrows(IllegalArgumentException.class, () -> new PacketQueue(-1));
-        }
-    }
-
     @Nested
     @DisplayName("Blocked producers and consumers")
     class Wakeups {

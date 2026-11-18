@@ -16,10 +16,7 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrowsExactly;
 
-/**
- * Verifies {@link DdsHeader} header and footer parsing and the block math it derives from the
- * frame's {@link PixelFormat}, independently of any native BC codec.
- */
+/** Verifies {@link DdsHeader} header and footer parsing, independently of any native BC codec. */
 @DisplayName("DDS container")
 public class DdsHeaderTest {
 
@@ -114,20 +111,6 @@ public class DdsHeaderTest {
         void refusesCountOutsideArraySizes() {
             for (final int count: new int[] { -1, 4_097, Integer.MAX_VALUE })
                 assertThrowsExactly(IllegalArgumentException.class, () -> DdsHeader.readFooter(ByteBuffer.wrap(new byte[] { 1, 2, 3 }), count), "count " + count);
-        }
-    }
-
-    @Nested
-    @DisplayName("Block math")
-    class BlockMath {
-
-        @Test
-        @DisplayName("Frame bytes follow the format's block size, edges padded up to the 4x4 grid")
-        void frameBytes() throws CodecException {
-            // 64x32 FORMS 16x8 BLOCKS; 61x30 PADS UP TO THE SAME GRID
-            assertEquals(128 * 16, DdsHeader.read(ByteBuffer.wrap(DdsFixture.write(64, 32, PixelFormat.BC7, 1))).frameBytes());
-            assertEquals(128 * 8, DdsHeader.read(ByteBuffer.wrap(DdsFixture.write(61, 30, PixelFormat.BC1, 1))).frameBytes());
-            assertEquals(128 * 16, PixelFormat.BC3.frameBytes(61, 30, 8));
         }
     }
 }

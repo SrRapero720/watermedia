@@ -1,5 +1,6 @@
 package org.watermedia.bootstrap.app;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -43,11 +44,10 @@ public class LogUploaderTest {
     @DisplayName("Stages")
     class Stages {
 
-        @Test
-        @DisplayName("a test run loads the classes from a directory, so it counts as a development run and the dialog opens")
-        void development() {
-            assertTrue(LogUploader.DEV);
-            assertTrue(LogUploader.AVAILABLE);
+        // step() ONLY OPENS THE DIALOG ON A DEVELOPMENT RUN OR INSIDE A mods FOLDER
+        @BeforeEach
+        void developmentRun() {
+            assertTrue(LogUploader.AVAILABLE, "the stage cases need a JVM that loads the classes from a directory (LogUploader.DEV)");
         }
 
         @Test

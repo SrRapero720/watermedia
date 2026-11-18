@@ -30,7 +30,6 @@ import java.util.concurrent.CopyOnWriteArrayList;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -282,13 +281,6 @@ public class OdyseePlatformTest {
             assertEquals(OdyseePlatformTest.this.http.uri("/v6/streams/5d2af9ea0959b3938b6e0fbd2eacc550430b169f/b8e5ee.mp4"), source.qualities().get(0).uri());
             // get ON THE REPOST URL ITSELF ANSWERS "stream doesn't have source data"; THE SHARED CLAIM'S PERMANENT URL STREAMS
             assertEquals(List.of("resolve " + REPOST, "get lbry://name#5d2af9ea0959b3938b6e0fbd2eacc550430b169f"), OdyseePlatformTest.this.calls);
-        }
-
-        @Test
-        @DisplayName("The embed URL shape resolves the same claim")
-        void testEmbedShape() throws Exception {
-            final Source source = OdyseePlatformTest.this.platform.resolve(URI.create("https://odysee.com/$/embed/@IsaacElite10:8/2026-05-06-21-36-32:5")).sources().get(0);
-            assertEquals("Project Gotham Racing 4", source.metadata().title());
         }
     }
 

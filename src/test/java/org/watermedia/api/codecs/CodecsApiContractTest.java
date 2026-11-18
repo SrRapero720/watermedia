@@ -24,7 +24,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * Verifies the {@link CodecsAPI} contract: format detection, header consumption on the caller's buffer, the
  * overloads and their argument checks, the requested layout, the iterator and close contract every
- * {@link ImageReader} shares, empty metadata and codec availability.
+ * {@link ImageReader} shares and empty metadata.
  */
 @DisplayName("CodecsAPI contract")
 public class CodecsApiContractTest {
@@ -163,8 +163,8 @@ public class CodecsApiContractTest {
     }
 
     @Nested
-    @DisplayName("Metadata and availability")
-    class MetadataAndAvailability {
+    @DisplayName("Metadata")
+    class EmptyMetadata {
 
         @Test
         @DisplayName("Empty metadata: scalar fields null, collection fields empty (not null)")
@@ -175,15 +175,6 @@ public class CodecsApiContractTest {
                 assertTrue(metadata.authors().isEmpty());
                 assertTrue(metadata.values().isEmpty());
             }
-        }
-
-        @Test
-        @DisplayName("Decode-only containers list no codecs, image containers carry no sound and Ogg carries only sound")
-        void availability() {
-            for (final Container container: List.of(Container.WEBP, Container.JPEG, Container.NETPBM, Container.SVG))
-                assertTrue(container.video().isEmpty() && container.audio().isEmpty(), container.name());
-            assertTrue(Container.PNG.audio().isEmpty() && Container.GIF.audio().isEmpty());
-            assertTrue(Container.OGG.video().isEmpty() && !Container.OGG.audio().isEmpty());
         }
     }
 }

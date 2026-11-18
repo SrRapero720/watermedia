@@ -82,12 +82,6 @@ public class DefensiveCheckTest {
     @DisplayName("tlcheck")
     class Tlcheck {
         @Test
-        @DisplayName("passes a clean JVM and game directory")
-        void passesCleanEnvironment(@TempDir final Path gameDir) {
-            assertDoesNotThrow(() -> DefensiveCheck.run(gameDir));
-        }
-
-        @Test
         @DisplayName("blocks startup when a thread of the skin mod is alive")
         void blocksLauncherThread(@TempDir final Path gameDir) throws InterruptedException {
             final CountDownLatch release = new CountDownLatch(1), running = new CountDownLatch(1);
@@ -109,7 +103,7 @@ public class DefensiveCheckTest {
         }
 
         @Test
-        @DisplayName("warns about leftovers in the game directory without blocking")
+        @DisplayName("passes a clean JVM and warns about leftovers in the game directory without blocking")
         void warnsLeftovers(@TempDir final Path gameDir) throws Exception {
             Files.writeString(gameDir.resolve("TlauncherProfiles.json"), "{}");
             try (final LogCapture logs = new LogCapture(WaterMedia.ID)) {
