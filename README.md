@@ -52,6 +52,7 @@ any Java app can embed the API.
 - 🔒 HTTPS media checks certificates, and tokens, passwords and login data never reach the logs
 
 <h1 style="color: #EB622B;"><strong>🌐 SUPPORTED PLATFORMS</strong></h1>
+Supports direct links to static files from file buckets and all next platforms:
 
 <p align="center" style="text-align: center;">
 <img src="https://raw.githubusercontent.com/SrRapero720/watermedia/master/docs/assets/youtube2.png" width="48" height="48" alt="YouTube" title="YouTube">
@@ -78,12 +79,6 @@ any Java app can embed the API.
 <img src="https://raw.githubusercontent.com/SrRapero720/watermedia/master/docs/assets/mediafire.png" width="48" height="48" alt="MediaFire" title="MediaFire">
 <img src="https://raw.githubusercontent.com/SrRapero720/watermedia/master/docs/assets/porkhub.png" width="48" height="48" alt="PornHub" title="PornHub">
 </p>
-
-- Direct links to any video, music, picture or playlist, local files and `water://` resources play too
-- YouTube, SoundCloud, Facebook and Instagram play through _yt-dlp_, which requires _WATERMeDIA: Binaries_
-- BiliBili plays up to 1080p (8K with VIP) when you add your session cookie in the settings; without it, up to 480p
-- Newgrounds plays movies, music and art
-- PornHub plays only with mature content allowed in the settings
 
 <h1 style="color: #EB622B;"><strong>🧩 MODS USING WATERMeDIA</strong></h1>
 
@@ -119,10 +114,11 @@ this repository under [`binaries/`](https://github.com/SrRapero720/watermedia/tr
 
 <p align="center" style="text-align: center;">
 <img src="https://raw.githubusercontent.com/SrRapero720/watermedia/master/docs/assets/windows64.png" width="64" height="64" alt="Windows x64" title="Windows x64">
-<img src="https://raw.githubusercontent.com/SrRapero720/watermedia/master/docs/assets/linux64.png" width="64" height="64" alt="Linux x64" title="Linux x64">
 <img src="https://raw.githubusercontent.com/SrRapero720/watermedia/master/docs/assets/mac64.png" width="64" height="64" alt="macOS Intel" title="macOS Intel">
 <img src="https://raw.githubusercontent.com/SrRapero720/watermedia/master/docs/assets/macarm.png" width="64" height="64" alt="macOS Apple Silicon" title="macOS Apple Silicon">
+<img src="https://raw.githubusercontent.com/SrRapero720/watermedia/master/docs/assets/linux64.png" width="64" height="64" alt="Linux x64" title="Linux x64">
 </p>
+
 
 Linux runs on ARM64 too. Windows on ARM and Android aren't supported.
 
