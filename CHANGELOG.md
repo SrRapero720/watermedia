@@ -24,6 +24,7 @@
 - 🐛 Fixed uploads showing a confusing error when the file server is off, unreachable or doesn't answer
 - 🐛 Fixed **Upload Logs** missing the app's own log
 - 🐛 Fixed **Cleanup cache** starting twice when its window was closed and reopened mid-clean
+- 🐛 Fixed SVG images with deep nesting failing to load on Java 25
 
 # 📦 UPDATE 3.0.1 (after-release hotfix)
 - 🛠️ Update developers documentation
