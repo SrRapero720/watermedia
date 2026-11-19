@@ -551,8 +551,9 @@ requested, and SVG yields RGBA when RGBA is requested (everything else is conver
   segmentation, `VP8BoolDecoder` with `MAX_PAD_BYTES=16` EOF latch, token partitions, intra prediction, IDCT/WHT, loop
   filter, `DataTool.yuvToBgra`; `codecs.vp8.brokenTokens` tolerates bad partition sizes); `AlphaDecoder.decode/applyAlpha`
   (raw or VP8L-compressed alpha, filters none/horizontal/vertical/gradient).
-- `svg/SvgReader`: StAX parse (`SvgParser`: external entities disabled, empty resolver for DTDs, JDK entity limits,
-  `MAX_ELEMENTS=100_000`, `MAX_ATTR_CHARS=1_000_000`, `MAX_DOC_CHARS=16_000_000`), `SvgDocument` (viewBox, intrinsic size,
+- `svg/SvgReader`: StAX parse (`SvgParser`: external entities disabled, empty resolver for DTDs, every JDK entity,
+  depth and attribute limit pinned because Java 24 changed the defaults (`maxElementDepth=0` leaves nesting to
+  `MAX_DEPTH`), `MAX_ELEMENTS=100_000`, `MAX_ATTR_CHARS=1_000_000`, `MAX_DOC_CHARS=16_000_000`), `SvgDocument` (viewBox, intrinsic size,
   `preserveAspectRatio` meet vs none, linear gradients with href chains `MAX_CHAIN=16`, `MAX_STOPS=256`, radial gradient
   → average solid colour, `MAX_DEPTH=512`), shapes `rect`/`circle`/`ellipse`/`line`/`polygon`/`polyline`/`path`
   (`PathParser` full `d` grammar, arcs → cubics), `RenderState` inheritance (fill, stroke, opacity, fill-rule,

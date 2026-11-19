@@ -50,6 +50,11 @@ final class SvgParser {
         setProperty(f, "jdk.xml.entityReplacementLimit", 100_000);
         setProperty(f, "jdk.xml.totalEntitySizeLimit", 1_000_000);
         setProperty(f, "jdk.xml.maxGeneralEntitySizeLimit", 100_000);
+        setProperty(f, "jdk.xml.maxParameterEntitySizeLimit", 100_000);
+        // JAVA 24 LOWERED THESE TWO FROM UNLIMITED AND 10 000 TO 100 AND 200: NESTING IS GATED BY SvgDocument AND
+        // ATTRIBUTE DATA BY THE BUDGETS ABOVE, SO A DOCUMENT DECODES THE SAME ON EVERY RELEASE
+        setProperty(f, "jdk.xml.maxElementDepth", 0);
+        setProperty(f, "jdk.xml.elementAttributeLimit", 10_000);
         FACTORY = f;
     }
 
