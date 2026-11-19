@@ -1,3 +1,30 @@
+# 📦 UPDATE 3.0.2 (bugs everywhere)
+- ⚙️ NEW: Every exception and error log message starts with its own code, like `(wm_err:0720)`
+  - The codes are the `WaterMedia.ERR_*` constants, one per place that can fail
+- ⚙️ NEW: `NetworkAPI.serverEnabled()` tells whether the file server is up: right away on the host that runs it, elsewhere once `remoteUrl` answers
+- ⚙️ NEW: A link refused by the site lists leaves its MRL `BLOCKED`, with a `WhitelistException` or a `BlacklistException`
+- ✨ Site whitelist and blacklist: choose which sites can play under `[player.whitelist]` and `[player.blacklist]` in `config/watermedia.toml`
+  - `trustLocal` keeps your own files, your file server and your local network playing
+  - `water://global` links always play
+- ✨ Supports Minecraft 26.3 on Forge, NeoForge and Fabric
+- ✨ **Upload Logs** in the app asks for a title and a description, then opens the issue page already filled in
+- ✨ **Upload Logs** also sends your WATERMeDIA config files, with tokens and cookies hidden
+- ✨ **Upload Logs** lists the error codes found in your files, so a report points at what failed
+- 🛠️ The file server checks its port when it starts and stays off when the port is busy, closed or `remoteUrl` doesn't lead back to it
+- 🛠️ **Upload Logs** hides your user name in folder paths before anything is uploaded
+- 🛠️ The app uses a bolder font and shorter texts
+- 🛠️ Reports list the suspected mods and the installed extensions, and keep the long _FFmpeg_ codec list collapsed
+- 🛠️ `water://local` links no longer open Windows network shares
+- 🛠️ Now requires _WATERMeDIA: Binaries_ 3.0.1 or newer
+- 🐛 Fixed long YouTube videos freezing on their first frames while the audio kept playing
+- 🐛 Fixed videos freezing or losing a few seconds of picture when resumed after a long pause
+  - Streams paused for 10 seconds or more buffer for a moment when they resume
+- 🐛 Fixed YouTube links failing with "Sign in to confirm you're not a bot" on some networks due to IPv6 restrictions
+- 🐛 Fixed RTMP streams never starting
+- 🐛 Fixed uploads showing a confusing error when the file server is off, unreachable or doesn't answer
+- 🐛 Fixed **Upload Logs** missing the app's own log
+- 🐛 Fixed **Cleanup cache** starting twice when its window was closed and reopened mid-clean
+
 # 📦 UPDATE 3.0.1 (after-release hotfix)
 - 🛠️ Update developers documentation
 - 🛠️ Reworked bootstrap internals.
