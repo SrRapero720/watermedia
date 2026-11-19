@@ -103,24 +103,23 @@ Supports direct links to static files from file buckets and all next platforms:
 <h1 style="color: #EB622B;"><strong>📦 WATERMeDIA: BINARIES</strong></h1>
 
 _FFmpeg_ natives and a few extra shared libraries ship in the companion mod
-[_WATERMeDIA: Binaries_](https://www.curseforge.com/minecraft/mc-mods/watermedia-binaries). Its sources live in
-this repository under [`binaries/`](https://github.com/SrRapero720/watermedia/tree/master/binaries).
+[_WATERMeDIA: Binaries_](https://www.curseforge.com/minecraft/mc-mods/watermedia-binaries). Its sources live in [Github](https://github.com/SrRapero720/watermedia-binaries).
 
-- Minecraft clients require Binaries, and both mods must be on 3.0
-- Dedicated servers can skip it. CurseForge and Modrinth list it as required because their dependencies can't
-  express client/server conditions, so installers may add it to servers too
-- Apps embedding the Java API can run without it, keeping picture support but losing video decoding and the
-  platforms backed by _yt-dlp_
+- Minecraft requires it for a better experience on client-side, server-side is optional
+- Standalone apps is up to the developer
 
+<h2 align="center" style="color: #EB622B; text-align: center;"><strong>⚡ SUPPORTED OS</strong></h2>
 <p align="center" style="text-align: center;">
+<br>
 <img src="https://raw.githubusercontent.com/SrRapero720/watermedia/master/docs/assets/windows64.png" width="64" height="64" alt="Windows x64" title="Windows x64">
 <img src="https://raw.githubusercontent.com/SrRapero720/watermedia/master/docs/assets/mac64.png" width="64" height="64" alt="macOS Intel" title="macOS Intel">
 <img src="https://raw.githubusercontent.com/SrRapero720/watermedia/master/docs/assets/macarm.png" width="64" height="64" alt="macOS Apple Silicon" title="macOS Apple Silicon">
 <img src="https://raw.githubusercontent.com/SrRapero720/watermedia/master/docs/assets/linux64.png" width="64" height="64" alt="Linux x64" title="Linux x64">
+<img src="https://raw.githubusercontent.com/SrRapero720/watermedia/master/docs/assets/linuxarm.png" width="64" height="64" alt="Linux ARM" title="Linux ARM">
+<br>
+Windows ARM and Android aren't supported.
 </p>
 
-
-Linux runs on ARM64 too. Windows on ARM and Android aren't supported.
 
 <h1 style="color: #EB622B;"><strong>🎮 CREATE YOUR SERVER AT LOW PRICES</strong></h1>
 
