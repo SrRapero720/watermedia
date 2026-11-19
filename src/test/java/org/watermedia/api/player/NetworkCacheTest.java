@@ -214,7 +214,7 @@ public class NetworkCacheTest {
         }
 
         @Test
-        @DisplayName("A body shorter than its Content-Length fails with the truncation error instead of being cached")
+        @DisplayName("A body shorter than its Content-Length fails instead of being cached")
         void truncatedBodyIsRefused(@TempDir final Path cache) throws Exception {
             try (final LocalHttp server = LocalHttp.start("/cut.png", exchange -> {
                 exchange.getResponseHeaders().set("Content-Type", "image/png");
@@ -229,8 +229,11 @@ public class NetworkCacheTest {
                 final URI uri = server.uri("/cut.png");
                 final IOException failure = assertThrows(IOException.class, () -> NetworkCache.read(uri, null, ACCEPT_IMAGE, READ_LIMIT_BYTES, true),
                         "a short body is a failure");
-                // THE DROPPED CONNECTION READS AS A CLEAN END OF THE BODY, SO ONLY THE CACHE'S OWN LENGTH CHECK CATCHES IT
-                assertEquals("(wm_err:1175) Failed to download the media due to truncated body: 10 of 100 bytes, " + uri, failure.getMessage());
+                // JAVA 17 AND 21 READ THE DROPPED CONNECTION AS A CLEAN END, SO THE CACHE'S OWN LENGTH CHECK REPORTS IT; NEWER
+                // RELEASES FAIL THE READ THEMSELVES, AND THE CACHE NEVER REPORTS A SHORT BODY UNDER ANOTHER CODE
+                final String message = failure.getMessage();
+                assertTrue(!message.startsWith("(wm_err:")
+                        || message.equals("(wm_err:1175) Failed to download the media due to truncated body: 10 of 100 bytes, " + uri), message);
                 try (final var stream = Files.list(cache)) {
                     assertFalse(stream.anyMatch(path -> path.getFileName().toString().endsWith(".tmp")), "nothing was cached");
                 }

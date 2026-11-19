@@ -342,7 +342,7 @@ public class AppBootstrapDependenciesTest {
         }
 
         @Test
-        @DisplayName("Incomplete downloads fail on their length, keep the cache and remove partial files")
+        @DisplayName("Incomplete downloads fail, keep the cache and remove partial files")
         void incompleteDownloadsKeepTheCache(@TempDir final Path directory) throws Exception {
             final Path destination = Files.writeString(directory.resolve("library.jar"), "previous");
             // 3 BYTES OF THE 100 THE HEADERS ANNOUNCE, THEN THE CONNECTION CLOSES
@@ -350,13 +350,19 @@ public class AppBootstrapDependenciesTest {
                 try {
                     exchange.sendResponseHeaders(200, 100);
                     exchange.getResponseBody().write(new byte[] { 1, 2, 3 });
+                    // WITHOUT THE FLUSH JAVA 25 DROPS THE CONNECTION BEFORE THE HEADERS LEAVE
+                    exchange.getResponseBody().flush();
                 } finally {
                     exchange.close();
                 }
             })) {
                 final var failure = assertThrows(InvocationTargetException.class, () -> download(server.uri("/library.jar"), destination, PAYLOAD_PIN));
                 assertInstanceOf(IOException.class, failure.getCause());
-                assertEquals("(wm_err:8008) Failed to download library.jar due to incomplete data: 3 of 100 bytes", failure.getCause().getMessage());
+                // JAVA 17 AND 21 READ THE CLOSED CONNECTION AS A CLEAN END, SO THE LAUNCHER'S OWN LENGTH CHECK REPORTS IT; NEWER
+                // RELEASES FAIL THE READ THEMSELVES, AND THE LAUNCHER NEVER REPORTS A SHORT BODY UNDER ANOTHER CODE
+                final String message = failure.getCause().getMessage();
+                assertTrue(!message.startsWith("(wm_err:")
+                        || message.equals("(wm_err:8008) Failed to download library.jar due to incomplete data: 3 of 100 bytes"), message);
             }
             assertEquals("previous", Files.readString(destination));
             try (final var files = Files.list(directory)) { assertEquals(List.of(destination), files.toList()); }
