@@ -400,7 +400,7 @@ public abstract sealed class MediaPlayer permits ServerMediaPlayer, FFMediaPlaye
      */
     public long texture() { return this.gfx == null ? NO_TEXTURE : this.gfx.texture(); }
 
-    /** Returns the audio source handle of the {@link SFXEngine} (an OpenAL source id, 0 on Java Sound), or {@link #NO_SOURCE} without audio. */
+    /** Returns the audio source handle of the {@link SFXEngine} (an OpenAL source id, 0 on Java Sound), or {@link #NO_SOURCE} without audio; it stays listener-relative and unattenuated unless {@link #spatialAudio(SFXEngine.SpatialAudio)} positions it. */
     public int audioSource() { return this.sfx != null ? this.sfx.source() : NO_SOURCE; }
 
     /** Whether the audio engine plays through positional mono sinks, see {@link #sinks()}. */
