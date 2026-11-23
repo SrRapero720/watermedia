@@ -38,7 +38,11 @@ public enum Container {
     /** WebM, the Matroska profile for the web. */
     WEBM(EnumSet.of(VideoCodec.VP8, VideoCodec.VP9, VideoCodec.AV1), EnumSet.of(AudioCodec.OPUS)),
     /** Ogg, audio only. */
-    OGG(EnumSet.noneOf(VideoCodec.class), EnumSet.of(AudioCodec.OPUS, AudioCodec.FLAC));
+    OGG(EnumSet.noneOf(VideoCodec.class), EnumSet.of(AudioCodec.OPUS, AudioCodec.FLAC)),
+    /** MP3, audio only. */
+    MP3(EnumSet.noneOf(VideoCodec.class), EnumSet.of(AudioCodec.MP3)),
+    /** M4A, the audio-only MP4. */
+    M4A(EnumSet.noneOf(VideoCodec.class), EnumSet.of(AudioCodec.AAC));
 
     private final Set<VideoCodec> video;
     private final Set<AudioCodec> audio;

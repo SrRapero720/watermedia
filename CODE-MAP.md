@@ -10,7 +10,9 @@ Mapped on 2026-10-30 against version `3.0.0` (`RELEASE`); counts (files, latches
 Homologation wave of 2026-11-01 (dividers, member order, nested single-owner types, no dashes), the app upload-logs
 revamp of 2026-11-16 (issue title and description, `TextArea`, clipboard helpers, config copies) and the error codes
 and file server port check wave of 2026-11-16 (`wm_err` registry, startup check of a fixed `serverPort`) and the site
-lists wave of 2026-11-17 (`player.whitelist`, `player.blacklist`, `WhitelistException`, `BlacklistException`) folded in.
+lists wave of 2026-11-17 (`player.whitelist`, `player.blacklist`, `WhitelistException`, `BlacklistException`) and the
+download wave of 2026-11-22 (`FFTranscoder`, `MediaDownloader`, `DownloadDialog`, `ChoiceGrid`, `Container.MP3`/`M4A`)
+folded in.
 Symbol names are exact; line numbers are omitted on purpose.
 Legend: ⚠ gotcha or hard rule, ↪ reuse pointer ("to do X use Y").
 
@@ -37,6 +39,7 @@ Where to look (task → section → entry point):
 | Threads, digests, bounded reads, shader includes | §11 | `ThreadTool.workerFactory`, `IOTool.sha256` / `readLimited` / `shader` |
 | Change the desktop app | §12 | `BaseScreen` subclasses, `Element` widgets, draw through `Canvas` only |
 | Build, natives, CI, release | §4 | `build.gradle`, `gradle/common.gradle`, `binaries/tools` |
+| Copy or re-encode a media into a file | §6.5, §12.1 | `FFTranscoder.probe` + `new FFTranscoder(Job, listener).run()`; the app's `MediaDownloader` |
 | Write or find a test | §16 | mirrored package + `test/support` helpers |
 | Check what is disabled or missing | §19 | gaps list, `TODO.md`, `PENDING.md` |
 
@@ -208,7 +211,7 @@ Package map (`src/main/java/org/watermedia`):
   `ColorType`, `Zlib`; `gif/*` 4 block records + `IChunk`);
   `readers/` (`PngReader`, `GifReader`, `JpegReader`, `WebPReader`, `NetpbmReader`, `svg/*`, `webp/*`);
   `decoders/` (`FFDecoder`, `FrameQueue`, `PacketQueue`, `Placebo`); `encoders/` (`AnimationEncoder`, `PngEncoder`,
-  `GifEncoder`, `FFEncoder`).
+  `GifEncoder`, `FFEncoder`, `FFTranscoder`).
 - `api/player`: `PlayerAPI`, `MediaPlayer`, `FFMediaPlayer`, `TxMediaPlayer`, `ServerMediaPlayer`, `MRL`,
   `MasterClock`, `NetworkCache`, `GFXEngine`, `GLEngine`, `VKEngine`, `VKContext`, `HeadlessGFXEngine`, `SWEngine`,
   `AWTEngine`, `JFXEngine`, `SFXEngine`, `ALEngine`, `JSEngine`, `Colorimetry`, `WhitelistException`,
@@ -488,7 +491,7 @@ status queries `ffmpegLoaded`, `ffmpegError` and `vulkanDecode` stay supported. 
   sample frames), `close()` (→ `finish()`, throws if nothing encoded). Hooks `frame`, `samples`, `finish`.
 - `Container` enum: `PNG{PNG}`, `GIF{GIF}`, decode-only `WEBP`, `JPEG`, `NETPBM`, `SVG`, `MP4{H264,HEVC,AV1,VP9 /
   AAC,OPUS,MP3,FLAC}`, `MOV{H264,HEVC,PRORES / AAC,PCM}`, `MKV{H264,HEVC,AV1,VP8,VP9,PRORES / AAC,OPUS,MP3,FLAC,PCM}`,
-  `WEBM{VP8,VP9,AV1 / OPUS}`, `OGG{- / OPUS,FLAC}`.
+  `WEBM{VP8,VP9,AV1 / OPUS}`, `OGG{- / OPUS,FLAC}`, `MP3{- / MP3}`, `M4A{- / AAC}`.
   `VideoCodec {PNG, GIF, H264, HEVC, AV1, VP8, VP9, PRORES}`, `AudioCodec {PCM, OPUS, AAC, MP3, FLAC}`.
 - `ReaderFilter.compute(Frame)` (`Frame(buffer, width, height, format)`): never rewrite `src`; return `src` or a fresh
   buffer. `DownscaleFilter(scale | w,h | w,h,scale)`: area average via `DataTool.scaleArea`, never enlarges, no-op for
@@ -601,10 +604,11 @@ requested, and SVG yields RGBA when RGBA is requested (everything else is conver
     `AVDISCARD_ALL` (`discard`), so an HLS master stops fetching the other renditions.
   - Threads (`ThreadTool.workerFactory("FFThread")`, named `<group>-demux|video|audio`); `decodeLock` guards decode
     thread creation/teardown. Queues: `PacketQueue` video 16 MiB / audio 8 MiB, `FrameQueue` video 3 / audio 9 slots.
-    One static `INTERRUPT` callback (JavaCPP caps live callback instances at 10).
+    One public static `INTERRUPT` callback (JavaCPP caps live callback instances at 10), which `FFTranscoder` shares.
   - Separate audio `Track` → second format context (`codecs.ffmpeg.trackPacketReads` per iteration; falls back to the
     main audio stream).
-  - Input options (`applyInputOptions(options, input)`, shared by the main input and the separate audio track):
+  - Input options (public static `inputOptions(options, input, headers)`, shared by the main input, the separate audio
+    track and the inputs of `FFTranscoder`):
     `FFTool.configureTLS`, `analyzeduration`/`probesize` from config, `buffer_size`, `rtbufsize`, `http_persistent=1`,
     `multiple_requests=0`, `reconnect`/`reconnect_streamed`/`reconnect_delay_max=5`, `rtsp_transport=tcp`, `max_delay`;
     `headers` (`HttpHeaders.toRawString`) only when the source has any (an empty value makes FFmpeg end the request
@@ -641,7 +645,8 @@ requested, and SVG yields RGBA when RGBA is requested (everything else is conver
   - Codec selection: fps from `avg_frame_rate` (plausible 1..1000) else `r_frame_rate`; hardware order: Vulkan on the
     engine's device/twin (only when `Device.filters()` or the format is YUV420P/YUVJ420P/YUV420P10LE), then CUDA, QSV,
     AMF, OHCODEC, D3D11VA, D3D12VA, VIDEOTOOLBOX, VAAPI, VDPAU, DRM, MEDIACODEC, VULKAN (own device, downloads), then
-    software (`libdav1d` > `libaom-av1` for AV1; threads 2/4/6/MAX by pixel count capped by `MAX_DECODE_THREADS`).
+    software (public static `softwareVideoDecoder(codecId, fallback)`: `libdav1d` > `libaom-av1` for AV1; threads
+    2/4/6/MAX by pixel count capped by `MAX_DECODE_THREADS`).
   - Public: `start`, `abort`, `stop`, `close`, `owns(Thread)`, `videoFrames()`, `audioFrames()`, `video()`, `audio()`,
     `decoding()`, `demuxDied()`, `buffered()`, `hardware()`, `vulkan()`, `filters()`, `videoContext()`, `uri()`,
     `fps()`, `hls()`.
@@ -664,12 +669,55 @@ requested, and SVG yields RGBA when RGBA is requested (everything else is conver
   5-bit histogram, Floyd-Steinberg dithering when `quality >= 50`), changed-region frames with KEEP/CLEAR disposal,
   LZW (`compress(1)`-style hash, 12-bit max), NETSCAPE loop when animated and `repeat != 1` (`repeat ≤ 65_536`),
   `MIN_DELAY_CS=2`.
-- `FFEncoder(Container, Path file, OutputStream out, Video, Audio)`: MP4/MOV/MKV/WEBM/OGG; writes `<file>.part` (or a
-  temp file for streams) and moves on `finish()`; `+faststart` for MP4/MOV; video encoders by preference H264
+- `FFEncoder(Container, Path file, OutputStream out, Video, Audio)`: MP4/MOV/MKV/WEBM/OGG/MP3/M4A; writes `<file>.part`
+  (or a temp file for streams) and moves on `finish()`; `+faststart` for MP4/MOV/M4A; video encoders by preference H264
   `libx264`→`libopenh264`, HEVC `libx265`→`libkvazaar`, AV1 `libsvtav1`→`libaom-av1`, VP8 `libvpx`, VP9 `libvpx-vp9`,
   PRORES `prores_ks`; `quality` 0..100 mapped to each encoder's CRF/QP/preset; pixel conversion with `sws_scale` tagged
   BT.709 limited; time base 1/90_000, GOP 2 s; audio `pcm_s16le`, `libopus`, `aac`, `libmp3lame`, `flac` with
-  `swresample` + `AVAudioFifo` chunking. Requires `CodecsAPI.ffmpegLoaded()`.
+  `swresample` + `AVAudioFifo` chunking. Requires `CodecsAPI.ffmpegLoaded()`. ↪ Package-private statics shared with
+  `FFTranscoder`: `muxer(Container)` (FFmpeg muxer name, null for house-made containers; M4A is `ipod`),
+  `faststart(Container)`, `software(VideoCodec|AudioCodec)` (encoder names by preference), `encoder(codec, names)`,
+  `rate(rates, wanted)` and `supported(context, codec, config)`.
+- `FFTranscoder(Job, Runnable progressed)` (2026-11-22, internal, used by the app's `MediaDownloader`): one media into
+  one file, each track copied as it comes or decoded and encoded again at a target bitrate. One instance runs one job
+  on the calling thread.
+  - Records `Job(input, track, headers, container, file, video, audio, title, author)` (`track` = separate audio input;
+    an audio job with a track never opens `input`), `Video(codec, bitrate, fps, effort, hardware)` and
+    `Audio(codec, bitrate)` (null codec = copy), `enum Effort {FAST, BALANCED, BEST}`, and the probe results
+    `Info(durationMs, video, audio)`, `VideoInfo(codec, name, width, height, fps, bitrate)`,
+    `AudioInfo(codec, name, sampleRate, channels, bitrate)` (null codec = one no `Container` encodes).
+  - The constructor only checks the job against its container (IAE) and `ffmpegLoaded()` (IOException).
+  - `static probe(URI, HttpHeaders)`: length (0 = unknown or live), picked streams and bitrates. A bitrate comes from
+    the stream, else from what the file size leaves (never for `hls`/`dash`, whose size is the playlist's), else it is
+    measured: `measure` reads `MEASURE_WINDOWS=3` windows of `MEASURE_WINDOW_US=4 s` at even steps of the media (one
+    window when it is short or cannot seek). ⚠ A measure reads some seconds of media over the network.
+  - `run()` → true when written, false after `cancel()`: `openInputs` (same `FFDecoder.inputOptions` and `INTERRUPT`
+    as the players, unused streams `AVDISCARD_ALL`), `openOutput` (`<file>.part`, tags `title`/`artist`, `hvc1` tag for
+    HEVC in MP4/MOV), `pump` (reads the input that is behind in time, so two inputs interleave), flush, trailer, move.
+    ⚠ A read error other than EOF fails the run instead of ending it, so a cut connection never leaves a short file
+    that looks whole (only an HLS segment the demuxer gives up on passes without an error and leaves a hole in both
+    tracks); a packet a decoder refuses is skipped (warned once per track).
+  - Timestamps: `pump` rewrites every packet to count from the start of its input before any decoder or the muxer
+    sees it. On a format flagged `AVFMT_TS_DISCONT` (HLS, MPEG-TS) a packet that lands over `JUMP_BACK_US` (1 s) before
+    or `JUMP_AHEAD_US` (10 s) after where its track should go on continues that track instead, as the `ffmpeg` tool
+    does, so a clock that restarts mid-way never freezes the picture.
+  - Stream picks (`stream`): the largest video that is no attached picture (cover art), the default audio else the first.
+  - Video encode: software decoder (`FFDecoder.softwareVideoDecoder`), candidates = GPU encoders that take system
+    memory frames when `hardware` (`<codec>_nvenc`, `_qsv`, `_amf`, `_videotoolbox`, `_mf`), then
+    `FFEncoder.software`; the first that opens wins (`encoder()` names it). Pixel format 4:2:0 10-bit for a deep
+    source (never H264/VP8), else 8-bit, else NV12; source size (odd sides grow by a pixel), source colour tags (RGB
+    turns into BT.709 limited), clock 1/90_000, GOP 2 s, `tune` (bitrate + 1.5x peak + 2x buffer, effort mapped to each
+    encoder's preset; ⚠ no peak for `libsvtav1`, which refuses to open with one next to a bitrate), frame rate limit
+    by output slots (first frame of each slot stays). The display matrix (rotation) and the HDR mastering and light
+    level side data of the input stream are copied onto the output stream, which an encode would otherwise drop.
+  - Audio encode: resampler built from the first decoded frame (rebuilt on a mid-stream change), FIFO chunks, pts by
+    sample count from where the first frame starts; a frame that comes more than two encoder frames later than that
+    count gets the hole written as silence first, so the sound after it stays in sync; channel layout = the codec's
+    own of the source's count, else its widest below it (a downmix).
+  - `cancel()` sets a flag and raises the abort pointer the interrupt callback polls (checked again before the
+    trailer and before the final move, so a late cancel still writes nothing); `free()` deletes the `.part`.
+    `progress()` (0..1, volatile, 0 for an unknown length) and the listener (at most every `PROGRESS_STEP_NS` 200 ms,
+    on the run's thread).
 
 ## 7. Player API (`api/player`)
 
@@ -1195,7 +1243,7 @@ requested, and SVG yields RGBA when RGBA is requested (everything else is conver
   `System.exit(0)`. Hot swap GL↔VK (`requestEngineSwap` → `performEngineSwap` at the top of the loop) releases every
   player, disposes text/assets, destroys the window and rebuilds everything on the new backend.
 - `AppContext`: window/input state (logical `mouseX/Y` = physical / `uiScale`), services (`catalog`, `media`, `sound`,
-  `assets`, `upload`, `cleanup`), `execute(Runnable)` (render-thread queue + wake), `requestRender()`,
+  `assets`, `upload`, `cleanup`, `download`), `execute(Runnable)` (render-thread queue + wake), `requestRender()`,
   `releaseAsync(name, runnable)` + `awaitPlayerRelease()` (blocking teardown off the render thread), `showError(...)`,
   static `clipboard()` (the text, or "" when empty, busy or headless) and `clipboard(String)` (true once copied).
   ↪ They are the app's only clipboard door (pastes in `OpenMultimediaScreen` and `TextArea`; copies in
@@ -1213,6 +1261,41 @@ requested, and SVG yields RGBA when RGBA is requested (everything else is conver
   `HomeScreen.onUpdate` binds every frame; `step()` (from `WaterMediaApp.navigateAction`) runs the next stage on a
   `ThreadTool.thread` worker that ends with the repaint callback. ⚠ `step()` checks `working` before `visible`, so a
   dialog reopened mid-stage shows that stage instead of resetting it under a second worker.
+- `MediaDownloader` (`ctx.download`, 2026-11-22): the download dialog's picks, probes and transcode; the element tree
+  is `DownloadDialog` (§12.4). Picks and probe results belong to the render thread: workers (`MediaDownloader-Probe`,
+  `-Transcode`, `-Reveal`) hand results back through the `Executor` it was built with (`AppContext.execute`).
+  - `open(source, title, page, preferred)` resets the picks to the `SOURCE` preset (a running download just shows
+    again); `title` is the source's own or null, and the file is then named after the last part of `page`.
+  - Runtime retention (owner, 2026-11-22): `start()` keeps its picks in the private `last`, a `Picks(container,
+    quality, video, audio, fps, effort, hardware, videoRate, audioRate, preset)` record, and every later `open()`
+    restores them (the quality as the closest one the new source has, ahead of `preferred`) before `normalize` fits
+    them to that source. It lives only while the app runs, and picks that started no download are never kept.
+  - Public picks the dialog writes: `container`, `quality`, `video`/`audio` (null = copy), `fps` (0 = source),
+    `videoRate`/`audioRate` (slider 0..1), then `changed()` (leaves the preset, runs the rules); `effort` and
+    `hardware` need no `changed()`. `preset(Preset)` keeps the preset on, so a probe that lands later completes it.
+  - Rules (`normalize`): `SOURCE` copies both tracks into WEBM when both codecs were born in it, else MP4, else MKV
+    (an audio-only source gets the audio container of its codec); `COMPATIBILITY` is MP4 + H264/AAC (a track already
+    in them is copied) at the best resolution up to 1080p; `AUDIO` is the audio container of the source's codec. A
+    codec the container refuses moves to the copy when it fits (`allowed(null)`; MKV takes anything), else to
+    `VIDEO_FALLBACK` (H264, VP9, HEVC, AV1) or the first of `AUDIO_CODECS`; an fps at or above the source's becomes 0.
+    A source read whole that has no sound never stays on an audio container (it goes back to the one of its video)
+    and turns the `AUDIO` preset into `SOURCE`.
+  - Probes: one `FFTranscoder.probe` per picked resolution URI and one for the first `audioTracks()` entry, cached
+    per URI (`info()`, `picture()`, `sound()`, `probing()`, `failure()`). `open()` keeps the cache for an equal
+    source and only drops the failures, so a dialog opened again reads nothing twice. ⚠ A running probe cannot be
+    cancelled: it ends by itself and its result is dropped when the source changed.
+  - Bitrates: `videoMax()`/`audioMax()` are the source's (guessed when unknown: 0.07 bits per pixel, 64 kbps per
+    channel; lossy audio capped at 320 kbps); `videoBitrate()`/`audioBitrate()` map the slider between a floor and
+    that maximum, never above it; `estimate()` = bitrates over `durationMs()`.
+  - `start()` only when `ready()` (probes landed, no failure, a known length, a track to write): the file goes to
+    `<user.home>/Downloads`, else `<cwd>/downloads`, named `fileName(name)` (no separators, refused characters, lone
+    surrogates, trailing dots or Windows device names; 120 chars) plus ` (n)` while taken. The worker reserves that
+    name with an empty file (`Files.createFile`) which the finished download replaces, so a file saved under it
+    meanwhile is never overwritten; a download that wrote nothing deletes it. `cancel()` stops a running download or
+    hides the dialog; `back()` returns to the options; `reveal()` opens the folder; `shutdown()` (from
+    `WaterMediaApp.cleanup`) cancels and waits up to 3 s so the `.part` is deleted before exit.
+  - ⚠ Pictures are never offered (`MediaType.IMAGE`), a live media (length 0) never becomes `ready()`, and only the
+    first audio track (the original language) is downloaded.
 - `LogUploader` (dialog stages SCAN/UPLOAD/ISSUE = `stage` 1..3; workers `LogUploader-Scan`, `-Upload`, `-Report`,
   `-Submit`):
   - Gate: `AVAILABLE = WORKDIR_IS_MODS || DEV` opens the dialog (else the home tile reads `LOCKED`); `DEV` is a run
@@ -1288,7 +1371,8 @@ requested, and SVG yields RGBA when RGBA is requested (everything else is conver
   answers `textInputActive()`, through hidden children too: a pane that hides blurs its inputs (`clearFocus()`, as
   `HomeScreen.ReportPane` does on its visibility edges).
 - Containers: `Group<T>` (children, reverse-order dispatch), `Parent.column()/row()` (weights, `spacing`),
-  `ParentFrame` (overlay by gravity), `ParentScroll` (+ package-private `ScrollState` momentum), `Box`.
+  `ParentFrame` (overlay by gravity), `ParentScroll` (+ package-private `ScrollState` momentum; clicks, hovers and
+  presses route only inside its viewport, so a scrolled-out slider never captures the pointer), `Box`.
 - `Canvas` (the only draw surface): alpha/clip stacks, `fill`, `fillRound`, `stroke`, `glow`, `shadow`, gradients,
   `line`, `cube`, `image(textureId, ...)`, `mediaImage(long handle, ...)` (player frames), `icon(name, ...)`
   (`PixelIcon` masks), single-line `text*` through `TextRenderer` (AWT glyph atlas; JetBrains Mono SemiBold as plain
@@ -1296,7 +1380,9 @@ requested, and SVG yields RGBA when RGBA is requested (everything else is conver
   pairs cannot show; no SDF/wrapping), `live(Consumer)` + `raise()` for painters over a cached tree.
 - Widgets: `Text`, `Button` (+ static `render`/`width` for hand layout), `IconButton`, `Icon`, `Image`, `Badge`,
   `KeyChip`, `StatusSquare`/`StatusText`, `SectionHead`, `ProgressBar`, `SeekBar`, `Switch`, `CheckBox`,
-  `SegmentedControl`, `Stepper`, `TextField` (single line, append-at-end editing only; it binds no CTRL+V:
+  `SegmentedControl`, `Stepper`, `ChoiceGrid` (rows of `columns` choice buttons drawn by hand through `Button.box`:
+  `cells(labels)`, `locked(index, value)` (dim, swallows its click), `picked(index)` bound by the owner, `onPick`; it
+  never picks by itself), `TextField` (single line, append-at-end editing only; it binds no CTRL+V:
   `OpenMultimediaScreen` binds CTRL+V and a PASTE button that replace its value), `TextArea` (multi-line: soft wrap,
   caret by click, arrows, HOME/END and CTRL word moves, ENTER breaks the line, own CTRL+V through `insert`, scrolls to
   the caret; CTRL+ENTER (decided on the press), TAB and ESC reach the screen; `singleLine(true)` keeps one paragraph,
@@ -1329,15 +1415,31 @@ requested, and SVG yields RGBA when RGBA is requested (everything else is conver
 - `HomeScreen` (`enum Action {OPEN_MULTIMEDIA, UPLOAD_LOGS, CLEANUP, SETTINGS, REGION_SELECTOR, MRL_SELECTOR, PLAYER,
   EXIT, BACK}` is the navigation vocabulary; catalog tiles create every group MRL with `PlayerAPI.mrl`; dialogs below),
   `OpenMultimediaScreen` (URL/path vs search by `loadable(text)`; metadata preview MRL; `PlatformAPI.search`
-  dropdown with thumbnail players; 30 s load wait), `MRLSelectorScreen` (group list with status, filter, thumbnail
+  dropdown with thumbnail players; 30 s load wait; DOWNLOAD button and `D` while the field is blurred, enabled once
+  the previewed MRL resolved to a source that is no picture, `downloadable()`), `MRLSelectorScreen` (group list with status, filter, thumbnail
   players for visible rows via `Previews`, reload of regenerable MRLs), `RegionSelectorScreen` (IPTV regions →
   TELEVISION group), `PlayerScreen` (`VideoSurface` + `CrtOverlay` + HUD; `PlayerAPI.player(selectedMRL, index,
-  mediaEngineSupplier(...), PlayerAPI::alEngine)`; keys ESC/ENTER/V/SPACE/arrows/Y/U/S/./,/N/B/L/digits; quality and
-  video dialogs; ⚠ not restored after an engine swap), `SettingsScreen` + `SettingsModel` (edits every WaterConfig spec
+  mediaEngineSupplier(...), PlayerAPI::alEngine)`; keys ESC/ENTER/V/D/SPACE/arrows/Y/U/S/./,/N/B/L/digits; quality and
+  video dialogs; DOWNLOAD button in the top right corner and `D` open the download dialog on the playing source and
+  quality (hidden for pictures); ⚠ not restored after an engine swap), `SettingsScreen` + `SettingsModel` (edits every WaterConfig spec
   reflectively, autosave on `WaterMedia-ConfigSave`, `SaveMachine` states; only the App spec has a live applier),
   `LoadingScreen` (reads `WaterMedia.loading()/step()/steps()`), `TitleBar`, `Header`, `KeybindsBar`, `Background`,
   `CrtOverlay`, `Previews` (MRL status label/colour, `blocked(mrl)` reason text by exception type, thumbnail release
   through `ctx.releaseAsync`).
+- `DownloadDialog` (2026-11-22; a `Group` holding one `Dialog`, mounted by `WaterMediaApp.initShell` on the root
+  overlay under the error and exit dialogs, so every screen shares it): it only binds `ctx.download` in `onUpdate`.
+  Owner layout: one narrow panel (`PANEL_W` 460) of stacked sections inside a `ParentScroll`, each a compact
+  `SectionHead` over a `ChoiceGrid` of three cells per row: Container, Resolution (the source's qualities), Video
+  codec (`SRC` = copy; ⚠ `AV2` is shown locked, `AV2_CELL`, until the natives bring an encoder, see `TODO.md`), Audio
+  codec, Audio bitrate and Video bitrate (`SeekBar`, only for a track encoded again; never above the source's), Frame
+  rate (`SRC`, 60, 50, 30, 25, 24; rates at or above the source's locked), Compression (effort), Encoder
+  (software/hardware), Presets (two per row; the first reads FROM YOUTUBE on a YouTube link, FROM SOURCE elsewhere)
+  and the size line (estimate and length, or why nothing can start: a failed probe, READING SOURCE, LIVE MEDIA HAS NO
+  END, NO TRACK TO DOWNLOAD). Video sections hide for an audio container and lock for a copy; the audio containers
+  and BEST AUDIO lock for a source without sound. While a download runs the content turns into the percent, a `ProgressBar` and the encoder name;
+  then the file name and its folder, or the failure. ESC cancels the download, goes back from a failure or closes;
+  ENTER starts or closes; the left footer button becomes OPEN FOLDER once done. `keybinds(download)` feeds
+  `WaterMediaApp.footerKeybinds`.
 - `HomeScreen` dialogs: the upload and cleanup `Dialog`s stay mounted on the overlay and only follow `ctx.upload`/
   `ctx.cleanup` in `onUpdate`; the primary buttons reach `step()` through `navigator.accept(Action.UPLOAD_LOGS|CLEANUP)`
   (the cleanup CLOSE hides the dialog itself). Upload (`Stepper` SCAN/UPLOAD/ISSUE, one `UPLOAD_PANEL_W` width):
@@ -1459,7 +1561,7 @@ System properties: `watermedia.engine`, `watermedia.app` (child JVM flag), `wate
       `StreamablePlatform` 2310-2319, `TikTokPlatform` 2320-2349, `TwitchPlatform` 2350-2379, `TwitterPlatform`
       2380-2389, `VidLiiPlatform` 2390-2399, `WebRequests` 2400-2409, `YouTubePlatform` 2410-2429, `YtDlpPlatform`
       2430-2459.
-  - `api/codecs` 4000-7999 (next 5230): `BcReader` 4000-4009, `CodecsAPI` 4010-4039, `DownscaleFilter` 4040-4049,
+  - `api/codecs` 4000-7999 (next 5290): `BcReader` 4000-4009, `CodecsAPI` 4010-4039, `DownscaleFilter` 4040-4049,
     `Encoder` 4050-4109, `ImageData` 4110-4139, `ImageMetadata` 4140-4149, `ImageReader` 4150-4169; subfolders:
     - `common/dds`: `DdsHeader` 4170-4209.
     - `common/gif`: `ColorTable` 4210-4219, `GraphicExtension` 4220-4229, `ImageDescriptor` 4230-4239,
@@ -1470,7 +1572,8 @@ System properties: `watermedia.engine`, `watermedia.app` (child JVM flag), `wate
       `PngChunk` 4440-4459, `SBIT` 4460-4479, `SPLT` 4480-4489, `SRGB` 4490-4499, `TEXT` 4500-4509, `TIME` 4510-4519,
       `TRNS` 4520-4529, `ZTXT` 4530-4539, `Zlib` 4540-4549.
     - `decoders`: `FFDecoder` 4550-4619, `FrameQueue` 4620-4629, `PacketQueue` 4630-4639, `Placebo` 4640-4649.
-    - `encoders`: `AnimationEncoder` 4650-4659, `FFEncoder` 4660-4699, `GifEncoder` 4700-4709, `PngEncoder` 4710-4719.
+    - `encoders`: `AnimationEncoder` 4650-4659, `FFEncoder` 4660-4699, `GifEncoder` 4700-4709, `PngEncoder` 4710-4719,
+      `FFTranscoder` 5230-5289 (added later, so its block follows the last one of the range).
     - `readers`: `GifReader` 4720-4749, `JpegReader` 4750-4869, `NetpbmReader` 4870-4919, `PngReader` 4920-4999,
       `WebPReader` 5000-5039.
     - `readers/svg`: `Path` 5040-5049, `PathParser` 5050-5059, `SvgColor` 5060-5069, `SvgDocument` 5070-5079,
@@ -1479,7 +1582,7 @@ System properties: `watermedia.engine`, `watermedia.app` (child JVM flag), `wate
     - `readers/webp/lossless`: `BitReader` 5120-5129, `ColorCache` 5130-5139, `HuffmanDecoder` 5140-5159,
       `HuffmanTable` 5160-5169, `VP8LosslessDecoder` 5170-5189.
     - `readers/webp/lossy`: `VP8BoolDecoder` 5190-5199, `VP8LossyDecoder` 5200-5229.
-  - `bootstrap` 8000-8999 (next 8210): `AppBootstrap` 8000-8019, `DefensiveCheck` 8020-8029, `FabricBootstrap`
+  - `bootstrap` 8000-8999 (next 8220): `AppBootstrap` 8000-8019, `DefensiveCheck` 8020-8029, `FabricBootstrap`
     8030-8039, `ForgeBootstrap` 8040-8049, `NeoBootstrap` 8050-8059; subfolders:
     - `app`: `ClickSound` 8060-8069, `LogUploader` 8070-8089, `MediaCatalog` 8090-8099, `WaterMediaApp` 8100-8119.
     - `app/element`: `Spinner` 8120-8129.
@@ -1487,6 +1590,7 @@ System properties: `watermedia.engine`, `watermedia.app` (child JVM flag), `wate
     - `app/render/opengl`: `OpenGLRenderBackend` 8150-8159.
     - `app/render/vulkan`: `VulkanRenderBackend` 8160-8189.
     - `app/screen`: `SettingsModel` 8190-8199, `SettingsScreen` 8200-8209.
+    - `app` (added later): `MediaDownloader` 8210-8219.
   - New codes: a new site declares a new constant with the next unused value of its class block (the last constant
     under its `// Class first-last` comment) and the class prefix; a new class adds a `// Class first-last` comment
     with the next free block of its package (blocks so far hold about twice their sites, rounded up to a ten) and
@@ -1506,7 +1610,7 @@ System properties: `watermedia.engine`, `watermedia.app` (child JVM flag), `wate
   symlink refusal (`NOFOLLOW_LINKS`), TLauncher refusal, `DEFAULT_NETWORK_TOKEN` guard off loopback.
 
 ## 16. Tests (`src/test`)
-- Layout mirrors the main packages (127 files, 16 of them support helpers). Root: `ApiGuideExampleTest` (runs the
+- Layout mirrors the main packages (130 files, 17 of them support helpers). Root: `ApiGuideExampleTest` (runs the
   public-only `ApiGuideExample` and checks the sizes its `DownscaleFilter` yields),
   `BootstrapProcessTest` and `ServiceLifecycleProcessTest` (child JVMs through `MediaBootstrap.runProbe`),
   `LoggerRedactionTest`, `ErrorCodeInventoryTest` (parses the `ERR_*` declarations of `WaterMedia.java`; every site
@@ -1531,6 +1635,11 @@ System properties: `watermedia.engine`, `watermedia.app` (child JVM flag), `wate
   timeout; `SegmentRetries`: a first segment refused twice still decodes; `Abort`, `EmbeddedAudio`,
   `SeparateTracks`, `OutputOrder`, `LanguageMatch`),
   `QueueLifecycleTest`, `FFEncoderTest` (each container is probed for the codec ids and the audio length it wrote),
+  `FFTranscoderTest` (`Arguments`: jobs refused before anything opens; `Media`: probe of files and of a file-based HLS
+  playlist whose bitrate it measures, copies, audio-only containers, encodes, mixed copy and encode, a separate audio
+  input, bitrate, frame rate limit, every codec on its first available encoder, rotation kept by copy and encode, a
+  hole in the sound filled with silence, a playlist whose segments restart their clock, hardware fallback, tags and
+  progress, cancels and failures that leave no file),
   `GifEncoderTest`, `PngEncoderTest`, readers `GifTest`,
   `JpegTest` (progressive fixtures plus the baseline `7.jpg`, also read as extended sequential), `NetpbmTest` (whole
   rasters against the samples read straight from the file), `PngTest`, `WebpTest`, `WebpMalformedTest`, `SvgTest`,
@@ -1566,6 +1675,10 @@ System properties: `watermedia.engine`, `watermedia.app` (child JVM flag), `wate
   `MathEasesTest`; bootstrap `AppBootstrapDependenciesTest`, `DefensiveCheckTest`, app `AppConfigTest`,
   `FramePlanTest`, `LogUploaderTest` (stages with the stage 3 resume and the report retry, both scan layouts in a
   `@TempDir`, masked reads and user names, collected `wm_err` codes, body with `## Error codes`, link limit),
+  `MediaDownloaderTest` (`Names`: file names and bitrate labels; `Dialog`: picks, container rules, presets, a source
+  without sound, sliders, a download, the name taken from the link, the picks kept for the next dialog, a cancel and
+  a failed probe, on a `MediaDownloader` built with the test
+  seam folder and a queue `Executor` the test thread drains while it waits),
   `SystemInfoTest` (extension alerts), `HomeScreenTest` (`IssueKeys`, `EarlierKeys`, `Status`: a windowless
   `HomeScreen` whose navigator only records the fired `Action`s, so nothing is uploaded or opened; ⚠ `onEnter`
   still starts the `WaterMedia-CacheSize` walk of the cache folder on its own thread), `CanvasLiveTest`,
@@ -1599,7 +1712,10 @@ System properties: `watermedia.engine`, `watermedia.app` (child JVM flag), `wate
   `GIF_ANIMATED`, `JPEG_GRAY`, `M3U_IPTV`, ...; `readAll`, `fileUri`, `wav` (plain, or WAVE_FORMAT_EXTENSIBLE with a channel mask), `tone`,
   `level`, `dubbed` (tagged multi-stream Matroska), `segment` (HLS-ready Matroska), `transportSegments` (intra-only
   MPEG-2 noise cut into `segment<i>.ts` with continuous timestamps and continuity counters, PAT/PMT per segment),
-  `webm`), `MediaBootstrap` (`client()`, `ffmpegAvailable()` one shared
+  `webm`, `clip` (moving gradient plus a 440 Hz tone through `CodecsAPI.encoder`, either track optional), `holed` (a
+  `segment` whose timestamps skip some seconds), `rotated` (the video of a file copied into an MP4 with a display
+  matrix)), `MediaProbe` (`read(file)`: length, title tag and every stream with its codec id, layout, packets, end
+  and rotation, read back with libavformat; `track(type)`), `MediaBootstrap` (`client()`, `ffmpegAvailable()` one shared
   bootstrap in a temp dir, `runProbe(type, dir, scenario, omitBindings)`, whose failures carry the log of the child,
   a probe killed at its 45 s limit included), `PlayerWait` (`awaitStatus`,
   `awaitCondition`), `LocalHttp` (loopback `HttpServer`, one context with any handler, `respond`, `respondRange`,
@@ -1687,7 +1803,7 @@ System properties: `watermedia.engine`, `watermedia.app` (child JVM flag), `wate
   the stores receive the README as is: a new icon shows only after its push. ↪ A new platform adds its icon to the
   row; Linux ARM64 has no icon yet and stays as text. `WATER.md`: `water://` spec. `docs/animated-picture-stream-spec.md`: APS example
   (never implement). `binaries/tools/NATIVE_REBUILD.md`: native rebuild, repack, reviewed CVEs.
-- `TODO.md`: BCn uploads in GL/VK, HDR tone mapping from metadata and on software engines, real version in IDE runs,
+- `TODO.md`: AV2 downloads in the app, BCn uploads in GL/VK, HDR tone mapping from metadata and on software engines, real version in IDE runs,
   Vulkan frame-texture fast path. `PENDING.md`: host validation ledger (H1..H15, Spanish).
 - Known doc drift: PENDING H5 names a `WaterMedia.stop()` that does not exist.
 
@@ -1702,7 +1818,9 @@ System properties: `watermedia.engine`, `watermedia.app` (child JVM flag), `wate
   thumbnails and resolved sources are never checked; mature gates only where the service exposes a flag;
   `WaterPlatform.local` allows `..`; Sendvid/yt-dlp
   resolves can hold a loader thread for 60/120 s; Twitch persisted-query hashes rotate.
-- App notes: no Vulkan validation layers; `PlayerScreen` not restored after a hot swap; `TextField` has no caret
+- App notes: downloads skip pictures and live media, take only the first audio track and write no subtitles; a GPU
+  encoder is only tried when the download starts (no check when the dialog opens); no Vulkan validation layers;
+  `PlayerScreen` not restored after a hot swap; `TextField` has no caret
   movement/selection; `TextArea` has no selection, copy, cut or undo; `HomeScreen.Action.SETTINGS` navigates only with
   DEBUG logging (`WaterMediaApp.navigateAction`); stale `config/watermedia.toml` in the repo.
 - Library notes: `NetworkCache` sweeps `.part` files once per start (no timer); `GLEngine.drainOne` clears `pending`

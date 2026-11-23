@@ -15,6 +15,7 @@ public final class PixelIcon {
             Map.entry("folder", new String[]{"110000", "111111", "100001", "100001", "111111"}),
             Map.entry("tv", new String[]{"1000001", "0100010", "0010100", "0111110", "0100010", "0100010", "0111110", "0011100"}),
             Map.entry("upload", new String[]{"001100", "011110", "110011", "001100", "001100", "001100"}),
+            Map.entry("download", new String[]{"001100", "001100", "001100", "110011", "011110", "001100"}),
             Map.entry("broom", new String[]{"00010", "00100", "01110", "11111", "10101", "10101"}),
             Map.entry("x", new String[]{"10001", "01010", "00100", "01010", "10001"}),
             Map.entry("link", new String[]{

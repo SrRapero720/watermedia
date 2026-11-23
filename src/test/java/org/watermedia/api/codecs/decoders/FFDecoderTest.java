@@ -269,8 +269,7 @@ public class FFDecoderTest {
                 // THE DEMUXER PARKS ON THE HELD TIMELINE RIGHT AFTER THE OPEN, SO ITS CONTEXT IS ONLY READ HERE
                 assertInputPolicy(decoder.formatContext, "the main input");
 
-                // BUILDING THE SHARED OPTIONS ONLY READS THE DECODER'S HEADERS
-                decoder.applyInputOptions(options, decoder.uri());
+                FFDecoder.inputOptions(options, decoder.uri(), new HttpHeaders());
                 assertEquals("19000000", av_dict_get(options, "analyzeduration", null, 0).value().getString(), "the analysis duration goes in microseconds");
                 assertEquals(String.valueOf(23L * 1_024 * 1_024), av_dict_get(options, "probesize", null, 0).value().getString(), "the probe size goes in bytes");
             } finally {
@@ -282,11 +281,9 @@ public class FFDecoderTest {
         @Test
         @DisplayName("An input's connections get the 10 s I/O timeout, and HLS and DASH segments keep the TLS policy, retry a failed open and resume a cut download without restarting it at byte 0")
         void transportPolicy() {
-            final FFDecoder decoder = decoder(Fixtures.fileUri(Fixtures.MP4_H264), new Recorder(null));
             final AVDictionary options = new AVDictionary();
             try {
-                // BUILDING THE SHARED OPTIONS ONLY READS THE DECODER'S HEADERS
-                decoder.applyInputOptions(options, URI.create("https://example.org/media.m3u8"));
+                FFDecoder.inputOptions(options, URI.create("https://example.org/media.m3u8"), new HttpHeaders());
                 assertEquals("10000000", av_dict_get(options, "timeout", null, 0).value().getString(), "the input's own connections");
                 assertEquals("10000000", av_dict_get(options, "rw_timeout", null, 0).value().getString(), "the only timeout HLS and DASH copy to their segments");
                 assertEquals("2", av_dict_get(options, "seg_max_retry", null, 0).value().getString(), "an HLS segment that fails to open is asked for again");
@@ -296,14 +293,12 @@ public class FFDecoderTest {
                 assertFalse(nested.contains("reconnect_streamed"), "a segment served without ranges never restarts at byte 0: " + nested);
             } finally {
                 av_dict_free(options);
-                decoder.close();
             }
         }
 
         @Test
         @DisplayName("Only YouTube's CDN gets requests of at most 10 MiB, every other host one request for the whole file")
         void boundedRequestsOnlyOnYouTubeCdn() {
-            final FFDecoder decoder = decoder(Fixtures.fileUri(Fixtures.MP4_H264), new Recorder(null));
             final Map<String, Boolean> inputs = Map.of(
                     "https://rr3---sn-abc.googlevideo.com/videoplayback?id=1", true,
                     "https://GoogleVideo.com/videoplayback", true,
@@ -312,20 +307,16 @@ public class FFDecoderTest {
                     "https://googlevideo.com.example.org/videoplayback", false,
                     "http://127.0.0.1:8080/video.mp4", false,
                     Fixtures.fileUri(Fixtures.MP4_H264).toString(), false);
-            try {
-                for (final Map.Entry<String, Boolean> input: inputs.entrySet()) {
-                    final AVDictionary options = new AVDictionary();
-                    try {
-                        decoder.applyInputOptions(options, URI.create(input.getKey()));
-                        final AVDictionaryEntry size = av_dict_get(options, "request_size", null, 0);
-                        if (input.getValue()) assertEquals(String.valueOf(REQUEST_BYTES), size == null ? null : size.value().getString(), input.getKey() + " asks for at most 10 MiB");
-                        else assertNull(size, input.getKey() + " asks for the whole file");
-                    } finally {
-                        av_dict_free(options);
-                    }
+            for (final Map.Entry<String, Boolean> input: inputs.entrySet()) {
+                final AVDictionary options = new AVDictionary();
+                try {
+                    FFDecoder.inputOptions(options, URI.create(input.getKey()), new HttpHeaders());
+                    final AVDictionaryEntry size = av_dict_get(options, "request_size", null, 0);
+                    if (input.getValue()) assertEquals(String.valueOf(REQUEST_BYTES), size == null ? null : size.value().getString(), input.getKey() + " asks for at most 10 MiB");
+                    else assertNull(size, input.getKey() + " asks for the whole file");
+                } finally {
+                    av_dict_free(options);
                 }
-            } finally {
-                decoder.close();
             }
         }
 
@@ -338,7 +329,6 @@ public class FFDecoderTest {
             final byte[] body = Files.readAllBytes(wav);
             final List<String> ranges = new CopyOnWriteArrayList<>();
             final ExecutorService workers = Executors.newCachedThreadPool();
-            final FFDecoder decoder = decoder(wav.toUri(), new Recorder(null));
             final AVDictionary options = new AVDictionary();
             final AVFormatContext context = avformat_alloc_context();
             final AVPacket packet = av_packet_alloc();
@@ -347,7 +337,7 @@ public class FFDecoderTest {
                 LocalHttp.respondRange(exchange, "audio/wav", body);
             }, workers)) {
                 // THE OPTIONS OF A CDN LINK OPEN THE LOOPBACK FILE: FFMPEG ITSELF MUST SPLIT THE READ
-                decoder.applyInputOptions(options, URI.create("https://rr3---sn-abc.googlevideo.com/videoplayback"));
+                FFDecoder.inputOptions(options, URI.create("https://rr3---sn-abc.googlevideo.com/videoplayback"), new HttpHeaders());
                 assertTrue(avformat_open_input(context, origin.uri("/long.wav").toString(), null, options) >= 0, "the file must open");
                 long read = 0;
                 while (av_read_frame(context, packet) >= 0) {
@@ -368,7 +358,6 @@ public class FFDecoderTest {
                 av_packet_free(packet);
                 avformat_close_input(context);
                 av_dict_free(options);
-                decoder.close();
                 workers.shutdownNow();
             }
         }
@@ -402,22 +391,17 @@ public class FFDecoderTest {
         @Test
         @DisplayName("An RTMP input never gets timeout, which it reads as the wait for an incoming connection, and keeps the I/O timeout")
         void rtmpNeverWaitsForAConnection() {
-            final FFDecoder decoder = decoder(Fixtures.fileUri(Fixtures.MP4_H264), new Recorder(null));
-            try {
-                for (final String scheme: List.of("rtmp", "rtmps", "rtmpt", "RTMPE", "rtsp", "https")) {
-                    final AVDictionary options = new AVDictionary();
-                    try {
-                        decoder.applyInputOptions(options, URI.create(scheme + "://example.org/live/stream"));
-                        final AVDictionaryEntry timeout = av_dict_get(options, "timeout", null, 0);
-                        if (scheme.toLowerCase(Locale.ROOT).startsWith("rtmp")) assertNull(timeout, scheme + " takes no timeout");
-                        else assertEquals("10000000", timeout == null ? null : timeout.value().getString(), scheme + " times out its connection");
-                        assertEquals("10000000", av_dict_get(options, "rw_timeout", null, 0).value().getString(), scheme + " times out a stalled read");
-                    } finally {
-                        av_dict_free(options);
-                    }
+            for (final String scheme: List.of("rtmp", "rtmps", "rtmpt", "RTMPE", "rtsp", "https")) {
+                final AVDictionary options = new AVDictionary();
+                try {
+                    FFDecoder.inputOptions(options, URI.create(scheme + "://example.org/live/stream"), new HttpHeaders());
+                    final AVDictionaryEntry timeout = av_dict_get(options, "timeout", null, 0);
+                    if (scheme.toLowerCase(Locale.ROOT).startsWith("rtmp")) assertNull(timeout, scheme + " takes no timeout");
+                    else assertEquals("10000000", timeout == null ? null : timeout.value().getString(), scheme + " times out its connection");
+                    assertEquals("10000000", av_dict_get(options, "rw_timeout", null, 0).value().getString(), scheme + " times out a stalled read");
+                } finally {
+                    av_dict_free(options);
                 }
-            } finally {
-                decoder.close();
             }
         }
 
@@ -440,22 +424,18 @@ public class FFDecoderTest {
         @Test
         @DisplayName("Headers reach FFmpeg only when there are any, so no request ends its headers twice")
         void headersOnlyWhenPresent() {
-            final FFDecoder plain = decoder(Fixtures.fileUri(Fixtures.MP4_H264), new Recorder(null));
-            final FFDecoder referred = new FFDecoder("FFThread-Test", Fixtures.fileUri(Fixtures.MP4_H264), new HttpHeaders().set("Referer", "https://example.org/"),
-                    true, null, new Linear(true), new Recorder(null));
+            final URI uri = Fixtures.fileUri(Fixtures.MP4_H264);
             final AVDictionary none = new AVDictionary();
             final AVDictionary some = new AVDictionary();
             try {
-                plain.applyInputOptions(none, plain.uri());
-                referred.applyInputOptions(some, referred.uri());
+                FFDecoder.inputOptions(none, uri, new HttpHeaders());
+                FFDecoder.inputOptions(some, uri, new HttpHeaders().set("Referer", "https://example.org/"));
                 // AN EMPTY headers ENDS THE REQUEST HEAD EARLY
                 assertNull(av_dict_get(none, "headers", null, 0), "an input without headers passes none");
                 assertEquals("Referer: https://example.org/\r\n", av_dict_get(some, "headers", null, 0).value().getString(), "every header line ends in CRLF");
             } finally {
                 av_dict_free(none);
                 av_dict_free(some);
-                plain.close();
-                referred.close();
             }
         }
 

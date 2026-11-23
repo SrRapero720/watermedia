@@ -55,7 +55,7 @@ public final class FFDecoder {
     private static final ThreadFactory THREADS = ThreadTool.workerFactory("FFThread", Thread.NORM_PRIORITY);
     // ONE CALLBACK FOR EVERY DECODER, READING THE ABORT FLAG ITS opaque POINTS AT: JAVACPP BINDS AT MOST 10 LIVE INSTANCES PER
     // CALLBACK CLASS AND FREES ONE ONLY ON DEALLOCATION, SO A CALLBACK PER DECODER WOULD STOP WORKING AFTER THE TENTH
-    private static final Callback_Pointer INTERRUPT = new Callback_Pointer() {
+    public static final Callback_Pointer INTERRUPT = new Callback_Pointer() {
         @Override
         public int call(final Pointer opaque) {
             return new IntPointer(opaque).get();
@@ -323,19 +323,16 @@ public final class FFDecoder {
     /** Returns whether the input is an HLS playlist. */
     public boolean hls() { return this.hls; }
 
-    // ==========================================================================
-    // INTERNAL API
-    // ==========================================================================
-    // MAIN AND SEPARATE AUDIO INPUTS SHARE TRANSPORT AND PROBING POLICY; FFMPEG EXPECTS MICROSECONDS/BYTES WHERE THE CONFIG
-    // USES MILLISECONDS/MEBIBYTES
-    void applyInputOptions(final AVDictionary options, final URI input) {
+    /** Sets the transport and probing policy every input opens with: the main one, a separate audio track and a transcode's. */
+    public static void inputOptions(final AVDictionary options, final URI input, final HttpHeaders headers) {
+        // FFMPEG EXPECTS MICROSECONDS/BYTES WHERE THE CONFIG USES MILLISECONDS/MEBIBYTES
         final String scheme = input.getScheme() == null ? "" : input.getScheme().toLowerCase(Locale.ROOT);
         final String host = input.getHost() == null ? "" : input.getHost().toLowerCase(Locale.ROOT);
         FFTool.configureTLS(options);
         // HLS AND DASH SEGMENTS ONLY TAKE protocol_opts; reconnect_streamed WOULD RESTART AN UNRANGED ONE AT BYTE 0
         av_dict_set(options, "protocol_opts", ":reconnect=1:reconnect_delay_max=5", AV_DICT_APPEND);
         // AN EMPTY headers ENDS THE REQUEST HEAD EARLY
-        if (!this.headers.empty()) av_dict_set(options, "headers", this.headers.toRawString(), 0);
+        if (!headers.empty()) av_dict_set(options, "headers", headers.toRawString(), 0);
         final long analyzeMs = WaterMediaConfig.codecs.ffmpeg.analyzeDuration;
         if (analyzeMs > 0) av_dict_set(options, "analyzeduration", String.valueOf(analyzeMs * 1_000L), 0);
         av_dict_set(options, "probesize", String.valueOf(DataTool.megabytes(WaterMediaConfig.codecs.ffmpeg.probeSize)), 0);
@@ -358,6 +355,22 @@ public final class FFDecoder {
         av_dict_set(options, "max_delay", "5000000", 0);
     }
 
+    /** Returns a video decoder that emits frames without an accelerator, or {@code fallback} when the codec's default already does. */
+    public static AVCodec softwareVideoDecoder(final int codecId, final AVCodec fallback) {
+        // THE NATIVE av1 DECODER IS A HWACCEL HOST THAT EMITS NO FRAMES WITHOUT AN ACCELERATOR: libdav1d, THEN libaom-av1.
+        // EVERY OTHER CODEC OF THE BUNDLED FFMPEG DEFAULTS TO A NATIVE SOFTWARE DECODER
+        if (codecId == AV_CODEC_ID_AV1) {
+            final AVCodec dav1d = avcodec_find_decoder_by_name("libdav1d");
+            if (dav1d != null) return dav1d;
+            final AVCodec aom = avcodec_find_decoder_by_name("libaom-av1");
+            if (aom != null) return aom;
+        }
+        return fallback;
+    }
+
+    // ==========================================================================
+    // INTERNAL API
+    // ==========================================================================
     // OPENS THE SEPARATE AUDIO TRACK AND PICKS ITS STREAM (SEE audioIndex); FALSE WHEN IT CANNOT PLAY OR AN ABORT CUT THE OPEN SHORT
     boolean initAudioTrack(final Track track, final int stream, final String language) {
         final URI trackUri = track.uri();
@@ -374,7 +387,7 @@ public final class FFDecoder {
         final AVDictionary trackOptions = new AVDictionary();
 
         try {
-            this.applyInputOptions(trackOptions, trackUri);
+            inputOptions(trackOptions, trackUri, this.headers);
 
             if (avformat.avformat_open_input(this.trackFormatContext, trackUrl, null, trackOptions) < 0) {
                 if (!this.aborted) LOGGER.error(IT, DataTool.errCode(WaterMedia.ERR_FFDECODER_TRACK_OPEN) + "Failed to open audio track input: {}", trackUrl);
@@ -1252,7 +1265,7 @@ public final class FFDecoder {
     private boolean openInput(final String url) {
         final AVDictionary options = new AVDictionary();
         try {
-            this.applyInputOptions(options, this.uri);
+            inputOptions(options, this.uri, this.headers);
 
             final int ret = avformat.avformat_open_input(this.formatContext, url, null, options);
             if (ret < 0) {
@@ -1816,19 +1829,6 @@ public final class FFDecoder {
             if (config == null) return null;
             if (config.device_type() == hw && (config.methods() & avcodec.AV_CODEC_HW_CONFIG_METHOD_HW_DEVICE_CTX) != 0) return config;
         }
-    }
-
-    // A SOFTWARE-CAPABLE VIDEO DECODER: THE NATIVE av1 DECODER avcodec_find_decoder RETURNS IS A HWACCEL HOST THAT EMITS NO
-    // FRAMES WITHOUT AN ACCELERATOR, SO AV1 PREFERS libdav1d, THEN libaom-av1, THEN THE DEFAULT. EVERY OTHER CODEC OF THE
-    // BUNDLED FFMPEG DEFAULTS TO A NATIVE SOFTWARE DECODER; THE PLAYER'S ZERO-FRAME → ERROR CHECK BACKS ANY FUTURE STUB
-    private static AVCodec softwareVideoDecoder(final int codecId, final AVCodec fallback) {
-        if (codecId == AV_CODEC_ID_AV1) {
-            final AVCodec dav1d = avcodec_find_decoder_by_name("libdav1d");
-            if (dav1d != null) return dav1d;
-            final AVCodec aom = avcodec_find_decoder_by_name("libaom-av1");
-            if (aom != null) return aom;
-        }
-        return fallback;
     }
 
     // SIZES THE SOFTWARE DECODER THREAD POOL TO THE FRAME AREA

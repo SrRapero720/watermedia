@@ -76,9 +76,9 @@ public final class PlayerScreen extends BaseScreen {
     private static final List<Keybind> KEYS_QUALITY = List.of(new Keybind("ARROWS", "Navigate"), new Keybind("ENTER", "Select"),
             new Keybind("ESC", "Cancel"));
     private static final List<Keybind> KEYS_SOURCES = List.of(new Keybind("SPACE", "Play/Pause"), new Keybind("L", "Loop"),
-            new Keybind("V", "Video"), new Keybind("ESC", "Menu"), new Keybind("ENTER", "Sources"));
+            new Keybind("V", "Video"), new Keybind("D", "Download"), new Keybind("ESC", "Menu"), new Keybind("ENTER", "Sources"));
     private static final List<Keybind> KEYS_QUALITIES = List.of(new Keybind("SPACE", "Play/Pause"), new Keybind("L", "Loop"),
-            new Keybind("V", "Video"), new Keybind("ESC", "Menu"), new Keybind("ENTER", "Quality"));
+            new Keybind("V", "Video"), new Keybind("D", "Download"), new Keybind("ESC", "Menu"), new Keybind("ENTER", "Quality"));
     // HUD EDGE FADE AND TOP-BAND GRADIENT STOPS
     private static final Color FADE_DARK = new Color(0, 0, 0, 230);
     private static final Color FADE_CLEAR = new Color(0, 0, 0, 0);
@@ -214,6 +214,7 @@ public final class PlayerScreen extends BaseScreen {
         switch (key) {
             case GLFW_KEY_ENTER, GLFW_KEY_KP_ENTER -> this.openQualityDialog();
             case GLFW_KEY_V -> this.openVideoDialog();
+            case GLFW_KEY_D -> this.openDownload();
             case GLFW_KEY_SPACE -> this.togglePlayback(player);
             case GLFW_KEY_LEFT -> player.rewind();
             case GLFW_KEY_RIGHT -> player.forward();
@@ -320,6 +321,16 @@ public final class PlayerScreen extends BaseScreen {
             this.ctx.media.selectedSource = this.ctx.media.availableSources[this.ctx.media.selectedSourceIndex];
             this.startPlayer();
         }
+    }
+
+    // OPENS THE DOWNLOAD DIALOG ON THE PLAYING SOURCE AT THE PLAYING QUALITY, UNLESS IT IS A PICTURE, WHICH HAS NOTHING TO TRANSCODE
+    private void openDownload() {
+        final MRL.Source source = this.ctx.media.selectedSource;
+        final MediaPlayer player = this.ctx.media.player;
+        if (source == null || source.type() == MediaType.IMAGE || this.ctx.media.selectedMRL == null) return;
+        final Metadata meta = source.metadata();
+        this.ctx.download.open(source, meta == null ? null : meta.title(), this.ctx.media.selectedMRL.uri(),
+                player == null ? this.ctx.media.selectedQuality : player.quality());
     }
 
     private void seekToPercent(final int percent) {
@@ -1115,6 +1126,7 @@ public final class PlayerScreen extends BaseScreen {
     // PIECE IS A CHILD PLACED AT ABSOLUTE POSITIONS BY onLayout
     private final class Hud extends Group<Hud> {
         private final Button back;
+        private final Button download;
         private final Icon srcIcon;
         private final MetricsPanel metrics = new MetricsPanel();
         private final Button dbg;
@@ -1161,6 +1173,12 @@ public final class PlayerScreen extends BaseScreen {
             this.back = new Button("BACK").icon("arrow-left")
                     .accent(AppTheme.TEXT_SOFT).textColor(AppTheme.TEXT_SOFT).width(WRAP_CONTENT).height(34)
                     .onClick(b -> PlayerScreen.this.returnToMenu());
+            this.download = new Button("DOWNLOAD").subText("D").icon("download")
+                    .accent(AppTheme.GREEN).textColor(AppTheme.GREEN).width(WRAP_CONTENT).height(34)
+                    .onClick(b -> {
+                        PlayerScreen.this.openDownload();
+                        PlayerScreen.this.ctx.sound.play();
+                    });
             this.srcIcon = new Icon("folder").iconSize(12).color(AppTheme.NEON_LIGHT);
             this.dbg = new Button("DEBUG").icon("debug")
                     .accent(AppTheme.NEON_LIGHT).textColor(AppTheme.NEON_LIGHT).size(112, 30)
@@ -1220,7 +1238,7 @@ public final class PlayerScreen extends BaseScreen {
                     .add(this.dbg).add(this.qual).add(this.lod)
                     .add(this.prev).add(this.rew).add(this.stopBtn).add(this.play).add(this.fwd).add(this.next)
                     .add(this.loop).add(this.speedDrop)
-                    .add(this.back);
+                    .add(this.back).add(this.download);
         }
 
         @Override
@@ -1257,6 +1275,8 @@ public final class PlayerScreen extends BaseScreen {
             this.next.visible(alive && this.multiSource);
             this.loop.visible(alive);
             this.speedDrop.visible(alive);
+            final MRL.Source source = PlayerScreen.this.ctx.media.selectedSource;
+            this.download.visible(alive && source != null && source.type() != MediaType.IMAGE);
             if (!alive) return;
 
             final long duration = Math.max(0, p.duration());
@@ -1310,6 +1330,9 @@ public final class PlayerScreen extends BaseScreen {
             // BACK IS PLACED BEFORE THE ERROR EXIT SO IT STAYS CLICKABLE WHEN THE PLAYER FAILS
             this.back.layout(x0 + 16, this.topYA);
             if (this.errorMode) return;
+            // DOWNLOAD SITS IN THE TOP RIGHT CORNER, AND THE INFO ROW TAGS BELOW STOP SHORT OF IT
+            final int reserve = this.download.visible() ? this.download.measuredWidth() + 16 : 0;
+            this.download.layout(x0 + w - reserve, this.topYA);
 
             this.transportYA = y0 + this.transportYL;
             this.controlsYA = this.transportYA + 42;
@@ -1368,14 +1391,14 @@ public final class PlayerScreen extends BaseScreen {
             this.titleStr = text.truncateToWidth(title, Math.max(180, w - 520), AppTheme.TEXT_SECTION, Font.BOLD);
             int tagX = x0 + 108 + text.widthBold(this.titleStr, AppTheme.TEXT_SECTION) + 12;
             this.tagType = ctx.media.selectedSource == null ? null : ctx.media.selectedSource.type();
-            this.showTypeTag = this.tagType != null && tagX < x0 + w - 180;
+            this.showTypeTag = this.tagType != null && tagX < x0 + w - 180 - reserve;
             if (this.showTypeTag) {
                 this.typeTagXA = tagX;
                 tagX += PlayerScreen.this.typeTagWidth(this.tagType) + 8;
             }
             this.srcLabel = (ctx.media.selectedSourceIndex + 1) + "/" + sources;
             this.srcTagW = text.width(this.srcLabel, AppTheme.TEXT_BODY) + 46;
-            final boolean showSrc = tagX + this.srcTagW < x0 + w - 20;
+            final boolean showSrc = tagX + this.srcTagW < x0 + w - 20 - reserve;
             this.srcIcon.visible(showSrc);
             if (showSrc) {
                 this.srcTagXA = tagX;

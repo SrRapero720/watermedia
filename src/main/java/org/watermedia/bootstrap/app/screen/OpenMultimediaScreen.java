@@ -76,7 +76,7 @@ public class OpenMultimediaScreen extends BaseScreen {
             new Keybind("TYPE", "Search"), new Keybind("CLICK", "Pick result"),
             new Keybind("CTRL+V", "Paste"), new Keybind("ESC", "Cancel"));
     private static final List<Keybind> KEYS_DEFAULT = List.of(
-            new Keybind("ENTER", "Play"), new Keybind("SPACE", "Save"),
+            new Keybind("ENTER", "Play"), new Keybind("SPACE", "Save"), new Keybind("D", "Download"),
             new Keybind("CTRL+V", "Paste"), new Keybind("R", "Reload"), new Keybind("ESC", "Cancel"));
 
     private final Consumer<HomeScreen.Action> navigator;
@@ -113,6 +113,7 @@ public class OpenMultimediaScreen extends BaseScreen {
     private TextField field;
     private Button reload;
     private Button save;
+    private Button download;
     private Button play;
     private PreviewPanel preview;
     private StatusChip chip;
@@ -215,6 +216,10 @@ public class OpenMultimediaScreen extends BaseScreen {
                 case GLFW_KEY_R -> {
                     if (!this.field.textInputActive() && !this.searchMode() && !url.isEmpty()) this.reloadPreviewMRL();
                 }
+                // ONLY WHILE THE FIELD IS BLURRED, LIKE SAVE AND RELOAD
+                case GLFW_KEY_D -> {
+                    if (!this.field.textInputActive()) this.openDownload();
+                }
             }
         }
         return true; // MODAL: THE HOME SCREEN UNDERNEATH MUST NEVER SEE KEYS
@@ -273,6 +278,9 @@ public class OpenMultimediaScreen extends BaseScreen {
         this.save = new Button("SAVE").subText("SPACE").icon("save")
                 .accent(AppTheme.NEON_LIGHT).textColor(AppTheme.NEON_LIGHT).height(36)
                 .onClick(b -> this.saveCustomUrl());
+        this.download = new Button("DOWNLOAD").subText("D").icon("download")
+                .accent(AppTheme.CYAN).textColor(AppTheme.CYAN).height(36)
+                .onClick(b -> this.openDownload());
         this.play = new Button("PLAY").subText("ENTER").icon("play")
                 .accent(AppTheme.GREEN).textColor(AppTheme.GREEN).height(36)
                 .onClick(b -> {
@@ -286,6 +294,7 @@ public class OpenMultimediaScreen extends BaseScreen {
                 .add(cancel)
                 .add(new Box().size(0, 1).weight(1f))
                 .add(this.save)
+                .add(this.download)
                 .add(this.play);
 
         // DIALOG TITLE STRIP: BOLD TITLE, A DIVIDER UNDER IT AND THE RED CLOSE BUTTON PINNED RIGHT
@@ -357,6 +366,10 @@ public class OpenMultimediaScreen extends BaseScreen {
         final boolean empty = url.isEmpty();
         this.reload.enabled(!search && !empty);
         this.save.accent(search || empty ? AppTheme.TEXT_FAINT : AppTheme.NEON_LIGHT).enabled(!search && !empty);
+        // DOWNLOAD NEEDS THE PREVIEWED MEDIA RESOLVED, AND ONE WITH A TIMELINE
+        final boolean downloadable = this.downloadable() != null;
+        final Color downloadColor = downloadable ? AppTheme.CYAN : AppTheme.TEXT_FAINT;
+        this.download.accent(downloadColor).textColor(downloadColor).enabled(downloadable);
         final Color playColor = empty ? AppTheme.TEXT_FAINT : search ? AppTheme.CYAN : AppTheme.GREEN;
         this.play.label(search ? "SEARCH" : "PLAY").icon(search ? "search" : "play")
                 .accent(playColor).textColor(playColor).enabled(!empty);
@@ -447,6 +460,19 @@ public class OpenMultimediaScreen extends BaseScreen {
             return;
         }
         this.navigator.accept(HomeScreen.Action.PLAYER);
+    }
+
+    // THE PREVIEWED SOURCE WHEN IT CAN BE DOWNLOADED (RESOLVED, OUTSIDE SEARCH MODE AND NO PICTURE), ELSE NULL
+    private MRL.Source downloadable() {
+        final MRL.Source source = this.searchMode() ? null : this.firstSource();
+        return source == null || source.type() == MediaType.IMAGE ? null : source;
+    }
+
+    private void openDownload() {
+        final MRL.Source source = this.downloadable();
+        if (source == null) return;
+        this.ctx.download.open(source, source.metadata() == null ? null : source.metadata().title(), this.previewMRL.uri(), null);
+        this.ctx.sound.play();
     }
 
     private void ensurePreviewMRL() {

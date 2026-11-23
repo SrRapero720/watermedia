@@ -1042,6 +1042,41 @@ public final class WaterMedia {
     public static final int ERR_VP8_DECODER_FRAME_SMALL = 5208;
     public static final int ERR_VP8_DECODER_START_CODE = 5209;
     public static final int ERR_VP8_DECODER_MACROBLOCK_EOF = 5210;
+    // FFTranscoder 5230-5289
+    public static final int ERR_FFTRANSCODER_JOB_NULL = 5230;
+    public static final int ERR_FFTRANSCODER_NO_TRACK = 5231;
+    public static final int ERR_FFTRANSCODER_CONTAINER = 5232;
+    public static final int ERR_FFTRANSCODER_VIDEO_CODEC = 5233;
+    public static final int ERR_FFTRANSCODER_AUDIO_CODEC = 5234;
+    public static final int ERR_FFTRANSCODER_RATES = 5235;
+    public static final int ERR_FFTRANSCODER_NO_FFMPEG = 5236;
+    public static final int ERR_FFTRANSCODER_PROBE_NO_FFMPEG = 5237;
+    public static final int ERR_FFTRANSCODER_RERUN = 5238;
+    public static final int ERR_FFTRANSCODER_OPEN_INPUT = 5239;
+    public static final int ERR_FFTRANSCODER_STREAM_INFO = 5240;
+    public static final int ERR_FFTRANSCODER_NO_VIDEO = 5241;
+    public static final int ERR_FFTRANSCODER_NO_AUDIO = 5242;
+    public static final int ERR_FFTRANSCODER_MUXER_ALLOC = 5243;
+    public static final int ERR_FFTRANSCODER_ALLOC = 5244;
+    public static final int ERR_FFTRANSCODER_STREAM_CREATE = 5245;
+    public static final int ERR_FFTRANSCODER_DECODER_MISSING = 5246;
+    public static final int ERR_FFTRANSCODER_DECODER_ALLOC = 5247;
+    public static final int ERR_FFTRANSCODER_PIXEL_FORMAT = 5248;
+    public static final int ERR_FFTRANSCODER_VIDEO_ENC_MISSING = 5249;
+    public static final int ERR_FFTRANSCODER_VIDEO_ENC_ALLOC = 5250;
+    public static final int ERR_FFTRANSCODER_VIDEO_FRAME_ALLOC = 5251;
+    public static final int ERR_FFTRANSCODER_AUDIO_ENC_ALLOC = 5252;
+    public static final int ERR_FFTRANSCODER_FIFO_ALLOC = 5253;
+    public static final int ERR_FFTRANSCODER_AUDIO_FRAME_ALLOC = 5254;
+    public static final int ERR_FFTRANSCODER_SCALER_CREATE = 5255;
+    public static final int ERR_FFTRANSCODER_QUEUE_AUDIO = 5256;
+    public static final int ERR_FFTRANSCODER_READ_AUDIO = 5257;
+    public static final int ERR_FFTRANSCODER_READ = 5258;
+    public static final int ERR_FFTRANSCODER_EMPTY = 5259;
+    public static final int ERR_FFTRANSCODER_STREAM_CREATE_ENCODED = 5260;
+    public static final int ERR_FFTRANSCODER_VIDEO_ENC_FORMAT = 5261;
+    public static final int ERR_FFTRANSCODER_QUEUE_SILENCE = 5262;
+    public static final int ERR_FFTRANSCODER_SIDE_DATA = 5263;
 
     // BOOTSTRAP AND APP 8000-8999
     // AppBootstrap 8000-8019
@@ -1119,6 +1154,8 @@ public final class WaterMedia {
     public static final int ERR_APP_SETTINGS_NUMBER_PARSE = 8194;
     // SettingsScreen 8200-8209
     public static final int ERR_APP_SETTINGSSCREEN_SAVE = 8200;
+    // MediaDownloader 8210-8219
+    public static final int ERR_APP_DOWNLOAD_RUN = 8210;
 
     // ENVIRONMENT: WRITTEN ONCE BY start() BEFORE THE VOLATILE started FLAG, WHICH PUBLISHES THEM;
     // EVERY READER CHECKS THE FLAG FIRST, SO ANY THREAD THAT SEES IT SET SEES THEM TOO

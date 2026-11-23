@@ -1019,7 +1019,7 @@ try (Encoder encoder = CodecsAPI.encoder(Container.GIF, Path.of("clip.gif"), gif
 ```
 
 ### Archivos de video
-MP4, MOV, MKV y WebM con _FFmpeg_, más Ogg solo para audio. Toman cualquier `PixelFormat` crudo.
+MP4, MOV, MKV y WebM con _FFmpeg_, más Ogg, MP3 y M4A solo para audio. Toman cualquier `PixelFormat` crudo.
 
 ```java
 Encoder.Video video = new Encoder.Video(VideoCodec.H264, 1280, 720, PixelFormat.BGRA, 60); // THE FULL CONSTRUCTOR SETS QUALITY, LIKE ON IMAGES

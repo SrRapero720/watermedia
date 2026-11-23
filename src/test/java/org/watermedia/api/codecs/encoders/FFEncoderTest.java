@@ -1,13 +1,7 @@
 package org.watermedia.api.codecs.encoders;
 
-import org.bytedeco.ffmpeg.avcodec.AVCodecParameters;
-import org.bytedeco.ffmpeg.avcodec.AVPacket;
-import org.bytedeco.ffmpeg.avformat.AVFormatContext;
-import org.bytedeco.ffmpeg.avutil.AVRational;
 import org.bytedeco.ffmpeg.global.avcodec;
-import org.bytedeco.ffmpeg.global.avformat;
 import org.bytedeco.ffmpeg.global.avutil;
-import org.bytedeco.javacpp.PointerPointer;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -30,6 +24,7 @@ import org.watermedia.api.util.PixelFormat;
 import org.watermedia.api.util.SampleType;
 import org.watermedia.test.support.Fixtures;
 import org.watermedia.test.support.MediaBootstrap;
+import org.watermedia.test.support.MediaProbe;
 import org.watermedia.test.support.PlayerWait;
 
 import java.io.ByteArrayOutputStream;
@@ -38,9 +33,7 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -97,39 +90,6 @@ public class FFEncoderTest {
             }
         }
         return pcm.flip();
-    }
-
-    // READS THE STREAMS, THEIR PACKETS, WHERE EACH ONE ENDS (LAST PTS PLUS DURATION) AND ITS LONGEST PACKET BACK WITH LIBAVFORMAT
-    private static Probe probe(final Path file) throws IOException {
-        final AVFormatContext context = new AVFormatContext(null);
-        final int opened = avformat.avformat_open_input(context, file.toAbsolutePath().toString(), null, null);
-        if (opened < 0) throw new IOException("avformat_open_input failed: " + opened);
-        final AVPacket packet = avcodec.av_packet_alloc();
-        try {
-            if (avformat.avformat_find_stream_info(context, (PointerPointer<?>) null) < 0) throw new IOException("avformat_find_stream_info failed");
-            final int streams = context.nb_streams();
-            final int[] packets = new int[streams];
-            final long[] ends = new long[streams];
-            final long[] longest = new long[streams];
-            while (avformat.av_read_frame(context, packet) >= 0) {
-                final int index = packet.stream_index();
-                final AVRational base = context.streams(index).time_base();
-                packets[index]++;
-                ends[index] = Math.max(ends[index], (packet.pts() + packet.duration()) * 1_000_000L * base.num() / base.den());
-                longest[index] = Math.max(longest[index], packet.duration() * 1_000_000L * base.num() / base.den());
-                avcodec.av_packet_unref(packet);
-            }
-            final List<Track> tracks = new ArrayList<>();
-            for (int i = 0; i < streams; i++) {
-                final AVCodecParameters parameters = context.streams(i).codecpar();
-                tracks.add(new Track(parameters.codec_type(), parameters.codec_id(), parameters.width(), parameters.height(),
-                        parameters.sample_rate(), parameters.ch_layout().nb_channels(), packets[i], ends[i], longest[i]));
-            }
-            return new Probe(context.duration(), tracks);
-        } finally {
-            avcodec.av_packet_free(packet);
-            avformat.avformat_close_input(context);
-        }
     }
 
     // ==========================================================================
@@ -221,7 +181,7 @@ public class FFEncoderTest {
                 "MP4, H264, AAC", "MP4, HEVC, MP3", "MP4, AV1, OPUS", "MP4, VP9, FLAC",
                 "MKV, VP9, FLAC", "MKV, H264, PCM", "MKV, VP8, MP3",
                 "MOV, PRORES, PCM", "MOV, H264, AAC",
-                "OGG, , OPUS", "OGG, , FLAC"
+                "OGG, , OPUS", "OGG, , FLAC", "MP3, , MP3", "M4A, , AAC"
         })
         void containers(final Container container, final VideoCodec videoCodec, final AudioCodec audioCodec) throws IOException {
             final Path file = DIRECTORY.resolve(container + "-" + videoCodec + "-" + audioCodec + "." + container.name().toLowerCase());
@@ -229,11 +189,11 @@ public class FFEncoderTest {
             final Encoder.Audio audio = audioCodec == null ? null : new Encoder.Audio(audioCodec, RATE_HZ, 2, SampleType.S16);
             encode(CodecsAPI.encoder(container, file, video, audio), video, audio);
 
-            final Probe probe = probe(file);
+            final MediaProbe probe = MediaProbe.read(file);
             assertEquals((video != null ? 1 : 0) + (audio != null ? 1 : 0), probe.tracks().size(), "one stream per track");
             assertTrue(Math.abs(probe.durationUs() - SECONDS * 1_000_000L) <= 150_000L, "length " + probe.durationUs() + " us");
             if (video != null) {
-                final Track picture = probe.track(avutil.AVMEDIA_TYPE_VIDEO);
+                final MediaProbe.Track picture = probe.track(avutil.AVMEDIA_TYPE_VIDEO);
                 assertNotNull(picture, "video stream");
                 assertEquals(switch (videoCodec) {
                     case H264 -> avcodec.AV_CODEC_ID_H264;
@@ -251,7 +211,7 @@ public class FFEncoderTest {
                 assertTrue(Math.abs(picture.endUs() - SECONDS * 1_000_000L) <= 1_000L, "video ends at " + picture.endUs() + " us");
             }
             if (audio != null) {
-                final Track sound = probe.track(avutil.AVMEDIA_TYPE_AUDIO);
+                final MediaProbe.Track sound = probe.track(avutil.AVMEDIA_TYPE_AUDIO);
                 assertNotNull(sound, "audio stream");
                 assertEquals(switch (audioCodec) {
                     case PCM -> avcodec.AV_CODEC_ID_PCM_S16LE;
@@ -263,8 +223,10 @@ public class FFEncoderTest {
                 assertEquals(2, sound.channels(), "audio channels");
                 assertEquals(RATE_HZ, sound.sampleRate(), "audio sample rate");
                 // EVERY CONTAINER KEEPS THE PRIMING BEFORE ZERO, SO EVERY SAMPLE SENT ENDS THE TRACK AT ONE SECOND (LESS THE
-                // MILLISECOND MATROSKA ROUNDS AWAY) AND ONLY THE PADDING OF A LAST FULL FRAME MAY RUN PAST IT
-                assertTrue(sound.endUs() >= SECONDS * 1_000_000L - 1_000L && sound.endUs() <= SECONDS * 1_000_000L + sound.frameUs(),
+                // MILLISECOND MATROSKA ROUNDS AWAY) AND ONLY THE PADDING OF A LAST FULL FRAME MAY RUN PAST IT. A BARE MP3 STREAM
+                // HAS NO TIME BEFORE ZERO, SO ITS PRIMING (UNDER ONE FRAME) COUNTS TOO
+                final long past = sound.frameUs() * (container == Container.MP3 ? 2 : 1);
+                assertTrue(sound.endUs() >= SECONDS * 1_000_000L - 1_000L && sound.endUs() <= SECONDS * 1_000_000L + past,
                         "audio ends at " + sound.endUs() + " us, its frames last up to " + sound.frameUs() + " us");
             }
         }
@@ -276,12 +238,12 @@ public class FFEncoderTest {
             final Encoder.Video video = new Encoder.Video(VideoCodec.VP9, 97, 63, PixelFormat.RGB, FPS);
             final Encoder.Audio audio = new Encoder.Audio(AudioCodec.OPUS, 44_100, 1, SampleType.FLT);
             encode(CodecsAPI.encoder(Container.WEBM, file, video, audio), video, audio);
-            final Probe probe = probe(file);
-            final Track picture = probe.track(avutil.AVMEDIA_TYPE_VIDEO);
+            final MediaProbe probe = MediaProbe.read(file);
+            final MediaProbe.Track picture = probe.track(avutil.AVMEDIA_TYPE_VIDEO);
             assertNotNull(picture, "video stream");
             assertEquals(98, picture.width(), "the odd width grows by a pixel");
             assertEquals(64, picture.height(), "the odd height grows by a pixel");
-            final Track sound = probe.track(avutil.AVMEDIA_TYPE_AUDIO);
+            final MediaProbe.Track sound = probe.track(avutil.AVMEDIA_TYPE_AUDIO);
             assertNotNull(sound, "audio stream");
             assertEquals(48_000, sound.sampleRate(), "Opus resamples to 48 kHz");
             assertEquals(1, sound.channels(), "the mono track stays mono");
@@ -358,15 +320,6 @@ public class FFEncoderTest {
                 player.stop();
                 player.release();
             }
-        }
-    }
-
-    private record Track(int type, int codec, int width, int height, int sampleRate, int channels, int packets, long endUs, long frameUs) {}
-
-    private record Probe(long durationUs, List<Track> tracks) {
-        Track track(final int type) {
-            for (final Track track: this.tracks) if (track.type() == type) return track;
-            return null;
         }
     }
 }

@@ -939,7 +939,7 @@ try (Encoder encoder = CodecsAPI.encoder(Container.GIF, Path.of("clip.gif"), gif
 ```
 
 ### 视频文件
-通过 _FFmpeg_ 支持 MP4、MOV、MKV 和 WebM，另外还有仅限音频的 Ogg。它们接受任何原始 `PixelFormat`。
+通过 _FFmpeg_ 支持 MP4、MOV、MKV 和 WebM，另外还有仅限音频的 Ogg、MP3 和 M4A。它们接受任何原始 `PixelFormat`。
 
 ```java
 Encoder.Video video = new Encoder.Video(VideoCodec.H264, 1280, 720, PixelFormat.BGRA, 60); // THE FULL CONSTRUCTOR SETS QUALITY, LIKE ON IMAGES

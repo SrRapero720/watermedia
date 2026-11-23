@@ -58,6 +58,12 @@ public final class ParentScroll extends Group<ParentScroll> {
     }
 
     @Override
+    public Element<?> dispatchPress(final double mx, final double my) {
+        // ONLY PRESSES INSIDE THE VIEWPORT ROUTE: A SCROLLED-OUT SLIDER MUST NOT CAPTURE THE POINTER
+        return this.contains(mx, my) ? super.dispatchPress(mx, my) : null;
+    }
+
+    @Override
     public boolean dispatchHover(final double mx, final double my) {
         if (!this.contains(mx, my)) {
             for (final Element<?> child: this.children) child.clearHover();

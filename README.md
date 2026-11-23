@@ -48,7 +48,7 @@ any Java app can embed the API.
   speakers can play a screen's sound anywhere without loading it twice\*
 - ⏱️ Synchronized playback through a server clock, so everyone watches the same moment\*
 - 🔍 Search videos by keyword on YouTube, Twitch, Kick and Imgur\*
-- 🎥 Record videos with sound to MP4, MOV, MKV, WebM and Ogg, and save pictures and animations as PNG, APNG and GIF (experimental)\*
+- 🎥 Record videos with sound to MP4, MOV, MKV, WebM, Ogg, MP3 and M4A, and save pictures and animations as PNG, APNG and GIF (experimental)\*
 - 🔒 HTTPS media checks certificates, and tokens, passwords and login data never reach the logs
 
 <h1 style="color: #EB622B;"><strong>🌐 SUPPORTED PLATFORMS</strong></h1>

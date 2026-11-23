@@ -26,6 +26,7 @@ import org.bytedeco.javacpp.IntPointer;
 import org.bytedeco.javacpp.Pointer;
 import org.bytedeco.javacpp.PointerPointer;
 import org.watermedia.WaterMedia;
+import org.watermedia.api.codecs.AudioCodec;
 import org.watermedia.api.codecs.CodecsAPI;
 import org.watermedia.api.codecs.Container;
 import org.watermedia.api.codecs.Encoder;
@@ -96,14 +97,8 @@ public final class FFEncoder extends Encoder {
         this.file = file;
         this.out = out;
 
-        final String format = switch (container) {
-            case MP4 -> "mp4";
-            case MOV -> "mov";
-            case MKV -> "matroska";
-            case WEBM -> "webm";
-            case OGG -> "ogg";
-            default -> throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_FFENCODER_CONTAINER) + "Failed to create the encoder due to non-FFmpeg container: " + container);
-        };
+        final String format = muxer(container);
+        if (format == null) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_FFENCODER_CONTAINER) + "Failed to create the encoder due to non-FFmpeg container: " + container);
         try {
             // A SEEKABLE FILE, SINCE MP4 AND MATROSKA PATCH THEIR HEADER: NEXT TO THE TARGET SO IT ONLY APPEARS FINISHED, OR A
             // PRIVATE ONE FOR A STREAM. ABSOLUTE, SO FFMPEG NEVER READS A "scheme:" PREFIX AS A PROTOCOL
@@ -131,8 +126,8 @@ public final class FFEncoder extends Encoder {
             }
             final AVDictionary options = new AVDictionary(null);
             try {
-                // MP4 AND MOV MOVE THEIR INDEX TO THE FRONT, SO PLAYERS START BEFORE THE WHOLE FILE ARRIVES
-                if (container == Container.MP4 || container == Container.MOV) avutil.av_dict_set(options, "movflags", "+faststart", 0);
+                // THE MP4 FAMILY MOVES ITS INDEX TO THE FRONT, SO PLAYERS START BEFORE THE WHOLE FILE ARRIVES
+                if (faststart(container)) avutil.av_dict_set(options, "movflags", "+faststart", 0);
                 final int header = avformat.avformat_write_header(this.muxer, options);
                 if (header < 0) throw FFTool.failure("avformat_write_header", header);
             } finally {
@@ -236,16 +231,7 @@ public final class FFEncoder extends Encoder {
     // SETUP
     // ==========================================================================
     private void openVideo(final Video video, final boolean globalHeader) throws IOException {
-        // SOFTWARE ENCODERS IN PREFERENCE ORDER; THE GPL ONES ONLY EXIST IN THE GPL NATIVES
-        final AVCodec codec = encoder(video.codec().name(), switch (video.codec()) {
-            case H264 -> new String[] { "libx264", "libopenh264" };
-            case HEVC -> new String[] { "libx265", "libkvazaar" };
-            case AV1 -> new String[] { "libsvtav1", "libaom-av1" };
-            case VP8 -> new String[] { "libvpx" };
-            case VP9 -> new String[] { "libvpx-vp9" };
-            case PRORES -> new String[] { "prores_ks" };
-            case PNG, GIF -> throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_FFENCODER_PURE_JAVA) + "Failed to create the video encoder due to pure Java codec: " + video.codec());
-        });
+        final AVCodec codec = encoder(video.codec().name(), software(video.codec()));
         this.picture = avcodec.avcodec_alloc_context3(codec);
         if (FFTool.isNull(this.picture)) throw new IOException(DataTool.errCode(WaterMedia.ERR_FFENCODER_VIDEO_ENC_ALLOC) + "Failed to allocate the " + video.codec() + " encoder");
 
@@ -305,13 +291,7 @@ public final class FFEncoder extends Encoder {
     }
 
     private void openAudio(final Audio audio, final boolean globalHeader) throws IOException {
-        final AVCodec codec = encoder(audio.codec().name(), switch (audio.codec()) {
-            case PCM -> new String[] { "pcm_s16le" };
-            case OPUS -> new String[] { "libopus" };
-            case AAC -> new String[] { "aac" };
-            case MP3 -> new String[] { "libmp3lame" };
-            case FLAC -> new String[] { "flac" };
-        });
+        final AVCodec codec = encoder(audio.codec().name(), software(audio.codec()));
         this.sound = avcodec.avcodec_alloc_context3(codec);
         if (FFTool.isNull(this.sound)) throw new IOException(DataTool.errCode(WaterMedia.ERR_FFENCODER_AUDIO_ENC_ALLOC) + "Failed to allocate the " + audio.codec() + " encoder");
 
@@ -321,17 +301,7 @@ public final class FFEncoder extends Encoder {
         int format = formats.length == 0 ? inputFormat : formats[0];
         for (final int candidate: formats) if (candidate == inputFormat) format = candidate;
 
-        // SAMPLE RATE: THE INPUT'S WHEN TAKEN, ELSE THE CLOSEST ABOVE IT (OPUS GOES TO 48 KHZ), ELSE THE HIGHEST
-        final int[] rates = supported(this.sound, codec, avcodec.AV_CODEC_CONFIG_SAMPLE_RATE);
-        int rate = rates.length == 0 ? audio.sampleRate() : -1;
-        if (rate < 0) {
-            int highest = 0;
-            for (final int candidate: rates) {
-                highest = Math.max(highest, candidate);
-                if (candidate >= audio.sampleRate() && (rate < 0 || candidate < rate)) rate = candidate;
-            }
-            if (rate < 0) rate = highest;
-        }
+        final int rate = rate(supported(this.sound, codec, avcodec.AV_CODEC_CONFIG_SAMPLE_RATE), audio.sampleRate());
 
         // CHANNEL LAYOUT: THE CODEC'S OWN FOR THAT CHANNEL COUNT, OR THE DEFAULT ONE WHEN IT TAKES ANY
         this.layout(this.sound.ch_layout(), codec, audio);
@@ -511,7 +481,48 @@ public final class FFEncoder extends Encoder {
     // ==========================================================================
     // UTILITY
     // ==========================================================================
-    private static AVCodec encoder(final String codec, final String[] names) throws IOException {
+    // THE FFMPEG MUXER OF A CONTAINER, OR NULL FOR THE HOUSE-MADE AND DECODE-ONLY ONES
+    static String muxer(final Container container) {
+        return switch (container) {
+            case MP4 -> "mp4";
+            case MOV -> "mov";
+            case MKV -> "matroska";
+            case WEBM -> "webm";
+            case OGG -> "ogg";
+            case MP3 -> "mp3";
+            case M4A -> "ipod";
+            default -> null;
+        };
+    }
+
+    static boolean faststart(final Container container) {
+        return container == Container.MP4 || container == Container.MOV || container == Container.M4A;
+    }
+
+    // SOFTWARE ENCODERS IN PREFERENCE ORDER; THE GPL ONES ONLY EXIST IN THE GPL NATIVES
+    static String[] software(final VideoCodec codec) {
+        return switch (codec) {
+            case H264 -> new String[] { "libx264", "libopenh264" };
+            case HEVC -> new String[] { "libx265", "libkvazaar" };
+            case AV1 -> new String[] { "libsvtav1", "libaom-av1" };
+            case VP8 -> new String[] { "libvpx" };
+            case VP9 -> new String[] { "libvpx-vp9" };
+            case PRORES -> new String[] { "prores_ks" };
+            case PNG, GIF -> throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_FFENCODER_PURE_JAVA) + "Failed to create the video encoder due to pure Java codec: " + codec);
+        };
+    }
+
+    static String[] software(final AudioCodec codec) {
+        return switch (codec) {
+            case PCM -> new String[] { "pcm_s16le" };
+            case OPUS -> new String[] { "libopus" };
+            case AAC -> new String[] { "aac" };
+            case MP3 -> new String[] { "libmp3lame" };
+            case FLAC -> new String[] { "flac" };
+        };
+    }
+
+    static AVCodec encoder(final String codec, final String[] names) throws IOException {
         for (final String name: names) {
             final AVCodec found = avcodec.avcodec_find_encoder_by_name(name);
             if (!FFTool.isNull(found)) return found;
@@ -519,8 +530,20 @@ public final class FFEncoder extends Encoder {
         throw new IOException(DataTool.errCode(WaterMedia.ERR_FFENCODER_ENCODER_MISSING) + "Failed to find the " + codec + " encoder due to missing natives, tried " + String.join(", ", names));
     }
 
+    // SAMPLE RATE: THE INPUT'S WHEN TAKEN, ELSE THE CLOSEST ABOVE IT (OPUS GOES TO 48 KHZ), ELSE THE HIGHEST
+    static int rate(final int[] rates, final int wanted) {
+        if (rates.length == 0) return wanted;
+        int rate = -1;
+        int highest = 0;
+        for (final int candidate: rates) {
+            highest = Math.max(highest, candidate);
+            if (candidate >= wanted && (rate < 0 || candidate < rate)) rate = candidate;
+        }
+        return rate < 0 ? highest : rate;
+    }
+
     // READS ONE INTEGER LIST OF avcodec_get_supported_config; EMPTY WHEN THE CODEC TAKES ANY VALUE
-    private static int[] supported(final AVCodecContext context, final AVCodec codec, final int config) {
+    static int[] supported(final AVCodecContext context, final AVCodec codec, final int config) {
         try (final PointerPointer<Pointer> list = new PointerPointer<>(1); final IntPointer count = new IntPointer(1)) {
             final int found = avcodec.avcodec_get_supported_config(context, codec, config, 0, list, count);
             final Pointer values = list.get(0);

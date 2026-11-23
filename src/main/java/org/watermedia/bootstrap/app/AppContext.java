@@ -68,6 +68,9 @@ public final class AppContext implements Executor {
     // CLEANUP CACHE DIALOG
     public final CacheCleaner cleanup = new CacheCleaner(this::requestRender);
 
+    // DOWNLOAD DIALOG, OVER ANY SCREEN
+    public final MediaDownloader download = new MediaDownloader(this);
+
     // GLOBAL ERROR DIALOG
     final ErrorState error = new ErrorState();
 

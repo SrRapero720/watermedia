@@ -358,7 +358,8 @@ public class WaterMediaApp {
                 .onPrimary(() -> running = false)
                 .panelWidth(520)
                 .visible(false);
-        root.overlay().add(errorDialog).add(exitDialog);
+        // THE DOWNLOAD DIALOG GOES UNDER THE OTHER TWO, SO AN ERROR OR THE EXIT CONFIRM STILL COVERS IT
+        root.overlay().add(new DownloadDialog()).add(errorDialog).add(exitDialog);
 
         screens.root(root);
         // THE PLAYER OWNS A CUSTOM WINDOW TITLE; EVERY OTHER SCREEN RESTORES THE DEFAULT
@@ -375,6 +376,7 @@ public class WaterMediaApp {
     private static List<Keybind> footerKeybinds() {
         if (ctx.hasError()) return KEYS_ERROR;
         if (ctx.exitConfirm) return KEYS_EXIT;
+        if (ctx.download.visible) return DownloadDialog.keybinds(ctx.download);
         return screens.currentKeybinds();
     }
 
@@ -646,6 +648,7 @@ public class WaterMediaApp {
     // CLEANUP
     // ==========================================================================
     private static void cleanup() {
+        ctx.download.shutdown();
         // FINISH ANY BACKGROUND PLAYER RELEASE BEFORE TEARING DOWN THE RENDER DEVICE, OR A VULKAN
         // RELEASE COULD DESTROY IMAGES ON AN ALREADY-DESTROYED DEVICE
         ctx.awaitPlayerRelease();

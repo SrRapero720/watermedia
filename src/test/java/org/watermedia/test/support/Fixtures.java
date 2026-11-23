@@ -3,6 +3,7 @@ package org.watermedia.test.support;
 import org.bytedeco.ffmpeg.avcodec.AVCodec;
 import org.bytedeco.ffmpeg.avcodec.AVCodecContext;
 import org.bytedeco.ffmpeg.avcodec.AVPacket;
+import org.bytedeco.ffmpeg.avcodec.AVPacketSideData;
 import org.bytedeco.ffmpeg.avformat.AVFormatContext;
 import org.bytedeco.ffmpeg.avformat.AVIOContext;
 import org.bytedeco.ffmpeg.avformat.AVStream;
@@ -13,12 +14,15 @@ import org.bytedeco.ffmpeg.global.avcodec;
 import org.bytedeco.ffmpeg.global.avformat;
 import org.bytedeco.ffmpeg.global.avutil;
 import org.bytedeco.javacpp.BytePointer;
+import org.bytedeco.javacpp.IntPointer;
 import org.bytedeco.javacpp.PointerPointer;
+import org.watermedia.api.codecs.AudioCodec;
 import org.watermedia.api.codecs.CodecsAPI;
 import org.watermedia.api.codecs.Container;
 import org.watermedia.api.codecs.Encoder;
 import org.watermedia.api.codecs.VideoCodec;
 import org.watermedia.api.util.PixelFormat;
+import org.watermedia.api.util.SampleType;
 
 import javax.sound.sampled.AudioFileFormat;
 import javax.sound.sampled.AudioFormat;
@@ -132,12 +136,68 @@ public final class Fixtures {
             titles[i] = "Audio " + i;
             levels[i] = level(i);
         }
-        matroska(file, rate, seconds, defaults, titles, languages, levels);
+        matroska(file, rate, seconds, defaults, titles, languages, levels, -1, 0);
     }
 
     /** Writes a Matroska file of one untitled, untagged mono 16-bit PCM stream filled with {@code level}: an HLS segment, as HLS refuses WAV ones. */
     public static void segment(final Path file, final int rate, final int seconds, final short level) throws IOException {
-        matroska(file, rate, seconds, -1, new String[1], new String[1], new short[] { level });
+        matroska(file, rate, seconds, -1, new String[1], new String[1], new short[] { level }, -1, 0);
+    }
+
+    /** Writes {@link #segment} with a hole: after {@code holeAt} seconds of sound its timestamps skip {@code hole} seconds, as a stream that lost a part does. */
+    public static void holed(final Path file, final int rate, final int seconds, final int holeAt, final int hole, final short level) throws IOException {
+        matroska(file, rate, seconds, -1, new String[1], new String[1], new short[] { level }, holeAt * 10, hole * 10);
+    }
+
+    /** Copies the video of {@code source} into an MP4 whose display matrix turns it by {@code degrees}, as phones record; needs the FFmpeg natives. */
+    public static void rotated(final Path source, final Path file, final double degrees) throws IOException {
+        final String path = file.toAbsolutePath().toString();
+        final AVFormatContext input = new AVFormatContext(null);
+        if (avformat.avformat_open_input(input, source.toAbsolutePath().toString(), null, null) < 0) throw new IOException("Cannot read " + source);
+        final AVFormatContext muxer = new AVFormatContext(null);
+        final AVPacket packet = avcodec.av_packet_alloc();
+        try {
+            if (avformat.avformat_find_stream_info(input, (PointerPointer<?>) null) < 0) throw new IOException("No streams in " + source);
+            int video = -1;
+            for (int i = 0; i < input.nb_streams(); i++) if (input.streams(i).codecpar().codec_type() == avutil.AVMEDIA_TYPE_VIDEO) video = i;
+            if (video < 0) throw new IOException("No video in " + source);
+            if (avformat.avformat_alloc_output_context2(muxer, null, "mp4", path) < 0 || muxer.isNull()) throw new IOException("No MP4 muxer");
+            final AVStream stream = avformat.avformat_new_stream(muxer, null);
+            if (avcodec.avcodec_parameters_copy(stream.codecpar(), input.streams(video).codecpar()) < 0) throw new IOException("MP4 refused the stream");
+            stream.codecpar().codec_tag(0);
+            stream.time_base(input.streams(video).time_base());
+
+            // THE 3x3 MATRIX OF 32-BIT FIXED POINT NUMBERS GOES INTO THE STREAM'S SIDE DATA, WHICH OWNS IT ONCE ADDED
+            final IntPointer matrix = new IntPointer(avutil.av_malloc(36));
+            avutil.av_display_rotation_set(matrix, degrees);
+            final AVPacketSideData list = stream.codecpar().coded_side_data() == null ? new AVPacketSideData(null) : stream.codecpar().coded_side_data();
+            final IntPointer count = new IntPointer(1).put(stream.codecpar().nb_coded_side_data());
+            if (avcodec.av_packet_side_data_add(list, count, avcodec.AV_PKT_DATA_DISPLAYMATRIX, matrix, 36, 0) == null) throw new IOException("No room for the display matrix");
+            stream.codecpar().coded_side_data(list).nb_coded_side_data(count.get());
+
+            final AVIOContext pb = new AVIOContext(null);
+            if (avformat.avio_open(pb, path, avformat.AVIO_FLAG_WRITE) < 0) throw new IOException("Cannot write " + file);
+            muxer.pb(pb);
+            if (avformat.avformat_write_header(muxer, (AVDictionary) null) < 0) throw new IOException("MP4 refused the header");
+            while (avformat.av_read_frame(input, packet) >= 0) {
+                if (packet.stream_index() == video) {
+                    packet.stream_index(0).pos(-1);
+                    avcodec.av_packet_rescale_ts(packet, input.streams(video).time_base(), stream.time_base());
+                    if (avformat.av_interleaved_write_frame(muxer, packet) < 0) throw new IOException("MP4 refused a packet");
+                }
+                avcodec.av_packet_unref(packet);
+            }
+            if (avformat.av_write_trailer(muxer) < 0) throw new IOException("MP4 refused the trailer");
+        } finally {
+            avcodec.av_packet_free(packet);
+            avformat.avformat_close_input(input);
+            if (!muxer.isNull()) {
+                final AVIOContext pb = muxer.pb();
+                if (pb != null && !pb.isNull()) avformat.avio_close(pb);
+                muxer.pb(null);
+                avformat.avformat_free_context(muxer);
+            }
+        }
     }
 
     /** Encodes a moving BGRA gradient into a VP9 WebM through {@link CodecsAPI#encoder}; needs the FFmpeg natives. */
@@ -159,6 +219,41 @@ public final class Fixtures {
             }
         }
         return out.toByteArray();
+    }
+
+    /** Encodes a moving BGRA gradient and a 440 Hz stereo tone at 48 kHz through {@link CodecsAPI#encoder}, a null codec leaving its track out; needs the FFmpeg natives. */
+    public static void clip(final Path file, final Container container, final VideoCodec video, final AudioCodec audio,
+                            final int width, final int height, final int fps, final int seconds) throws IOException {
+        final Encoder.Video picture = video == null ? null : new Encoder.Video(video, width, height, PixelFormat.BGRA, fps);
+        final Encoder.Audio sound = audio == null ? null : new Encoder.Audio(audio, 48_000, 2, SampleType.S16);
+        try (final Encoder writer = CodecsAPI.encoder(container, file, picture, sound)) {
+            final ByteBuffer frame = picture == null ? null : ByteBuffer.allocateDirect(width * height * 4);
+            long sent = 0;
+            // AUDIO FOLLOWS EVERY FRAME, LIKE A CAPTURE WOULD INTERLEAVE IT
+            for (int f = 0; f < seconds * fps; f++) {
+                if (picture != null) {
+                    frame.clear();
+                    for (int y = 0; y < height; y++) for (int x = 0; x < width; x++) {
+                        frame.put((byte) ((x + f * 4) & 0xFF));      // B
+                        frame.put((byte) ((y + f * 4) & 0xFF));      // G
+                        frame.put((byte) ((x + y + f * 8) & 0xFF));  // R
+                        frame.put((byte) 0xFF);                       // A
+                    }
+                    frame.flip();
+                    writer.video(frame, f * 1_000_000L / fps);
+                }
+                if (sound != null) {
+                    final long until = 48_000L * (f + 1) / fps;
+                    final ByteBuffer pcm = ByteBuffer.allocate((int) (until - sent) * 4).order(ByteOrder.LITTLE_ENDIAN);
+                    for (long s = sent; s < until; s++) {
+                        final short value = (short) (0.25 * Math.sin(2 * Math.PI * 440 * s / 48_000.0) * Short.MAX_VALUE);
+                        pcm.putShort(value).putShort(value);
+                    }
+                    writer.audio(pcm.flip());
+                    sent = until;
+                }
+            }
+        }
     }
 
     /** Writes one MPEG-2 video of fresh noise as {@code count} MPEG-TS files {@code segment<i>.ts}, cut the way an HLS segmenter cuts it; needs the FFmpeg natives. */
@@ -252,9 +347,10 @@ public final class Fixtures {
     // HELPERS
     // ==========================================================================
 
-    // WRITES ONE MONO S16 PCM STREAM PER LEVEL, EACH WITH ITS TITLE AND LANGUAGE WHEN NOT NULL; defaults FLAGS ONE DEFAULT
+    // WRITES ONE MONO S16 PCM STREAM PER LEVEL, EACH WITH ITS TITLE AND LANGUAGE WHEN NOT NULL; defaults FLAGS ONE DEFAULT.
+    // FROM PACKET holeAt ON (-1 FOR NEVER) THE TIMESTAMPS RUN hole PACKETS LATE
     private static void matroska(final Path file, final int rate, final int seconds, final int defaults, final String[] titles,
-                                 final String[] languages, final short[] levels) throws IOException {
+                                 final String[] languages, final short[] levels, final int holeAt, final int hole) throws IOException {
         final String path = file.toAbsolutePath().toString();
         final AVFormatContext muxer = new AVFormatContext(null);
         if (avformat.avformat_alloc_output_context2(muxer, null, "matroska", path) < 0 || muxer.isNull())
@@ -286,7 +382,8 @@ public final class Fixtures {
                     if (avcodec.av_new_packet(packet, samples * 2) < 0) throw new IOException("No memory for a packet");
                     final ByteBuffer data = packet.data().limit(samples * 2L).asBuffer().order(ByteOrder.LITTLE_ENDIAN);
                     for (int s = 0; s < samples; s++) data.putShort(levels[i]);
-                    packet.stream_index(i).pts((long) p * samples).dts((long) p * samples).duration(samples);
+                    final long stamp = (long) (p + (holeAt >= 0 && p >= holeAt ? hole : 0)) * samples;
+                    packet.stream_index(i).pts(stamp).dts(stamp).duration(samples);
                     avcodec.av_packet_rescale_ts(packet, clock, muxer.streams(i).time_base());
                     if (avformat.av_interleaved_write_frame(muxer, packet) < 0) throw new IOException("Matroska refused a packet");
                 }
