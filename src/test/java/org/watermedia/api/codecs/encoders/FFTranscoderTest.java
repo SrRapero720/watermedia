@@ -42,7 +42,7 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
  * Verifies {@link FFTranscoder}: job checks before anything opens, the probe of a file and of an HLS playlist whose
- * bitrate it measures, tracks copied or encoded again into every kind of container read back with libavformat, a
+ * bitrate it measures, tracks copied or encoded again into every type of container read back with libavformat, a
  * separate audio input, bitrate and frame rate limits, tags, progress, cancelling and failures that leave no file.
  * Native cases skip when the FFmpeg binaries are absent.
  */

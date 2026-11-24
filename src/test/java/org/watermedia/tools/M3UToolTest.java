@@ -91,7 +91,7 @@ public class M3UToolTest {
     class MasterPlaylists {
 
         @Test
-        @DisplayName("A STREAM-INF ladder parses as a master with its source, kind, default version 1 and every variant")
+        @DisplayName("A STREAM-INF ladder parses as a master with its source, type, default version 1 and every variant")
         void basicMaster() throws IOException {
             final String content = """
                 #EXTM3U
@@ -198,7 +198,7 @@ public class M3UToolTest {
     class MediaPlaylists {
 
         @Test
-        @DisplayName("A segment list parses as media with its source, kind, version, target duration and segments, neither live nor VOD after ENDLIST")
+        @DisplayName("A segment list parses as media with its source, type, version, target duration and segments, neither live nor VOD after ENDLIST")
         void basicMedia() throws IOException {
             final String content = """
                 #EXTM3U

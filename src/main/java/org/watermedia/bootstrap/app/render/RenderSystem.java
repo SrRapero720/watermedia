@@ -87,7 +87,7 @@ public final class RenderSystem {
         return true;
     }
 
-    /** The active engine kind. */
+    /** The active engine type. */
     public static Engine engineKind() { return kind; }
 
     /** Display name of the active engine ("Vulkan"/"OpenGL"). */
