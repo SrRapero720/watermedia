@@ -2,6 +2,7 @@ package org.watermedia.bootstrap;
 
 import org.watermedia.WaterMedia;
 import org.watermedia.bootstrap.app.AppConfig;
+import org.watermedia.bootstrap.app.AppEnvironment;
 import org.watermedia.bootstrap.app.WaterMediaApp;
 import org.watermedia.bootstrap.app.ui.AppTheme;
 import org.watermedia.tools.DataTool;
@@ -26,6 +27,7 @@ import java.net.URL;
 import java.net.URLClassLoader;
 import java.net.URLConnection;
 import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
 import java.nio.file.LinkOption;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
@@ -51,8 +53,8 @@ public final class AppBootstrap {
     // SHARED BY EVERY USER ON LINUX (/tmp): PINS REJECT PLANTED JARS, BUT THE FOLDER OWNER COULD SWAP A VERIFIED JAR
     // BEFORE THE CHILD JVM OPENS IT; A PER-USER CACHE DIRECTORY WOULD CLOSE THAT WINDOW
     private static final Path LIBS_DIR = Path.of(System.getProperty("java.io.tmpdir"), "watermedia", "libs");
-    // THE APP'S WATERCONFIG WRITES config/ INSIDE THE WORKING DIRECTORY THIS JVM PASSES ON; THE AppConfig KEYS ARE
-    // COMPILE-TIME CONSTANTS, SO READING THEM HERE NEVER LOADS WATERCONFIG
+    // THE APP'S WATERCONFIG WRITES config/ INSIDE THE HOME OF ITS AppEnvironment, WHERE THIS JVM STARTS IT. THE AppConfig
+    // KEYS ARE COMPILE-TIME CONSTANTS, SO READING THEM HERE NEVER LOADS WATERCONFIG
     private static final Path PREFERENCES = Path.of("config", AppConfig.ID + ".properties");
     private BootstrapWindow window;
 
@@ -71,12 +73,15 @@ public final class AppBootstrap {
                     });
                     return;
                 }
-                final Set<Path> jars = bootstrap.prepare();
+                // THE APP RESOLVES THE SAME ENVIRONMENT ONCE IT RUNS FROM THIS HOME
+                final Path home = AppEnvironment.CURRENT.home();
+                if (!home.equals(Path.of("").toAbsolutePath())) bootstrap.log("The app runs from " + home);
+                final Set<Path> jars = bootstrap.prepare(home, AppEnvironment.CURRENT.app());
                 if (bootstrap.window != null) {
                     EventQueue.invokeAndWait(bootstrap.window::dispose);
                     bootstrap.window = null;
                 }
-                final int code = relaunch(jars, args, bootstrap.engine());
+                final int code = relaunch(jars, args, bootstrap.engine(home), home);
                 if (code != RELAUNCH_EXIT) System.exit(code);
             } catch (final Throwable failure) {
                 failure.printStackTrace();
@@ -96,10 +101,10 @@ public final class AppBootstrap {
     // ==========================================================================
     // HELPERS
     // ==========================================================================
-    private Set<Path> prepare() throws Exception {
+    private Set<Path> prepare(final Path home, final Path app) throws Exception {
         final Set<Path> jars = new LinkedHashSet<>();
         // OUR RESOURCES MUST WIN OVER IDENTICALLY NAMED RESOURCES IN EXTENSION JARS
-        jars.add(Path.of(AppBootstrap.class.getProtectionDomain().getCodeSource().getLocation().toURI()));
+        jars.add(app);
         Files.createDirectories(LIBS_DIR);
         final Properties versions = versions();
         final String nested = versions.getProperty("nested");
@@ -126,9 +131,11 @@ public final class AppBootstrap {
             }
             jars.add(jar);
         }
-        final File[] files = Path.of("").toAbsolutePath().toFile().listFiles();
         boolean binaries = AppBootstrap.class.getResource("/org/watermedia/binaries/WaterMediaBinaries.class") != null;
-        if (files != null) {
+        // EXTENSIONS SIT IN THE HOME OR NEXT TO THE APP'S JAR, WHICH IN A MINECRAFT INSTANCE IS ITS mods FOLDER
+        for (final Path folder: new LinkedHashSet<>(List.of(home, app.getParent()))) {
+            final File[] files = folder.toFile().listFiles();
+            if (files == null) continue;
             for (final File file: files) {
                 final String name = file.getName().toLowerCase(Locale.ROOT);
                 if (file.isFile() && name.endsWith(".jar") && (name.startsWith("watermedia_") || name.startsWith("wm_")
@@ -144,11 +151,11 @@ public final class AppBootstrap {
     }
 
     // THE -D OVERRIDE WINS FOR ONE LAUNCH, THEN THE SAVED ENGINE, THEN VULKAN; THE FILE IS ONLY READ, THE APP OWNS IT
-    private String engine() {
+    private String engine(final Path home) {
         final String override = engine(System.getProperty(ENGINE_PROP));
         if (override != null) return override;
         final Properties preferences = new Properties();
-        try (final InputStream input = Files.newInputStream(PREFERENCES)) { preferences.load(input); }
+        try (final InputStream input = Files.newInputStream(home.resolve(PREFERENCES))) { preferences.load(input); }
         catch (final NoSuchFileException absent) {} // FIRST LAUNCH
         catch (final IOException | IllegalArgumentException failure) { this.log("Cannot read the app preferences: " + failure.getMessage()); }
         final String saved = engine(preferences.getProperty(AppConfig.ENGINE));
@@ -279,10 +286,14 @@ public final class AppBootstrap {
         if (window != null) window.progress(name, 100);
     }
 
-    private static int relaunch(final Set<Path> jars, final String[] args, final String engine) throws Exception {
+    private static int relaunch(final Set<Path> jars, final String[] args, final String engine, final Path home) throws Exception {
         final Set<String> classpath = new LinkedHashSet<>();
         jars.forEach(jar -> classpath.add(jar.toAbsolutePath().toString()));
-        classpath.addAll(Arrays.asList(System.getProperty("java.class.path", "").split(File.pathSeparator)));
+        // RELATIVE ENTRIES BELONG TO THIS JVM'S DIRECTORY, WHICH THE CHILD LEAVES WHEN ITS HOME IS ANOTHER ONE
+        for (final String entry: System.getProperty("java.class.path", "").split(File.pathSeparator)) {
+            try { classpath.add(Path.of(entry).toAbsolutePath().toString()); }
+            catch (final InvalidPathException wildcard) { classpath.add(entry); } // AN UNEXPANDED lib/* STAYS AS WRITTEN
+        }
         for (ClassLoader loader = Thread.currentThread().getContextClassLoader(); loader != null; loader = loader.getParent()) {
             if (!(loader instanceof final URLClassLoader urls)) continue;
             for (final URL url: urls.getURLs())
@@ -296,7 +307,7 @@ public final class AppBootstrap {
         command.addAll(List.of("-D" + APP_FLAG + "=true", "-D" + ENGINE_PROP + "=" + engine, "-Dlog4j2.StatusLogger.level=WARN",
                 "-cp", String.join(File.pathSeparator, classpath), AppBootstrap.class.getName()));
         command.addAll(Arrays.asList(args));
-        return new ProcessBuilder(command).inheritIO().start().waitFor();
+        return new ProcessBuilder(command).directory(home.toFile()).inheritIO().start().waitFor();
     }
 
     // ==========================================================================

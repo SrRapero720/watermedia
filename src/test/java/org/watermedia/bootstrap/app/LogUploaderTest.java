@@ -51,7 +51,7 @@ public class LogUploaderTest {
         // step() ONLY OPENS THE DIALOG ON A DEVELOPMENT RUN OR INSIDE A mods FOLDER
         @BeforeEach
         void developmentRun() {
-            assertTrue(LogUploader.AVAILABLE, "the stage cases need a JVM that loads the classes from a directory (LogUploader.DEV)");
+            assertTrue(LogUploader.AVAILABLE, "the stage cases need a JVM that loads the classes from a directory (AppEnvironment.Type.DEVELOPMENT)");
         }
 
         @Test
@@ -173,17 +173,19 @@ public class LogUploaderTest {
         @TempDir Path instance;
 
         @Test
-        @DisplayName("inside a mods folder the game files come from the instance and the app files from the folder itself")
-        void modsLayout() throws IOException {
+        @DisplayName("the game and the app files come from the instance root, with one config and the jars of its mods folder")
+        void instanceLayout() throws IOException {
             final Path mods = this.instance.resolve("mods");
             write(this.instance.resolve("logs/latest.log"), "game");
-            write(this.instance.resolve("logs/watermedia-app.log"), "not the log of this app");
+            write(this.instance.resolve("logs/watermedia-app.log"), "app");
             write(this.instance.resolve("crash-reports/crash-2026-11-01_10.00.00-client.txt"), "crash");
             write(this.instance.resolve("hs_err_pid42.log"), "fatal");
-            write(this.instance.resolve("config/watermedia.toml"), "game config");
-            write(mods.resolve("logs/watermedia-app.log"), "app");
-            write(mods.resolve("config/watermedia.toml"), "app config");
-            write(mods.resolve("config/app.properties"), "engine=VULKAN");
+            write(this.instance.resolve("config/watermedia.toml"), "shared config");
+            write(this.instance.resolve("config/app.properties"), "engine=VULKAN");
+            write(this.instance.resolve("loose.jar"), "");
+            // LEFTOVERS OF THE RELEASES THAT RAN THE APP FROM THE mods FOLDER ARE NOT READ
+            write(mods.resolve("logs/watermedia-app.log"), "old app log");
+            write(mods.resolve("config/watermedia.toml"), "old app config");
             write(mods.resolve("FancyMenu-Forge-1.20.1.jar"), "");
             write(mods.resolve("WaterMedia_YouTube_Extension-1.0.jar"), "");
             write(mods.resolve("notes.txt"), "");
@@ -192,18 +194,19 @@ public class LogUploaderTest {
             final int[] repaints = new int[1];
             final LogUploader uploader = new LogUploader(() -> repaints[0]++);
             uploader.working = true;
-            uploader.scan(mods, true);
+            uploader.scan(this.instance);
 
             assertFalse(uploader.working, "the scan ends its work");
             assertFalse(uploader.error, "every file was measured");
             assertEquals(1, repaints[0], "the scan repaints once");
             assertEquals(List.of("latest.log", "crash-2026-11-01_10.00.00-client.txt", "hs_err_pid42.log", "watermedia-app.log",
-                    "watermedia.toml (game)", "watermedia.toml (app)", "app.properties"), uploader.files.stream().map(entry -> entry.name).toList());
-            assertEquals(List.of("Game log", "Crash report", "JVM crash (hs_err)", "App log", "Config (game)", "Config (app)", "App preferences"),
+                    "watermedia.toml", "app.properties"), uploader.files.stream().map(entry -> entry.name).toList());
+            assertEquals(List.of("Game log", "Crash report", "JVM crash (hs_err)", "App log", "Config", "App preferences"),
                     uploader.files.stream().map(entry -> entry.label).toList());
             assertEquals(List.of(this.instance.resolve("logs/latest.log"), this.instance.resolve("crash-reports/crash-2026-11-01_10.00.00-client.txt"),
-                    this.instance.resolve("hs_err_pid42.log"), mods.resolve("logs/watermedia-app.log"), this.instance.resolve("config/watermedia.toml"),
-                    mods.resolve("config/watermedia.toml"), mods.resolve("config/app.properties")), uploader.files.stream().map(entry -> entry.path).toList());
+                    this.instance.resolve("hs_err_pid42.log"), this.instance.resolve("logs/watermedia-app.log"),
+                    this.instance.resolve("config/watermedia.toml"), this.instance.resolve("config/app.properties")),
+                    uploader.files.stream().map(entry -> entry.path).toList());
             for (final LogUploader.FileEntry entry: uploader.files) {
                 assertTrue(entry.present && entry.valid, entry.name);
                 assertEquals("READY", entry.state, entry.name);
@@ -212,59 +215,32 @@ public class LogUploaderTest {
         }
 
         @Test
-        @DisplayName("a development run reads everything from its working directory, the shared config once and the jars of its mods folder")
-        void devLayout() throws IOException {
-            write(this.instance.resolve("logs/latest.log"), "game");
-            write(this.instance.resolve("logs/watermedia-app.log"), "app");
-            write(this.instance.resolve("config/watermedia.toml"), "shared config");
-            write(this.instance.resolve("config/app.properties"), "engine=VULKAN");
-            write(this.instance.resolve("mods/WaterFrames-2.1.jar"), "");
-            write(this.instance.resolve("loose.jar"), "");
+        @DisplayName("the JVM crash row takes the newest dump of the instance root")
+        void newestFatal() throws IOException {
+            final Path older = this.instance.resolve("hs_err_pid42.log");
+            final Path newer = this.instance.resolve("hs_err_pid7.log");
+            write(older, "game crash");
+            write(newer, "app crash");
+            write(this.instance.resolve("hs_err_notes.txt"), "not a dump");
+            write(this.instance.resolve("mods/hs_err_pid9.log"), "outside the root");
+            Files.setLastModifiedTime(older, FileTime.fromMillis(1_000_000L));
+            Files.setLastModifiedTime(newer, FileTime.fromMillis(2_000_000L));
+            Files.setLastModifiedTime(this.instance.resolve("hs_err_notes.txt"), FileTime.fromMillis(3_000_000L));
+            Files.setLastModifiedTime(this.instance.resolve("mods/hs_err_pid9.log"), FileTime.fromMillis(4_000_000L));
 
             final LogUploader uploader = new LogUploader(() -> {});
-            uploader.scan(this.instance, false);
-
-            assertEquals(List.of("latest.log", "crash-reports", "hs_err_pid.log", "watermedia-app.log", "watermedia.toml", "app.properties"),
-                    uploader.files.stream().map(entry -> entry.name).toList());
-            assertEquals(List.of("Game log", "Crash report", "JVM crash (hs_err)", "App log", "Config", "App preferences"),
-                    uploader.files.stream().map(entry -> entry.label).toList());
-            assertEquals(List.of(true, false, false, true, true, true), uploader.files.stream().map(entry -> entry.present).toList());
-            assertEquals(this.instance.resolve("logs/watermedia-app.log"), uploader.files.get(3).path);
-            assertEquals(this.instance.resolve("config/watermedia.toml"), uploader.files.get(4).path);
-            assertEquals(List.of("waterframes-2.1.jar"), uploader.jars);
-        }
-
-        @Test
-        @DisplayName("the JVM crash row takes the newest dump of the game and of the app")
-        void newestFatal() throws IOException {
-            final Path mods = this.instance.resolve("mods");
-            final Path game = this.instance.resolve("hs_err_pid42.log");
-            final Path app = mods.resolve("hs_err_pid7.log");
-            write(game, "game crash");
-            write(app, "app crash");
-            write(mods.resolve("hs_err_notes.txt"), "not a dump");
-
-            Files.setLastModifiedTime(game, FileTime.fromMillis(2_000_000L));
-            Files.setLastModifiedTime(app, FileTime.fromMillis(1_000_000L));
-            final LogUploader gameNewer = new LogUploader(() -> {});
-            gameNewer.scan(mods, true);
-            assertEquals("hs_err_pid42.log", gameNewer.files.get(2).name);
-            assertEquals(game, gameNewer.files.get(2).path);
-
-            Files.setLastModifiedTime(app, FileTime.fromMillis(3_000_000L));
-            final LogUploader appNewer = new LogUploader(() -> {});
-            appNewer.scan(mods, true);
-            assertEquals("hs_err_pid7.log", appNewer.files.get(2).name);
-            assertEquals(app, appNewer.files.get(2).path);
-            assertEquals("JVM crash (hs_err)", appNewer.files.get(2).label);
-            assertEquals(7, appNewer.files.size());
+            uploader.scan(this.instance);
+            assertEquals("hs_err_pid7.log", uploader.files.get(2).name);
+            assertEquals(newer, uploader.files.get(2).path);
+            assertEquals("JVM crash (hs_err)", uploader.files.get(2).label);
+            assertEquals(6, uploader.files.size());
         }
 
         @Test
         @DisplayName("missing files stay as NOT FOUND rows and a missing mods folder lists no jars")
         void missing() {
             final LogUploader uploader = new LogUploader(() -> {});
-            uploader.scan(this.instance, false);
+            uploader.scan(this.instance);
 
             assertFalse(uploader.error, "a missing file is no error");
             assertEquals(6, uploader.files.size());
@@ -278,17 +254,16 @@ public class LogUploaderTest {
         @Test
         @DisplayName("a config copy is read with its token and cookie masked, like any log")
         void masksConfigs() throws IOException {
-            final Path mods = this.instance.resolve("mods");
-            write(mods.resolve("config/watermedia.toml"), "[network]\n  token = \"abc123\"\n\n[platforms]\n  biliBiliCookie = \"SESSDATA=xyz\"\n");
-            write(mods.resolve("config/app.properties"), "engine=VULKAN\nnetwork.token=abc123\n");
+            write(this.instance.resolve("config/watermedia.toml"), "[network]\n  token = \"abc123\"\n\n[platforms]\n  biliBiliCookie = \"SESSDATA=xyz\"\n");
+            write(this.instance.resolve("config/app.properties"), "engine=VULKAN\nnetwork.token=abc123\n");
             write(this.instance.resolve("logs/latest.log"), "Launched with --accessToken abc123 wm_err:0420\n");
 
             final LogUploader uploader = new LogUploader(() -> {});
-            uploader.scan(mods, true);
+            uploader.scan(this.instance);
 
             assertEquals("Launched with --accessToken ******** wm_err:0420\n", uploader.readContent(uploader.files.get(0)));
-            assertEquals("[network]\n  token = ********\n\n[platforms]\n  biliBiliCookie = ********\n", uploader.readContent(uploader.files.get(5)));
-            assertEquals("engine=VULKAN\nnetwork.token=********\n", uploader.readContent(uploader.files.get(6)));
+            assertEquals("[network]\n  token = ********\n\n[platforms]\n  biliBiliCookie = ********\n", uploader.readContent(uploader.files.get(4)));
+            assertEquals("engine=VULKAN\nnetwork.token=********\n", uploader.readContent(uploader.files.get(5)));
             assertFalse(uploader.error, "every file was read");
         }
 
@@ -299,7 +274,7 @@ public class LogUploaderTest {
             write(this.instance.resolve("crash-reports/crash-1.txt"), "IllegalStateException: (wm_err:0720) Failed to stop the file server\nCaused by: (wm_err:0005) Failed to load\n");
 
             final LogUploader uploader = new LogUploader(() -> {});
-            uploader.scan(this.instance.resolve("mods"), true);
+            uploader.scan(this.instance);
             assertEquals(Set.of(), uploader.codes);
             uploader.readContent(uploader.files.get(0));
             uploader.readContent(uploader.files.get(1));
@@ -313,7 +288,7 @@ public class LogUploaderTest {
             write(this.instance.resolve("logs/latest.log"), "Game dir C:\\Users\\Steve\\AppData\\Roaming\\.minecraft\nNatives at /home/alex/.cache/natives\n");
 
             final LogUploader uploader = new LogUploader(() -> {});
-            uploader.scan(this.instance.resolve("mods"), true);
+            uploader.scan(this.instance);
 
             assertEquals("Game dir C:\\Users\\********\\AppData\\Roaming\\.minecraft\nNatives at /home/********/.cache/natives\n",
                     uploader.readContent(uploader.files.get(0)));

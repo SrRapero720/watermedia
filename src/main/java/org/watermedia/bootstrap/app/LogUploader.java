@@ -12,7 +12,6 @@ import org.watermedia.tools.ThreadTool;
 
 import java.awt.Desktop;
 import java.io.BufferedReader;
-import java.io.File;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.net.URI;
@@ -39,12 +38,8 @@ import java.util.stream.Stream;
 public final class LogUploader {
     private static final Marker IT = MarkerManager.getMarker(LogUploader.class.getSimpleName());
     public static final String REPO = "SrRapero720/watermedia"; // MIRRORS github IN gradle.properties
-    // THE APP RUNS FROM A MINECRAFT mods FOLDER; IT ONLY DECIDES THE FOLDER LAYOUT THE SCAN READS
-    public static final boolean WORKDIR_IS_MODS = new File("").getAbsoluteFile().getName().equalsIgnoreCase("mods");
-    // DEVELOPMENT RUN: THE APP CLASSES COME FROM A CLASSES DIRECTORY INSTEAD OF A JAR
-    public static final boolean DEV = String.valueOf(LogUploader.class.getResource("LogUploader.class")).startsWith("file:");
-    // THE DIALOG OPENS WHERE AN INSTANCE CAN BE READ: INSIDE A mods FOLDER OR IN THE RUN DIRECTORY OF A DEVELOPMENT RUN
-    public static final boolean AVAILABLE = WORKDIR_IS_MODS || DEV;
+    // THE DIALOG OPENS WHERE THE HOME IS AN INSTANCE TO READ: A MINECRAFT ONE OR THE RUN DIRECTORY OF A DEVELOPMENT RUN
+    public static final boolean AVAILABLE = AppEnvironment.CURRENT.type() != AppEnvironment.Type.STANDALONE;
     // INPUT LIMITS OF THE ISSUE TITLE AND DESCRIPTION
     public static final int TITLE_LIMIT_CHARS = 80;
     public static final int DESCRIPTION_LIMIT_CHARS = 2_000;
@@ -140,7 +135,7 @@ public final class LogUploader {
             this.codes.clear();
             this.visible = true;
             this.working = true;
-            ThreadTool.thread("LogUploader-Scan", () -> this.scan(Path.of("").toAbsolutePath(), WORKDIR_IS_MODS));
+            ThreadTool.thread("LogUploader-Scan", () -> this.scan(AppEnvironment.CURRENT.home()));
             return;
         }
         if (this.stage <= 1) {
@@ -164,28 +159,22 @@ public final class LogUploader {
         }
     }
 
-    // LISTS THE FILES AND THE JAR NAMES OF THE INSTANCE. INSIDE A mods FOLDER THE GAME FILES SIT ONE LEVEL UP AND THE
-    // APP FILES IN IT; A DEVELOPMENT RUN HOLDS BOTH IN ITS WORKING DIRECTORY, WITH THE JARS UNDER ITS mods FOLDER
-    void scan(final Path cwd, final boolean inMods) {
+    // LISTS THE FILES AND THE JAR NAMES OF THE INSTANCE. THE HOME OF THE APP IS THE INSTANCE ROOT (A MINECRAFT ONE OR A
+    // DEVELOPMENT RUN), SO THE GAME AND THE APP SHARE config/ AND logs/, WITH THE JARS UNDER ITS mods FOLDER
+    void scan(final Path cwd) {
         try {
-            final Path instance = inMods ? cwd.getParent() : cwd;
-            final Path mods = inMods ? cwd : cwd.resolve("mods");
-            final Path crash = latestFile(p -> p.toString().endsWith(".txt"), instance.resolve("crash-reports"));
-            // A JVM FATAL ERROR LOG (hs_err_pid<pid>.log) LANDS IN THE WORKING DIRECTORY OF ITS PROCESS: THE GAME'S OR THE APP'S
-            final Path fatal = latestFile(p -> Files.isRegularFile(p) && p.getFileName().toString().startsWith("hs_err_pid"), instance, cwd);
-            // THE APP WRITES ITS LOG AND ITS WATERCONFIG FOLDER RELATIVE TO ITS OWN WORKING DIRECTORY
-            final Path gameConfig = instance.resolve("config").resolve(WaterMedia.ID + ".toml");
-            final Path appConfig = cwd.resolve(WaterConfig.getPath()).resolve(WaterMedia.ID + ".toml");
+            final Path mods = cwd.resolve("mods");
+            final Path crash = latestFile(p -> p.toString().endsWith(".txt"), cwd.resolve("crash-reports"));
+            // A JVM FATAL ERROR LOG (hs_err_pid<pid>.log) LANDS IN THE WORKING DIRECTORY OF ITS PROCESS, THE GAME'S OR THE APP'S
+            final Path fatal = latestFile(p -> Files.isRegularFile(p) && p.getFileName().toString().startsWith("hs_err_pid"), cwd);
+            final Path config = cwd.resolve(WaterConfig.getPath()).resolve(WaterMedia.ID + ".toml");
 
-            this.addScannedFile("latest.log", "Game log", instance.resolve("logs").resolve("latest.log"));
+            this.addScannedFile("latest.log", "Game log", cwd.resolve("logs").resolve("latest.log"));
             this.addScannedFile(crash != null ? crash.getFileName().toString() : "crash-reports", "Crash report", crash);
             this.addScannedFile(fatal != null ? fatal.getFileName().toString() : "hs_err_pid.log", "JVM crash (hs_err)", fatal);
             this.addScannedFile("watermedia-app.log", "App log", cwd.resolve("logs").resolve("watermedia-app.log"));
-            // A DEVELOPMENT RUN SHARES ONE LIBRARY CONFIG BETWEEN THE GAME AND THE APP: ONE ROW FOR ONE PATH
-            final boolean shared = gameConfig.equals(appConfig);
-            this.addScannedFile(WaterMedia.ID + (shared ? ".toml" : ".toml (game)"), shared ? "Config" : "Config (game)", gameConfig);
-            if (!shared) this.addScannedFile(WaterMedia.ID + ".toml (app)", "Config (app)", appConfig);
-            this.addScannedFile(AppConfig.ID + ".properties", "App preferences", appConfig.resolveSibling(AppConfig.ID + ".properties"));
+            this.addScannedFile(WaterMedia.ID + ".toml", "Config", config);
+            this.addScannedFile(AppConfig.ID + ".properties", "App preferences", config.resolveSibling(AppConfig.ID + ".properties"));
 
             // THE JAR NAMES FEED BOTH THE SUSPECTED MODS AND THE EXTENSION ALERTS OF THE REPORT
             try (final Stream<Path> stream = Files.isDirectory(mods) ? Files.list(mods) : Stream.empty()) {
@@ -439,22 +428,20 @@ public final class LogUploader {
 
     // NEWEST MATCHING FILE OF THE DIRECTORIES BY MODIFICATION TIME, OR NULL; AN UNREADABLE TIME COUNTS AS THE OLDEST AND
     // AN UNLISTABLE DIRECTORY OFFERS NOTHING
-    private static Path latestFile(final Predicate<Path> filter, final Path... dirs) {
+    private static Path latestFile(final Predicate<Path> filter, final Path dir) {
+        if (!Files.isDirectory(dir)) return null;
         Path latest = null;
         long latestTime = Long.MIN_VALUE;
-        for (final Path dir: dirs) {
-            if (!Files.isDirectory(dir)) continue;
-            try (final Stream<Path> stream = Files.list(dir)) {
-                for (final Path file: stream.filter(filter).toList()) {
-                    long time = 0L;
-                    try { time = Files.getLastModifiedTime(file).toMillis(); }
-                    catch (final IOException ignored) {}
-                    if (time <= latestTime) continue;
-                    latest = file;
-                    latestTime = time;
-                }
-            } catch (final IOException | RuntimeException ignored) {}
-        }
+        try (final Stream<Path> stream = Files.list(dir)) {
+            for (final Path file: stream.filter(filter).toList()) {
+                long time = 0L;
+                try { time = Files.getLastModifiedTime(file).toMillis(); }
+                catch (final IOException ignored) {}
+                if (time <= latestTime) continue;
+                latest = file;
+                latestTime = time;
+            }
+        } catch (final IOException | RuntimeException ignored) {}
         return latest;
     }
 

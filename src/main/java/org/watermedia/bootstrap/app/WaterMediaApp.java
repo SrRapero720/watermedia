@@ -32,7 +32,6 @@ import org.watermedia.tools.ThreadTool;
 import java.io.File;
 import java.nio.FloatBuffer;
 import java.nio.IntBuffer;
-import java.nio.file.Path;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.List;
@@ -149,9 +148,9 @@ public class WaterMediaApp {
         final Throwable[] failure = new Throwable[1];
         final Thread loader = ThreadTool.thread("WaterMediaApp-Init", () -> {
             try {
-                // PERSISTENT DATA GOES IN THE WORKING DIRECTORY NEXT TO config/ AND logs/; A null TEMP KEEPS THE
-                // MEDIA CACHE IN THE SYSTEM TEMP DIR
-                WaterMedia.start("WaterMediaApp", null, Path.of("").toAbsolutePath(), true);
+                // PERSISTENT DATA GOES IN THE HOME, NEXT TO config/ AND logs/ (THE LAUNCHER STARTED THIS JVM THERE).
+                // A null TEMP KEEPS THE MEDIA CACHE IN THE SYSTEM TEMP DIR
+                WaterMedia.start("WaterMediaApp", null, AppEnvironment.CURRENT.home(), true);
             } catch (final Throwable t) {
                 failure[0] = t;
             }

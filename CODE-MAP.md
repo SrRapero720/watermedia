@@ -12,7 +12,8 @@ revamp of 2026-11-16 (issue title and description, `TextArea`, clipboard helpers
 and file server port check wave of 2026-11-16 (`wm_err` registry, startup check of a fixed `serverPort`) and the site
 lists wave of 2026-11-17 (`player.whitelist`, `player.blacklist`, `WhitelistException`, `BlacklistException`) and the
 download wave of 2026-11-22 (`FFTranscoder`, `MediaDownloader`, `DownloadDialog`, `ChoiceGrid`, `Container.MP3`/`M4A`)
-and the demux fix of 2026-11-23 (separate track read by need, no blocking packet put) folded in.
+and the working directory fix of 2026-11-22 (`AppEnvironment`: a jar in `mods` runs from the instance root) and the
+demux fix of 2026-11-23 (separate track read by need, no blocking packet put) folded in.
 Symbol names are exact; line numbers are omitted on purpose.
 Legend: ⚠ gotcha or hard rule, ↪ reuse pointer ("to do X use Y").
 
@@ -408,16 +409,31 @@ Package map (`src/main/java/org/watermedia`):
   `AppBootstrap` or `WaterMedia.start`.
 
 ### `AppBootstrap` (`bootstrap/AppBootstrap.java`): standalone launcher (`Main-Class`)
-- Launcher JVM: `prepare()` extracts the `nested` jars that `bootstrap.properties` lists from `META-INF/jarjar/` to
+- `AppEnvironment` (`bootstrap/app`, record `type`, `home`, `app`; JDK only, so the launcher loads it): the one place
+  that decides where the app runs. `of(cwd, app)` is pure and `CURRENT` resolves it for the process from its working
+  directory and the jar or classes directory it was loaded from. ⚠ Owner rule 2026-11-22, `Type.MINECRAFT`: a jar
+  inside a `mods` folder (any letter case) always runs from the instance root (`mods/..`), whatever directory the
+  process started in, because the game's `config/watermedia.toml` lives there and the app's Settings screen edits it
+  (`logs/watermedia-app.log` joins the game's `logs/`). `Type.DEVELOPMENT` (classes from a directory) keeps the
+  working directory. `Type.STANDALONE` (any other jar) keeps it too, or takes the folder of the jar when the working
+  directory is read-only (`system32` after a shortcut or a search launch; neither writable → the working directory).
+  The answer is the same from the home, so the launcher and the app it starts there agree without passing anything.
+  ↪ Read `AppEnvironment.CURRENT` for the app's folder or type (`WaterMedia.start` cwd, `LogUploader.AVAILABLE` and
+  its scan root); never `Path.of("")` or a check of your own.
+- Launcher JVM: reads `AppEnvironment.CURRENT`; `prepare(home, app)` extracts the `nested` jars that
+  `bootstrap.properties` lists from `META-INF/jarjar/` to
   `<tmpdir>/watermedia/libs`, downloads the `Dependency` list coded in `dependencies(Properties)` (versions and SHA-256
   pins from `bootstrap.properties`; Maven Central, `User-Agent: WaterMedia`, ≤ `MAX_DOWNLOAD_BYTES=256 MiB`, exact
-  length, atomic move; optional `lwjgl-vulkan`/`lwjgl-shaderc`), adds extension jars from the CWD named
-  `watermedia_*`, `wm_*`, `waterm_*`, `wmedia_*`, then `relaunch(...)` a child `java --enable-native-access=ALL-UNNAMED
-  -Dwatermedia.app=true -Dwatermedia.engine=<opengl|vulkan> ... AppBootstrap`. Exit code `RELAUNCH_EXIT=42` relaunches;
-  errors show the Swing `BootstrapWindow` (Relaunch/Close) unless headless.
+  length, atomic move; optional `lwjgl-vulkan`/`lwjgl-shaderc`), adds extension jars from the home and from the folder
+  of the jar (the `mods` folder of an instance) named `watermedia_*`, `wm_*`, `waterm_*`, `wmedia_*`, then
+  `relaunch(...)` a child `java --enable-native-access=ALL-UNNAMED
+  -Dwatermedia.app=true -Dwatermedia.engine=<opengl|vulkan> ... AppBootstrap` started in the home
+  (`ProcessBuilder.directory`, classpath entries made absolute), so `config/`, `logs/` and every relative path of the
+  app live there. Exit code `RELAUNCH_EXIT=42` relaunches; errors show the Swing `BootstrapWindow` (Relaunch/Close)
+  unless headless.
 - Child JVM (`-Dwatermedia.app` set): `WaterMediaApp.start(...)` with the `ServiceLoader<AppBootstrap.Extension>`
   loader (`interface Extension { default String name(); void load(); }`).
-- Engine choice: `-Dwatermedia.engine` > `config/app.properties` key `engine` > `vulkan`.
+- Engine choice: `-Dwatermedia.engine` > `<home>/config/app.properties` key `engine` > `vulkan`.
 - ⚠ Runs before Log4j/Gson exist (plain `HttpURLConnection`, `System.out`); shares `<tmpdir>/watermedia/libs`.
 
 ### Binaries module (`binaries/src/main/java/org/watermedia/binaries`)
@@ -1242,7 +1258,7 @@ requested, and SVG yields RGBA when RGBA is requested (everything else is conver
 - `WaterMediaApp.start(Runnable task)` (render thread): `AppConfig.register()` → `initWindow()` (GLFW, engine from
   `-Dwatermedia.engine` or `AppConfig.engine`, `RenderSystem.chooseEngine/attach`, window rebuilt for GL when Vulkan
   attach fails) → `TextRenderer` → `Assets.load` → `initShell()` (`RootScreen`, global error/exit dialogs) →
-  `LoadingScreen` frames while thread `WaterMediaApp-Init` runs `WaterMedia.start("WaterMediaApp", null, cwd, true)` →
+  `LoadingScreen` frames while thread `WaterMediaApp-Init` runs `WaterMedia.start("WaterMediaApp", null, AppEnvironment.CURRENT.home(), true)` →
   `catalog.load()`, `initScreens()` (`home`, `mrl`, `regions`, `player`, `multimedia`, `settings`), extension SPI →
   `mainLoop()` (nested `WaterMediaApp.FramePlan {IDLE, DIRECT, CACHE, COMPOSITE}` and `WaterMediaApp.FrameLimiter`
   paced to the monitor refresh,
@@ -1305,17 +1321,18 @@ requested, and SVG yields RGBA when RGBA is requested (everything else is conver
     first audio track (the original language) is downloaded.
 - `LogUploader` (dialog stages SCAN/UPLOAD/ISSUE = `stage` 1..3; workers `LogUploader-Scan`, `-Upload`, `-Report`,
   `-Submit`):
-  - Gate: `AVAILABLE = WORKDIR_IS_MODS || DEV` opens the dialog (else the home tile reads `LOCKED`); `DEV` is a run
-    whose classes load from a directory (IDE or tests); `WORKDIR_IS_MODS` only picks the layout `scan(cwd, inMods)`
-    reads. ⚠ Nothing is simulated in a dev run: uploads reach mclo.gs and the issue page opens in the real browser.
+  - Gate: `AVAILABLE` opens the dialog (else the home tile reads `LOCKED`) where `AppEnvironment.CURRENT.type()` is
+    `MINECRAFT` or `DEVELOPMENT`, the two types whose home is an instance to read (§5 `AppEnvironment`). ⚠ Nothing is
+    simulated in a dev run: uploads reach mclo.gs and the issue page opens in the real browser.
   - Sessions: a hidden dialog at `stage == 3 && !issueOpened` reopens as it was (uploads, report, texts) instead of
     rescanning, which would paste the same files again; any other hidden dialog starts a fresh session (scan).
-  - `scan`: inside `mods` the game files sit one level up and the app files in the CWD; a dev run reads both from the
-    CWD (`run/` in IntelliJ) and the jars from `<cwd>/mods`. Rows are `FileEntry(name, label, path)` (the label names
-    the report line): `latest.log`, newest `crash-reports/*.txt`, newest `hs_err_pid*` of the instance and the CWD,
-    `logs/watermedia-app.log`, the config copies `<instance>/config/watermedia.toml` (game) and
-    `<cwd>/<WaterConfig.getPath()>/watermedia.toml` (app; one "Config" row when both paths match) and
-    `app.properties`. A found row reads `READY`, or `TOO LARGE` past 10 MiB or 25 000 lines; a missing one `NOT FOUND`.
+  - `scan(cwd)` (called with `AppEnvironment.CURRENT.home()`): one layout, since the home is the instance root (a
+    Minecraft instance, or `run/` in a dev run): the game and the app share `config/` and `logs/`, and the jars come
+    from `<cwd>/mods`. Rows are
+    `FileEntry(name, label, path)` (the label names the report line): `latest.log`, newest `crash-reports/*.txt`,
+    newest `hs_err_pid*` of the CWD, `logs/watermedia-app.log`, `<cwd>/<WaterConfig.getPath()>/watermedia.toml`
+    ("Config") and `app.properties`. ⚠ Releases up to 3.0.2 ran the app from `mods`, so an old `mods/config` and
+    `mods/logs` may remain there; nothing reads or migrates them. A found row reads `READY`, or `TOO LARGE` past 10 MiB or 25 000 lines; a missing one `NOT FOUND`.
     It also keeps the lowercased `*.jar` names (`jars`) for the suspected mods and the extension alerts.
   - `upload`: each uploadable row is read with a lenient UTF-8 decoder, masked by `DataTool.redact` and `maskUser`
     (`readContent`) and POSTed as a form to `https://api.mclo.gs/1/log` through `NetRequest.httpsOnly()`.
@@ -1617,7 +1634,7 @@ System properties: `watermedia.engine`, `watermedia.app` (child JVM flag), `wate
   symlink refusal (`NOFOLLOW_LINKS`), TLauncher refusal, `DEFAULT_NETWORK_TOKEN` guard off loopback.
 
 ## 16. Tests (`src/test`)
-- Layout mirrors the main packages (130 files, 17 of them support helpers). Root: `ApiGuideExampleTest` (runs the
+- Layout mirrors the main packages (131 files, 17 of them support helpers). Root: `ApiGuideExampleTest` (runs the
   public-only `ApiGuideExample` and checks the sizes its `DownscaleFilter` yields),
   `BootstrapProcessTest` and `ServiceLifecycleProcessTest` (child JVMs through `MediaBootstrap.runProbe`),
   `LoggerRedactionTest`, `ErrorCodeInventoryTest` (parses the `ERR_*` declarations of `WaterMedia.java`; every site
@@ -1682,7 +1699,9 @@ System properties: `watermedia.engine`, `watermedia.app` (child JVM flag), `wate
   device-free `ChannelTable`), `ALSinkTest`, `SpatialAudioTest`;
   util `HttpHeadersTest`, `NetRequestTest`, `MediaTypeTest`, `MediaQualityTest`, `PixelFormatTest`, `MathUtilTest`,
   `MathEasesTest`; bootstrap `AppBootstrapDependenciesTest`, `DefensiveCheckTest`, app `AppConfigTest`,
-  `FramePlanTest`, `LogUploaderTest` (stages with the stage 3 resume and the report retry, both scan layouts in a
+  `AppEnvironmentTest` (the three types, a read-only working directory through a deny ACL on Windows and permission
+  bits elsewhere, the same answer from the home),
+  `FramePlanTest`, `LogUploaderTest` (stages with the stage 3 resume and the report retry, the instance scan in a
   `@TempDir`, masked reads and user names, collected `wm_err` codes, body with `## Error codes`, link limit),
   `MediaDownloaderTest` (`Names`: file names and bitrate labels; `Dialog`: picks, container rules, presets, a source
   without sound, sliders, a download, the name taken from the link, the picks kept for the next dialog, a cancel and

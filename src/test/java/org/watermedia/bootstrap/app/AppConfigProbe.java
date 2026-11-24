@@ -72,9 +72,9 @@ public final class AppConfigProbe {
     // UTILITY
     // ==========================================================================
     private static String launcherEngine() throws Exception {
-        final Method engine = AppBootstrap.class.getDeclaredMethod("engine");
+        final Method engine = AppBootstrap.class.getDeclaredMethod("engine", Path.class);
         engine.setAccessible(true);
-        return (String) engine.invoke(new AppBootstrap());
+        return (String) engine.invoke(new AppBootstrap(), Path.of("").toAbsolutePath());
     }
 
     private static void expect(final String expected, final String actual, final String what) {
