@@ -11,7 +11,8 @@ import static org.watermedia.test.support.MediaBootstrap.runProbe;
 /**
  * Verifies the one-shot WaterMedia load in fresh JVMs: the modules each side walks with and without the client
  * libraries or the Binaries classes, a failed native install, a file server that cannot bind, the installed natives,
- * the native TLS bundle and a load that stays final whatever state it left.
+ * the native TLS bundle, config files that go to the folder the host set on WaterConfig and a load that stays final
+ * whatever state it left.
  */
 @DisplayName("WaterMedia load")
 public class BootstrapProcessTest {
@@ -26,4 +27,5 @@ public class BootstrapProcessTest {
     @Test @DisplayName("a file server that cannot bind its port leaves the load complete and uploads working") void occupiedServerPortKeepsTheLoadComplete() throws Exception { runProbe(BootstrapProbe.class, this.directory, "optional-failure", false); }
     @Test @DisplayName("the native TLS bundle holds the truststore's authorities and keeps verification on") void nativeAuthoritiesFollowTheTruststore() throws Exception { runProbe(BootstrapProbe.class, this.directory, "tls", false); }
     @Test @DisplayName("an empty truststore disables natives without failing the load") void emptyTruststoreDisablesNativesWithoutFailingTheLoad() throws Exception { runProbe(BootstrapProbe.class, this.directory, "tls-empty", false); }
+    @Test @DisplayName("the config files go to the folder the host set on WaterConfig, whatever working directory the load gets") void configGoesToTheFolderTheHostSet() throws Exception { runProbe(BootstrapProbe.class, this.directory, "config", true); }
 }

@@ -12,8 +12,9 @@ revamp of 2026-11-16 (issue title and description, `TextArea`, clipboard helpers
 and file server port check wave of 2026-11-16 (`wm_err` registry, startup check of a fixed `serverPort`) and the site
 lists wave of 2026-11-17 (`player.whitelist`, `player.blacklist`, `WhitelistException`, `BlacklistException`) and the
 download wave of 2026-11-22 (`FFTranscoder`, `MediaDownloader`, `DownloadDialog`, `ChoiceGrid`, `Container.MP3`/`M4A`)
-and the working directory fix of 2026-11-22 (`AppEnvironment`: a jar in `mods` runs from the instance root) and the
-demux fix of 2026-11-23 (separate track read by need, no blocking packet put) folded in.
+and the working directory fix of 2026-11-22 (`AppEnvironment`: a jar in `mods` runs from the instance root, the app
+points WaterConfig at its home) and the demux fix of 2026-11-23 (separate track read by need, no blocking packet put)
+folded in.
 Symbol names are exact; line numbers are omitted on purpose.
 Legend: ⚠ gotcha or hard rule, ↪ reuse pointer ("to do X use Y").
 
@@ -388,6 +389,9 @@ Package map (`src/main/java/org/watermedia`):
   `@Comment`, `@NumberConditions`, `@StringConditions`, controls (SEEKBAR, DROPDOWN, PASSWORD, INPUT_FOLDER).
 - `start(...)`: `WaterConfig.init()`; if no spec `watermedia` exists → `registerBlocking(WaterMediaConfig.class)`;
   else waits on the existing spec monitor until loaded or FAILED, then `refresh()` (one writer per process).
+  ⚠ The host owns the WaterConfig folder (owner rule 2026-11-23): `start` never moves it, whatever `cwd` it gets.
+  The default relative `config` resolves against the process directory, and a host that may run from another one sets
+  it before the load, as the app does (§12 `WaterMediaApp.start`). Never anchor it to `cwd` inside the library.
 - File `config/watermedia.toml` under the WaterConfig path (CWD `config/`); library `me.srrapero720.waterconfig`
   (nested jar, `requires static waterconfig`, `opens org.watermedia to waterconfig`). Full key table in §14.
 
@@ -1255,7 +1259,9 @@ requested, and SVG yields RGBA when RGBA is requested (everything else is conver
 ## 12. Standalone app (`bootstrap/app`, internal)
 
 ### 12.1 Runtime
-- `WaterMediaApp.start(Runnable task)` (render thread): `AppConfig.register()` → `initWindow()` (GLFW, engine from
+- `WaterMediaApp.start(Runnable task)` (render thread): `WaterConfig.setPath(<home>/config)` (the app owns the folder
+  of its config files, ⚠ `setPath` takes the config folder itself, not the home) → `AppConfig.register()` →
+  `initWindow()` (GLFW, engine from
   `-Dwatermedia.engine` or `AppConfig.engine`, `RenderSystem.chooseEngine/attach`, window rebuilt for GL when Vulkan
   attach fails) → `TextRenderer` → `Assets.load` → `initShell()` (`RootScreen`, global error/exit dialogs) →
   `LoadingScreen` frames while thread `WaterMediaApp-Init` runs `WaterMedia.start("WaterMediaApp", null, AppEnvironment.CURRENT.home(), true)` →
@@ -1641,7 +1647,8 @@ System properties: `watermedia.engine`, `watermedia.app` (child JVM flag), `wate
   carries a declared constant used once, inside its package range, and every constant but `ERR_UNKNOWN` has a site;
   details in §15). Probes and scenarios:
   `BootstrapProbe` (`server`, `client`, `native`, `native-failure`, `optional-failure`, `tls` via
-  `TLSLifecycleProbe.run`, `tls-empty`), `WithoutBinariesProbe` (`server-no-binaries`, `client-no-binaries`),
+  `TLSLifecycleProbe.run`, `tls-empty`, `config`: the files go to the folder the host set on WaterConfig, never to
+  the `cwd` of the load), `WithoutBinariesProbe` (`server-no-binaries`, `client-no-binaries`),
   `ServiceLifecycleProbe` (`platform`, `uploads`, `evicted`, `failed-probe`), `AppConfigProbe` (`defaults`, `shared`,
   `malformed`, `override`, launched by `AppConfigTest`), `NetworkServerTest.main` (`storage-lock`),
   `NetworkAPITest.main` (`host`: a dedicated server that starts the file server reports `serverEnabled()` at once).

@@ -41,6 +41,7 @@ public final class BootstrapProbe {
             case "server" -> server(root);
             case "native" -> nativeLoad(root);
             case "client" -> client(root);
+            case "config" -> config(root);
             default -> throw new IllegalArgumentException("Unknown scenario: " + scenario);
         }
         System.out.println("PROBE_OK " + scenario);
@@ -148,6 +149,17 @@ public final class BootstrapProbe {
             origin.release();
             if (!previous.await(10_000) || previous.status() != MRL.Status.LOADED) throw new AssertionError("The interrupted wait cancelled the load: " + previous.status());
         }
+        requireFinal(root);
+    }
+
+    // THE HOST OWNS THE WATERCONFIG FOLDER, AS THE APP DOES WITH ITS HOME: THE LOAD WRITES THERE AND NEVER MOVES IT TO THE cwd IT GETS
+    private static void config(final Path root) {
+        final Path folder = root.resolve("instance/config");
+        WaterConfig.setPath(folder);
+        WaterMedia.start("PROBE", root.resolve("temp"), root.resolve("data"), false);
+        if (!WaterMedia.loaded()) throw new AssertionError("The load did not complete");
+        if (!Files.isRegularFile(folder.resolve("watermedia.toml"))) throw new AssertionError("The config did not go to the folder the host set");
+        if (Files.exists(root.resolve("config")) || Files.exists(root.resolve("data/config"))) throw new AssertionError("The config was written outside the folder the host set");
         requireFinal(root);
     }
 

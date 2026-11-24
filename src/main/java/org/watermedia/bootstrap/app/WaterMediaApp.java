@@ -1,5 +1,6 @@
 package org.watermedia.bootstrap.app;
 
+import me.srrapero720.waterconfig.WaterConfig;
 import org.apache.logging.log4j.Level;
 import org.apache.logging.log4j.Marker;
 import org.apache.logging.log4j.MarkerManager;
@@ -85,6 +86,7 @@ public class WaterMediaApp {
     public static void start(final Runnable task) {
         // PHASE 1: SHOW THE WINDOW ASAP; THE APP SPEC REGISTERS FIRST SO ITS LOAD ON THE WATERCONFIG IO POOL
         // OVERLAPS THE SLOWER WINDOW AND ENGINE BOOT
+        WaterConfig.setPath(AppEnvironment.CURRENT.home().resolve(WaterConfig.getPath())); // STANDALONE MODE REQUIRES TO SPECIFY IT.
         AppConfig.register();
         initWindow();
         ctx.text = new TextRenderer();
