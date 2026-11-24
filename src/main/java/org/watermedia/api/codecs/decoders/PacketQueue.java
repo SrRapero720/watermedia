@@ -13,8 +13,8 @@ import java.util.ArrayDeque;
  * <p>Unlike {@link FrameQueue} (a fixed ring buffer), packets go in an {@link ArrayDeque}: they are small, their
  * count varies widely and {@code av_packet_clone} is cheap, so no slot is pre-allocated. Each {@link #flush()}
  * increments the serial, and a decode thread drops packets of an older serial after a seek. There is no count
- * limit, only a byte limit ({@code maxBytes}): {@link #put(AVPacket)} blocks above it until the decoder catches
- * up, which keeps network streams with large buffers from running out of memory.
+ * limit, only a byte limit ({@code maxBytes}): {@link #tryPut(AVPacket)} refuses packets above it and the demuxer
+ * holds its own until the decoder catches up, which keeps network streams with large buffers from running out of memory.
  */
 final class PacketQueue {
     private final ArrayDeque<Entry> packets = new ArrayDeque<>();
@@ -25,41 +25,15 @@ final class PacketQueue {
     private long totalBytes;
     private final long maxBytes;
 
-    /** Creates a queue whose {@link #put(AVPacket)} blocks once {@code maxBytes} are queued; {@code Long.MAX_VALUE} lifts the limit. */
+    /** Creates a queue that refuses packets once {@code maxBytes} are queued; {@code Long.MAX_VALUE} lifts the limit. */
     public PacketQueue(final long maxBytes) {
         if (maxBytes <= 0) throw new IllegalArgumentException(DataTool.errCode(WaterMedia.ERR_PACKETQUEUE_BYTE_LIMIT) + "Failed to create the packet queue due to non-positive byte limit");
         this.maxBytes = maxBytes;
     }
 
     /**
-     * Enqueues a clone of the packet, blocking while the byte limit is reached (backpressure to the demux thread); the
-     * caller keeps its packet. Returns false when the queue was aborted or finished, the wait was interrupted or the clone failed.
-     */
-    public boolean put(final AVPacket packet) {
-        synchronized (this.lock) {
-            while (this.totalBytes >= this.maxBytes && !this.aborted && !this.finished) {
-                try {
-                    this.lock.wait();
-                } catch (final InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    return false;
-                }
-            }
-            if (this.aborted || this.finished) return false;
-
-            // CLONE ONLY ONCE THE ENTRY WILL ACTUALLY BE ENQUEUED, SO A REJECTION ALLOCATES NOTHING NATIVE
-            final AVPacket clone = avcodec.av_packet_clone(packet);
-            if (clone == null) return false;
-            this.packets.addLast(new Entry(clone, this.serial));
-            this.totalBytes += clone.size();
-            this.lock.notifyAll();
-        }
-        return true;
-    }
-
-    /**
-     * Non-blocking put. Returns false immediately when the queue is full, aborted or finished, or the clone fails.
-     * The caller's original packet is not consumed on failure.
+     * Enqueues a clone of the packet without ever waiting; the caller keeps its packet. Returns false when the byte
+     * limit is reached (backpressure to the demux thread), the queue was aborted or finished, or the clone failed.
      */
     public boolean tryPut(final AVPacket packet) {
         synchronized (this.lock) {
@@ -95,7 +69,6 @@ final class PacketQueue {
             final Entry entry = this.packets.pollFirst();
             this.totalBytes -= entry.packet().size();
             serialOut[0] = entry.serial();
-            this.lock.notifyAll();
             return entry.packet();
         }
     }
@@ -106,7 +79,6 @@ final class PacketQueue {
             while (!this.packets.isEmpty()) avcodec.av_packet_free(this.packets.pollFirst().packet());
             this.totalBytes = 0;
             this.serial++;
-            this.lock.notifyAll();
         }
     }
 
@@ -132,7 +104,7 @@ final class PacketQueue {
         }
     }
 
-    /** Unblocks readers and writers, which then get false or null until {@link #reset()}; pending packets stay owned until flush, reset or free. */
+    /** Unblocks the reader; puts get false and gets null until {@link #reset()}, and pending packets stay owned until flush, reset or free. */
     public void abort() {
         synchronized (this.lock) {
             this.aborted = true;
@@ -154,7 +126,6 @@ final class PacketQueue {
         synchronized (this.lock) {
             while (!this.packets.isEmpty()) avcodec.av_packet_free(this.packets.pollFirst().packet());
             this.totalBytes = 0;
-            this.lock.notifyAll();
         }
     }
 

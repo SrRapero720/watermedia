@@ -450,6 +450,12 @@ public final class FFDecoder {
         long demuxAudioPackets = 0;
         boolean mainEof = false;
         boolean trackEof = false;
+        // A PACKET ITS QUEUE HAD NO ROOM FOR WAITS HERE, SO A FULL QUEUE NEVER KEEPS THE DEMUXER FROM FEEDING THE OTHER ONE
+        boolean mainHeld = false;
+        boolean trackHeld = false;
+        // HOW FAR EACH INPUT WAS READ IN SECONDS, NaN UNTIL A PACKET SAYS
+        double mainSec = Double.NaN;
+        double trackSec = Double.NaN;
 
         LOGGER.debug(IT, "Demux loop starting: videoIdx={}, audioIdx={}, useAudioTrack={}, nb_streams={}",
                 this.videoStreamIndex, this.audioStreamIndex, this.useAudioTrack,
@@ -464,6 +470,14 @@ public final class FFDecoder {
                     final boolean precise = seekReq.precise();
 
                     this.timeline.signalDemuxResumed();
+
+                    // WHAT WAS READ BEFORE THE SEEK BELONGS TO THE OLD POSITION
+                    avcodec.av_packet_unref(packet);
+                    if (trackPacket != null) avcodec.av_packet_unref(trackPacket);
+                    mainHeld = false;
+                    trackHeld = false;
+                    mainSec = Double.NaN;
+                    trackSec = Double.NaN;
 
                     if (precise) {
                         this.stopDecodeThreads();
@@ -548,31 +562,40 @@ public final class FFDecoder {
                     continue;
                 }
 
-                // SEPARATE AUDIO TRACK
+                boolean moved = false;
+
+                // SEPARATE AUDIO TRACK: READ ONLY WHILE IT TRAILS THE VIDEO OR ITS QUEUE RAN DRY. A FIXED SHARE OF PACKETS RAN IT MINUTES
+                // AHEAD UNTIL ITS QUEUE FILLED, AND FROM THEN ON THE VIDEO GOT ONE PACKET PER trackPacketReads OF SOUND PLAYED (FROZEN PICTURE)
                 if (this.useAudioTrack && !trackEof && this.trackFormatContext != null && trackPacket != null) {
                     final int reads = WaterMediaConfig.codecs.ffmpeg.trackPacketReads;
                     for (int i = 0; i < reads; i++) {
-                        final int trackResult = avformat.av_read_frame(this.trackFormatContext, trackPacket);
-                        if (trackResult >= 0) {
-                            try {
-                                if (trackPacket.stream_index() == this.audioStreamIndex) {
-                                    if (!this.audioPacketQueue.put(trackPacket)) break;
-                                    demuxAudioPackets++;
-                                }
-                            } finally {
-                                avcodec.av_packet_unref(trackPacket);
+                        if (!trackHeld) {
+                            if (!mainEof && trackSec > mainSec && this.audioPacketQueue.byteSize() > 0) break;
+                            if (avformat.av_read_frame(this.trackFormatContext, trackPacket) < 0) {
+                                trackEof = true;
+                                LOGGER.debug(IT, "Audio track reached EOF after {} packets", demuxAudioPackets);
+                                this.audioPacketQueue.finish();
+                                break;
                             }
-                        } else {
-                            trackEof = true;
-                            LOGGER.debug(IT, "Audio track reached EOF after {} packets", demuxAudioPackets);
-                            this.audioPacketQueue.finish();
-                            break;
+                            moved = true;
+                            if (trackPacket.stream_index() != this.audioStreamIndex) {
+                                avcodec.av_packet_unref(trackPacket);
+                                continue;
+                            }
+                            final long stamp = trackPacket.dts() != AV_NOPTS_VALUE ? trackPacket.dts() : trackPacket.pts();
+                            if (stamp != AV_NOPTS_VALUE) trackSec = stamp * this.audioTimeBase;
+                            trackHeld = true;
                         }
+                        if (!this.audioPacketQueue.tryPut(trackPacket)) break;
+                        avcodec.av_packet_unref(trackPacket);
+                        trackHeld = false;
+                        demuxAudioPackets++;
+                        moved = true;
                     }
                 }
 
                 // READ PACKET (MAIN CONTEXT)
-                if (!mainEof) {
+                if (!mainEof && !mainHeld) {
                     final int result = avformat.av_read_frame(this.formatContext, packet);
                     // A READ AN ABORT CUT SHORT ENDS THIS DECODER, NOT THE INPUT: THE CLOCK, SHARED WITH THE NEXT DECODER, NEVER HEARS IT AS EOF
                     if (result < 0 && this.aborted) break;
@@ -582,6 +605,15 @@ public final class FFDecoder {
                         this.videoPacketQueue.finish();
                         // WITHOUT A SEPARATE TRACK THE AUDIO PACKETS COME FROM THIS CONTEXT TOO, SO THE AUDIO QUEUE FINISHES AND DRAINS CLEANLY
                         if (!this.useAudioTrack) this.audioPacketQueue.finish();
+                    } else {
+                        moved = true;
+                        final int streamIndex = packet.stream_index();
+                        if (streamIndex == this.videoStreamIndex) {
+                            final long stamp = packet.dts() != AV_NOPTS_VALUE ? packet.dts() : packet.pts();
+                            if (stamp != AV_NOPTS_VALUE) mainSec = stamp * this.videoTimeBase;
+                            mainHeld = true;
+                        } else if (!this.useAudioTrack && streamIndex == this.audioStreamIndex) mainHeld = true;
+                        else avcodec.av_packet_unref(packet);
                     }
                 }
 
@@ -606,36 +638,20 @@ public final class FFDecoder {
                     continue;
                 }
 
-                if (mainEof) continue;
-
-                try {
-                    final int streamIndex = packet.stream_index();
-                    if (streamIndex == this.videoStreamIndex) {
-                        while (!this.videoPacketQueue.tryPut(packet)) {
-                            if (Thread.currentThread().isInterrupted() || this.timeline.seekPending()) break;
-                            if (this.useAudioTrack && this.trackFormatContext != null && trackPacket != null) {
-                                final int sr = avformat.av_read_frame(this.trackFormatContext, trackPacket);
-                                if (sr >= 0) {
-                                    try {
-                                        if (trackPacket.stream_index() == this.audioStreamIndex) {
-                                            this.audioPacketQueue.put(trackPacket);
-                                            demuxAudioPackets++;
-                                        }
-                                    } finally {
-                                        avcodec.av_packet_unref(trackPacket);
-                                    }
-                                }
-                            }
-                            Thread.sleep(1);
-                        }
-                        demuxVideoPackets++;
-                    } else if (!this.useAudioTrack && streamIndex == this.audioStreamIndex) {
-                        if (!this.audioPacketQueue.put(packet)) break;
-                        demuxAudioPackets++;
+                // QUEUE THE MAIN PACKET, WHICH STAYS HELD WHILE ITS QUEUE IS FULL
+                if (mainHeld) {
+                    final boolean video = packet.stream_index() == this.videoStreamIndex;
+                    if ((video ? this.videoPacketQueue : this.audioPacketQueue).tryPut(packet)) {
+                        avcodec.av_packet_unref(packet);
+                        mainHeld = false;
+                        moved = true;
+                        if (video) demuxVideoPackets++;
+                        else demuxAudioPackets++;
                     }
-                } finally {
-                    avcodec.av_packet_unref(packet);
                 }
+
+                // NOTHING TO READ AND NO ROOM TO QUEUE: THE DECODERS HAVE TO CATCH UP
+                if (!moved) Thread.sleep(1);
             }
         } catch (final InterruptedException e) {
             Thread.currentThread().interrupt();

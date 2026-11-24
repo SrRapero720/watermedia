@@ -12,7 +12,7 @@ revamp of 2026-11-16 (issue title and description, `TextArea`, clipboard helpers
 and file server port check wave of 2026-11-16 (`wm_err` registry, startup check of a fixed `serverPort`) and the site
 lists wave of 2026-11-17 (`player.whitelist`, `player.blacklist`, `WhitelistException`, `BlacklistException`) and the
 download wave of 2026-11-22 (`FFTranscoder`, `MediaDownloader`, `DownloadDialog`, `ChoiceGrid`, `Container.MP3`/`M4A`)
-folded in.
+and the demux fix of 2026-11-23 (separate track read by need, no blocking packet put) folded in.
 Symbol names are exact; line numbers are omitted on purpose.
 Legend: ⚠ gotcha or hard rule, ↪ reuse pointer ("to do X use Y").
 
@@ -605,8 +605,8 @@ requested, and SVG yields RGBA when RGBA is requested (everything else is conver
   - Threads (`ThreadTool.workerFactory("FFThread")`, named `<group>-demux|video|audio`); `decodeLock` guards decode
     thread creation/teardown. Queues: `PacketQueue` video 16 MiB / audio 8 MiB, `FrameQueue` video 3 / audio 9 slots.
     One public static `INTERRUPT` callback (JavaCPP caps live callback instances at 10), which `FFTranscoder` shares.
-  - Separate audio `Track` → second format context (`codecs.ffmpeg.trackPacketReads` per iteration; falls back to the
-    main audio stream).
+  - Separate audio `Track` → second format context (read by need, at most `codecs.ffmpeg.trackPacketReads` packets
+    per iteration; falls back to the main audio stream).
   - Input options (public static `inputOptions(options, input, headers)`, shared by the main input, the separate audio
     track and the inputs of `FFTranscoder`):
     `FFTool.configureTLS`, `analyzeduration`/`probesize` from config, `buffer_size`, `rtbufsize`, `http_persistent=1`,
@@ -626,11 +626,17 @@ requested, and SVG yields RGBA when RGBA is requested (everything else is conver
     subdomains): YouTube paces a longer or open-ended range to
     about twice the bitrate (waterframes#313, long videos froze while their audio played). Every other host keeps one
     open request, because each bounded range is a new request, which a file server out of slots answers with 503.
-    ⚠ The separate audio track is read `trackPacketReads` packets per main packet on the same blocking demux thread,
-    so a slow track download caps the video speed (PENDING D10).
   - Demux loop (parked waits last `PARK_MS=50` at most, so a seek or a resume that lands between the check and the
-    wait still wakes it): seek → pause park (`holding()`) → track reads → `av_read_frame` → route (video `tryPut`
-    spin, audio `put`). EOF: the main input's EOF finishes the video queue (and the audio queue without a separate
+    wait still wakes it): seek (drops the held packets) → pause park (`holding()`) → track reads → `av_read_frame` →
+    `tryPut`. ⚠ The demuxer never waits on a queue: a packet its queue has no room for stays held (`mainHeld`,
+    `trackHeld`) and the loop sleeps 1 ms only when nothing was read or queued, so a full queue never keeps the other
+    one from being fed. ⚠ The separate track is read by need: only while its last timestamp trails the video's
+    (`trackSec > mainSec` skips it), the main input ended or the audio queue ran dry (inputs whose timelines cannot
+    be compared never starve the sound). A fixed share of packets ran the track minutes ahead until its 8 MiB queue
+    filled, and a blocking `put` then gave the video one packet per `trackPacketReads` audio packets played: long
+    YouTube videos froze a few minutes in while their audio played (every late frame is skipped), and a track its
+    server paced capped the video (waterframes#313). Both inputs still share the thread (PENDING D10).
+    EOF: the main input's EOF finishes the video queue (and the audio queue without a separate
     track), the track's own EOF finishes the audio queue; once both ended, `signalDemuxFinished()` and park until a seek
     (repeat is driven by the player). ⚠ A read an abort cut short ends the decoder and is never reported as EOF.
     Seek ladder `av_seek_frame(BACKWARD)` → `avformat_seek_file` → `av_seek_frame(0)` → `reopenFormat()`;
@@ -653,8 +659,9 @@ requested, and SVG yields RGBA when RGBA is requested (everything else is conver
 - `FrameQueue(capacity)`: pre-allocated `Slot {AVFrame frame; ptsMs; durationMs; serial; width; height; format}` ring,
   single writer (`peekWritable()` blocks while full, `push()`), single reader (`peek()`, `peekNext()`, `next()` unrefs),
   `flush()`, `abort()`, `reset()`, `free()`. ⚠ A slot is invalid after `next()`.
-- `PacketQueue(maxBytes)` (package-private): cloned `AVPacket`s with the queue `serial`; `put` blocks over the byte cap,
-  `tryPut`, `get(int[] serialOut)` (caller frees), `flush()` (serial++), `finish()`, `endOfFile()`, `abort()`, `reset()`.
+- `PacketQueue(maxBytes)` (package-private): cloned `AVPacket`s with the queue `serial`; `tryPut` refuses over the
+  byte cap and never waits (no blocking put exists), `get(int[] serialOut)` (blocks while empty, caller frees),
+  `flush()` (serial++), `finish()`, `endOfFile()`, `abort()`, `reset()`.
 - `Placebo.open(frame, device, timeBase)`: `buffer → libplacebo → buffersink` graph on the decoder pool with
   `OPTIONS="format=rgba:color_primaries=bt709:color_trc=bt709"` (HDR tone-mapped to SDR RGBA); `push`, `pull`, `close`.
   ⚠ Deinterlace is deliberately off: `bwdif` makes `av_buffersink_get_frame` hang on interlaced input (PENDING H14).
@@ -1500,7 +1507,7 @@ original context current; GL needs the pumped render executor; `WaterMedia.start
 | `codecs.vp8.brokenTokens` | false | `VP8LossyDecoder` |
 | `codecs.ffmpeg.disable` / `customPath` | false / "" | `CodecsAPI.startFFmpeg` (startup only) |
 | `codecs.ffmpeg.hardwareAccel` | true | `FFDecoder.initVideo` |
-| `codecs.ffmpeg.trackPacketReads` | 3 (1..12) | `FFDecoder` demux loop |
+| `codecs.ffmpeg.trackPacketReads` | 3 (1..12) | `FFDecoder` demux loop (most track packets per iteration) |
 | `codecs.ffmpeg.cache` / `cacheMaxResponse` | true / 10 MB | `FFMediaPlayer.Callbacks.cached` |
 | `codecs.ffmpeg.analyzeDuration` / `probeSize` | 7000 ms (0..60000) / 10 MB | `FFDecoder.applyInputOptions` |
 | `player.defaultQuality` | `HIGHER` | `MediaPlayer` field init |
@@ -1633,7 +1640,9 @@ System properties: `watermedia.engine`, `watermedia.app` (child JVM flag), `wate
   and an RTMP input that connects; `IdleConnections`: a segment download reset or left silent in the middle of its
   body while the demuxer is held is asked for again and every frame decodes, the silent one after the real 10 s
   timeout; `SegmentRetries`: a first segment refused twice still decodes; `Abort`, `EmbeddedAudio`,
-  `SeparateTracks`, `OutputOrder`, `LanguageMatch`),
+  `SeparateTracks` (track choice and fallback, plus the video beside a track: every frame decodes while nobody takes
+  the sound and its queue stays full, and a track paced at twice its bitrate still feeds the video faster than it
+  plays), `OutputOrder`, `LanguageMatch`),
   `QueueLifecycleTest`, `FFEncoderTest` (each container is probed for the codec ids and the audio length it wrote),
   `FFTranscoderTest` (`Arguments`: jobs refused before anything opens; `Media`: probe of files and of a file-based HLS
   playlist whose bitrate it measures, copies, audio-only containers, encodes, mixed copy and encode, a separate audio

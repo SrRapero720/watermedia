@@ -78,8 +78,8 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
  * requests on YouTube's CDN alone, an RTMP input that connects instead of listening), HLS segment downloads that resume
  * after a reset or a silent connection, a refused segment asked for again, aborts that cut every blocked open and read
  * short without passing for the end of the input, the audio stream an {@link AudioChoice} decodes among the main
- * input's streams, HLS renditions and separate tracks while the others are discarded, the quad order of four channels
- * and the language match.
+ * input's streams, HLS renditions and separate tracks while the others are discarded, a video that keeps coming beside
+ * a separate track whose queue is full or whose download is paced, the quad order of four channels and the language match.
  */
 @DisplayName("FFDecoder")
 public class FFDecoderTest {
@@ -99,6 +99,11 @@ public class FFDecoderTest {
     private static final long CUT_TIMEOUT_MS = 30_000L;
     private static final long DRAIN_TIMEOUT_MS = 90_000L; // EACH SILENT CONNECTION COSTS ITS READ THE 10 s I/O TIMEOUT
     private static final int REQUEST_BYTES = 10 * 1_024 * 1_024; // THE MOST A REQUEST ASKS OF YOUTUBE'S CDN
+    // A VIDEO BESIDE A SEPARATE TRACK: AT 384 kHz THE TRACK OUTGROWS THE 8 MiB AUDIO PACKET QUEUE IN 11 s OF SOUND
+    private static final int FPS = 30;
+    private static final int FULL_SECONDS = 20;
+    private static final int PACED_RATE_HZ = 48_000;
+    private static final int PACED_SECONDS = 12;
 
     // ==========================================================================
     // INTERNAL API
@@ -214,6 +219,36 @@ public class FFDecoderTest {
     // THE FIRST DECODED SAMPLE, WHICH NAMES THE STREAM IT CAME FROM
     private static short sample(final FFDecoder decoder) {
         return decoder.audioFrames().peek().frame.data(0).limit(2).asBuffer().order(ByteOrder.nativeOrder()).getShort(0);
+    }
+
+    // WRITES A VIDEO WITHOUT SOUND OF seconds AND OPENS IT BESIDE track ON A MONO S16 ENGINE, FOR THE CALLER TO CLOSE
+    private static FFDecoder beside(final Path directory, final int seconds, final Track track) throws Exception {
+        final Path video = directory.resolve("video.webm");
+        Files.write(video, Fixtures.webm(64, 40, seconds * FPS, FPS));
+        final Recorder host = new Recorder(new FFDecoder.Pcm(SampleType.S16, 1));
+        final FFDecoder decoder = new FFDecoder("FFThread-Beside", video.toUri(), new HttpHeaders(), true,
+                new AudioChoice(List.of(track), AudioChoice.AUTO, -1, null), new Linear(false), host);
+        try {
+            decoder.start();
+            assertTrue(host.opened.await(OPEN_TIMEOUT_MS, TimeUnit.MILLISECONDS), "the video must open");
+            assertNull(host.failure, "the video must open without a failure");
+            assertEquals(new AudioStream(0, 0, track.name(), track.lang()), decoder.audioStream(), "the separate track plays");
+            return decoder;
+        } catch (final Throwable failure) {
+            decoder.close();
+            throw failure;
+        }
+    }
+
+    // COUNTS THE VIDEO FRAMES IT TAKES FROM THE DECODER, NEVER ITS SOUND, UNTIL count CAME OUT OR timeoutMs PASSED
+    private static int videoFrames(final FFDecoder decoder, final int count, final long timeoutMs) {
+        final long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs);
+        int frames = 0;
+        while (frames < count && PlayerWait.awaitCondition(() -> decoder.videoFrames().peek() != null, TimeUnit.NANOSECONDS.toMillis(deadline - System.nanoTime()))) {
+            decoder.videoFrames().next();
+            frames++;
+        }
+        return frames;
     }
 
     // THREE TAGGED STREAMS, THE SPANISH ONE FLAGGED DEFAULT; THE FRENCH ONE CARRIES THE BIBLIOGRAPHIC CODE
@@ -776,6 +811,42 @@ public class FFDecoderTest {
                 assertEquals(Fixtures.level(1), sample(decoder), "the default stream's samples decode");
             } finally {
                 decoder.close();
+            }
+        }
+
+        @Test
+        @DisplayName("A separate track whose packet queue filled up never holds the video back")
+        void fullTrackQueueKeepsTheVideoComing(@TempDir final Path directory) throws Exception {
+            // NOBODY TAKES THE SOUND, SO ITS QUEUE FILLS AND STAYS FULL WHILE THE VIDEO STILL HAS HALF ITS FRAMES TO READ
+            final Path track = directory.resolve("track.wav");
+            Fixtures.wav(track, SEGMENT_RATE_HZ, 1, Fixtures.tone(GERMAN, SEGMENT_RATE_HZ * FULL_SECONDS));
+            final FFDecoder decoder = beside(directory, FULL_SECONDS, new Track("Deutsch", "de", track.toUri()));
+            try {
+                assertEquals(FULL_SECONDS * FPS, videoFrames(decoder, FULL_SECONDS * FPS, OPEN_TIMEOUT_MS), "every video frame must decode beside a full audio queue");
+            } finally {
+                decoder.close();
+            }
+        }
+
+        @Test
+        @DisplayName("A separate track downloading at twice its bitrate, as YouTube paces one, never slows the video below its own speed")
+        void pacedTrackKeepsTheVideoComing(@TempDir final Path directory) throws Exception {
+            try (final IdleOrigin origin = IdleOrigin.resetting(CUT_TIMEOUT_MS)) {
+                final Path track = directory.resolve("track.wav");
+                Fixtures.wav(track, PACED_RATE_HZ, 1, Fixtures.tone(GERMAN, PACED_RATE_HZ * PACED_SECONDS));
+                origin.stream("/track.wav", "audio/wav", Files.readAllBytes(track), PACED_RATE_HZ * 2L * 2L);
+                final FFDecoder decoder = beside(directory, PACED_SECONDS, new Track("Deutsch", "de", origin.uri("/track.wav")));
+                try {
+                    // THE TRACK IS ONLY READ AS FAR AS THE VIDEO GOT, SO A DOWNLOAD AT TWICE ITS BITRATE FEEDS THE VIDEO AT TWICE ITS SPEED.
+                    // THE FIRST SIXTH IS MEASURED, WHILE MOST OF THE TRACK IS STILL DOWNLOADING
+                    final int measured = PACED_SECONDS / 6;
+                    final long started = System.nanoTime();
+                    final int frames = videoFrames(decoder, measured * FPS, measured * 1_000L);
+                    final long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started);
+                    assertEquals(measured * FPS, frames, measured + " s of video must arrive before they would have played, took " + elapsedMs + " ms");
+                } finally {
+                    decoder.close();
+                }
             }
         }
     }

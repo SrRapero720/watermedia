@@ -20,8 +20,8 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
  * Verifies the {@link FrameQueue} and {@link PacketQueue} lifecycles the FFmpeg pipeline relies on: an abort wakes a
- * blocked producer or consumer and a reset serves them again, a finish wakes them with a clean end of file that an
- * abort never reports, and a flush advances the serial.
+ * blocked frame producer or packet consumer and a reset serves them again, a packet queue refuses a put without ever
+ * waiting, a finish wakes its consumer with a clean end of file that an abort never reports, and a flush advances the serial.
  */
 @DisplayName("FFmpeg pipeline queues")
 public class QueueLifecycleTest {
@@ -68,39 +68,33 @@ public class QueueLifecycleTest {
     }
 
     @Test
-    @DisplayName("Abort and finish wake packet producers and consumers, only a finish reports the end of file, and a flush advances the serial")
-    void abortAndFinishWakePacketWaitersAndFlushAdvancesSerial() throws Exception {
-        // ONE 8-BYTE PACKET FILLS AN 8-BYTE QUEUE, SO THE NEXT put BLOCKS
+    @DisplayName("A full, aborted or finished packet queue refuses a put without waiting, abort and finish wake its consumer, only a finish reports the end of file, and a flush advances the serial")
+    void refusalsWakeupsAndFlushSerial() throws Exception {
+        // ONE 8-BYTE PACKET FILLS AN 8-BYTE QUEUE
         final PacketQueue queue = new PacketQueue(8);
         final AVPacket packet = avcodec.av_packet_alloc();
         assertNotNull(packet, "the packet must allocate");
         assertEquals(0, avcodec.av_new_packet(packet, 8), "the packet must take 8 bytes");
         Thread worker = null;
         try {
-            // A BLOCKED PRODUCER: ABORT, THEN FINISH, WAKE IT WITH A REFUSAL AND REFUSE LATER PUTS UNTIL A RESET
-            assertTrue(queue.put(packet), "an empty queue takes the packet");
+            // A FULL QUEUE REFUSES THE NEXT PACKET AT ONCE; AN ABORT, THEN A FINISH, REFUSE EVERY PUT UNTIL A RESET
+            assertTrue(queue.tryPut(packet), "an empty queue takes the packet");
+            assertFalse(queue.tryPut(packet), "a full queue refuses the packet");
+            avcodec.av_packet_free(queue.get(new int[1]));
             for (final boolean finish: new boolean[] { false, true }) {
-                final FutureTask<Boolean> producer = new FutureTask<>(() -> queue.put(packet));
-                worker = new Thread(producer, "PacketQueue-Test-Producer");
-                worker.start();
-                final Thread waiting = worker;
-                assertTrue(PlayerWait.awaitCondition(() -> waiting.getState() == Thread.State.WAITING, WAIT_MS), "the producer must block on the full queue");
                 if (finish) queue.finish();
                 else queue.abort();
-                assertFalse(producer.get(WAIT_MS, TimeUnit.MILLISECONDS), (finish ? "a finished" : "an aborted") + " queue refuses the blocked put");
-                assertFalse(queue.tryPut(packet), (finish ? "a finished" : "an aborted") + " queue refuses a later put");
-                worker.join(WAIT_MS);
+                assertFalse(queue.tryPut(packet), (finish ? "a finished" : "an aborted") + " queue refuses the packet");
                 queue.reset();
-                if (!finish) assertTrue(queue.put(packet), "a reset queue takes packets again");
             }
 
             // A FLUSH ADVANCES THE SERIAL, AND THE PACKETS PUT AFTER IT CARRY THE NEW ONE
             final int before = queue.serial();
-            assertTrue(queue.put(packet), "an empty queue takes the packet");
+            assertTrue(queue.tryPut(packet), "a reset queue takes the packet");
             queue.flush();
             assertEquals(before + 1, queue.serial(), "a flush advances the serial");
             packet.pts(123);
-            assertTrue(queue.put(packet), "a flushed queue takes the packet");
+            assertTrue(queue.tryPut(packet), "a flushed queue takes the packet");
             final int[] serial = new int[1];
             final AVPacket current = queue.get(serial);
             try {
