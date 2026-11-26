@@ -1,3 +1,17 @@
+# 📦 UPDATE 3.0.3
+- ⚙️ NEW: `Container.MP3` and `Container.M4A` write audio-only files (experimental, like the rest of `CodecsAPI`)
+- ✨ **Download** in the app saves what you are playing or previewing as a file
+  - Pick the container, the resolution, the codecs and the frame rate, and lower the bitrates to get a smaller file
+  - **From YouTube** keeps the media as it comes, **Best Compatibility** makes an MP4 for phones and chats, **Best Audio** keeps only the sound
+  - The dialog shows the size the file should take before it starts
+  - It opens on the choices of your last download while the app stays open
+  - Files go to your `Downloads` folder
+- 🐛 Fixed standalone run on `mods` folder doesn't work on the game folder.
+- 🐛 Fixed long YouTube videos freezing after a few minutes while the audio kept playing
+- 🐛 Fixed the app failing to start with `(wm_err:0005)` when opened from a shortcut or the Windows search
+- 🐛 Fixed the missing icon in the NeoForge mod list on Minecraft 26.2 and 26.3
+  - Mod developers no longer get a `logoFile` warning screen when the game starts
+
 # 📦 UPDATE 3.0.2 (bugs everywhere)
 - ⚙️ NEW: Every exception and error log message starts with its own code, like `(wm_err:0720)`
   - The codes are the `WaterMedia.ERR_*` constants, one per place that can fail
