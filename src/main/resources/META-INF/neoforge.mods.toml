@@ -12,6 +12,9 @@ logoFile="pack.png"
     displayURL="https://www.curseforge.com/minecraft/mc-mods/$id"
     credits="$credits"
     authors="$authors"
+    # NEOFORGE 26.2+ READS iconFile AND bannerFile AND DEPRECATES logoFile, OLDER ONES ONLY KNOW logoFile
+    iconFile="pack.png"
+    bannerFile="watermedia:textures/banner.png"
     logoFile="pack.png"
     description='''$description'''
 

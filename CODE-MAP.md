@@ -336,6 +336,12 @@ Package map (`src/main/java/org/watermedia`):
   `org.watermedia` artifacts as `com.github.SrRapero720:<repository>:<ref>`. Binaries' `install` clones the core master
   into `/tmp/watermedia`, copies itself into its `binaries/` folder and publishes from there (it never builds alone).
   ⚠ A tag whose commit pins an unpushed Binaries gitlink fails as a JitPack `gitError`.
+- ⚠ `neoforge.mods.toml` declares `iconFile` and `logoFile` together in both jars: NeoForge 26.2+ draws the mod list
+  icon only from `iconFile` and, in development runs, opens on a loading warnings screen for a `logoFile` without
+  `iconFile` or `bannerFile`; older NeoForge lines only read `logoFile`. The core also sets `bannerFile` to the asset
+  `watermedia:textures/banner.png` (the info panel of the mod list; a value with `:` is a resource location, a plain one
+  a file at the jar root), while Binaries has no banner and falls back to `logoFile`. Forge and Fabric metadata have no
+  such keys.
 - Loader metadata: `mods.toml` (Forge, `@Mod("watermedia")` scan), `neoforge.mods.toml`, `fabric.mod.json` (entry
   `org.watermedia.bootstrap.FabricBootstrap`, `jars` = nested libs, `breaks.watermedia_binaries`), `pack.mcmeta`; the
   Binaries jar carries twin files with mod id `watermedia_binaries` requiring `watermedia`; both jars mark the companion
