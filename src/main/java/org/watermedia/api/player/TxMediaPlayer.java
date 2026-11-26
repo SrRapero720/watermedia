@@ -86,7 +86,8 @@ public final class TxMediaPlayer extends MediaPlayer {
     private static final long SKIP_STEP_MS = 1_000L;
     private static final ExecutorService SINGLE_FRAME_POOL = Executors.newFixedThreadPool(
             Math.max(1, ThreadTool.baseThreads()),
-            ThreadTool.workerFactory("TxPlayer-SingleFrame", Thread.NORM_PRIORITY - 1));
+            ThreadTool.workerFactory("TxPlayer-SingleFrame", Thread.NORM_PRIORITY - 1)
+    );
     // ONE STREAMING DECODE THREAD PER PLAYING ANIMATION, OWNED LIKE THE POOL SO ITS CALLBACKS CANNOT RUN LIFECYCLE OPERATIONS
     private static final ThreadFactory STREAM_THREADS = ThreadTool.workerFactory("TxPlayer-Stream", Thread.NORM_PRIORITY - 1);
     // GLOBAL PERMITS BOUNDING AGGREGATE DECODE CPU ACROSS ALL TX PLAYERS: MANY ANIMATED

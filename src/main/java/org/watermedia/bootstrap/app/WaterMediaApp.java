@@ -115,8 +115,8 @@ public class WaterMediaApp {
         cleanup();
     }
 
-    public static void log(final String message) {
-        WaterMedia.LOGGER.info(IT, message);
+    public static void log(final String message, final Object... args) {
+        WaterMedia.LOGGER.info(IT, message, args);
     }
 
     /** Applies {@link AppConfig#scale}; 0 recomputes the factor from the window's monitor. */

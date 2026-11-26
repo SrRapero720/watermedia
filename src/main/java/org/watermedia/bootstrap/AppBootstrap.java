@@ -67,7 +67,7 @@ public final class AppBootstrap {
                     WaterMediaApp.start(() -> {
                         WaterMediaApp.log("Searching for extensions...");
                         ServiceLoader.load(Extension.class).forEach(extension -> {
-                            WaterMediaApp.log("Loading extension: " + extension.name());
+                            WaterMediaApp.log("Loading extension: {}", extension.name());
                             extension.load();
                         });
                     });
