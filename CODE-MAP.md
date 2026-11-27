@@ -9,8 +9,9 @@
 
 Quick notes, pending tasks and reminders of the owner and the agents. The owner manages it.
 - 2026-11-27: `INFORME.md` (untracked, Spanish) holds the seek and buffering investigation with the rework proposed for
-  `FFDecoder`, `FFMediaPlayer` and the follower of `MediaPlayer`. Nothing of it is implemented and its §12 lists the
-  decisions it waits for.
+  `FFDecoder`, `FFMediaPlayer` and the follower of `MediaPlayer`. Its phase F0 is in (the track seek flag, the track
+  runway, the input options and the follower's landing, cooldown and aim). Phases F1 to F5 are not, and its §12 lists
+  the decisions they wait for.
 
 ## SCRAPPED IDEAS
 
@@ -649,8 +650,10 @@ requested, and SVG yields RGBA when RGBA is requested (everything else is conver
     per iteration; falls back to the main audio stream).
   - Input options (public static `inputOptions(options, input, headers)`, shared by the main input, the separate audio
     track and the inputs of `FFTranscoder`):
-    `FFTool.configureTLS`, `analyzeduration`/`probesize` from config, `buffer_size`, `rtbufsize`, `http_persistent=1`,
-    `multiple_requests=0`, `reconnect`/`reconnect_streamed`/`reconnect_delay_max=5`, `rtsp_transport=tcp`, `max_delay`;
+    `FFTool.configureTLS`, `analyzeduration`/`probesize` from config, `reconnect`/`reconnect_streamed`/
+    `reconnect_delay_max=5`, `rtsp_transport=tcp`; `buffer_size` (32 MiB) only on `udp` and `rtp` inputs, the only
+    protocols that read it. ⚠ `rtbufsize` (capture devices), `max_delay` (RTP reordering) and `http_persistent` (the
+    HLS default) were dropped on 2026-11-27: nothing these inputs open read them;
     `headers` (`HttpHeaders.toRawString`) only when the source has any (an empty value makes FFmpeg end the request
     head early); `timeout` and `rw_timeout` are both 10 s: ⚠ `timeout` stays on the input's own connections and is
     left out of `rtmp*` inputs, where it means the seconds to wait for an incoming connection and turns the input into
@@ -666,6 +669,9 @@ requested, and SVG yields RGBA when RGBA is requested (everything else is conver
     subdomains): YouTube paces a longer or open-ended range to
     about twice the bitrate (waterframes#313, long videos froze while their audio played). Every other host keeps one
     open request, because each bounded range is a new request, which a file server out of slots answers with 503.
+    `multiple_requests=1` rides with `request_size`: the next range goes out on the connection of the last one
+    instead of a new TCP and TLS handshake every 10 MiB. ⚠ A seek still opens a connection (FFmpeg reuses one only
+    within `short_seek_size` of the range's end).
   - Demux loop (parked waits last `PARK_MS=50` at most, so a seek or a resume that lands between the check and the
     wait still wakes it): seek (drops the held packets) → pause park (`holding()`) → track reads → `av_read_frame` →
     `tryPut`. ⚠ The demuxer never waits on a queue: a packet its queue has no room for stays held (`mainHeld`,
@@ -676,11 +682,21 @@ requested, and SVG yields RGBA when RGBA is requested (everything else is conver
     filled, and a blocking `put` then gave the video one packet per `trackPacketReads` audio packets played: long
     YouTube videos froze a few minutes in while their audio played (every late frame is skipped), and a track its
     server paced capped the video (waterframes#313). Both inputs still share the thread (PENDING D10).
+    ⚠ Track runway: on the first pass after the start and after every seek the track is read past that rule until its
+    queue holds `TRACK_RUNWAY_BYTES` (64 KiB, about 4 s of Opus) or `TRACK_RUNWAY_NS` (250 ms) passed. The main
+    input's first read after a seek waits for the network (an HLS segment to open) with three packets of sound
+    queued: the sound ran dry, the clock ran on alone and snapped back when it returned (215 ms measured on a fast
+    link), which the follower read as drift.
     EOF: the main input's EOF finishes the video queue (and the audio queue without a separate
     track), the track's own EOF finishes the audio queue; once both ended, `signalDemuxFinished()` and park until a seek
     (repeat is driven by the player). ⚠ A read an abort cut short ends the decoder and is never reported as EOF.
     Seek ladder `av_seek_frame(BACKWARD)` → `avformat_seek_file` → `av_seek_frame(0)` → `reopenFormat()`;
     precise seeks stop decode threads, `reset()` queues (serial++), flush codecs and `syncDrain` on the demux thread.
+    ⚠ The separate track seeks with `AVSEEK_FLAG_BACKWARD | AVSEEK_FLAG_ANY`: every packet of sound is an entry
+    point, so it lands on the target. Without `ANY` a WebM lands on the cue before it (one per 10 s on YouTube) and
+    the clock, which starts with the first frame of any stream, started there. A track seek that fails warns once
+    (`trackSeekWarned`) and the sound keeps its old position. The main input still lands where its demuxer says (an
+    HLS video on its segment start), and its late frames are decoded and dropped one by one (`INFORME.md` F1).
   - Video decode: `receive_frame` → GPU→RAM transfer when a non-Vulkan hwaccel (`HW_TRANSFER_FAIL_LIMIT=30`, perf window
     120 frames at 0.75 of the frame budget → software fallback `reinitVideoCodecSoftware()`) → optional `Placebo` →
     `queueVideo` (best-effort pts, 10 s discontinuity offset `PTS_DISCONTINUITY_SEC`). No `sws_scale` here.
@@ -836,8 +852,19 @@ requested, and SVG yields RGBA when RGBA is requested (everything else is conver
   `mute()`, `quality()`.
 - Follower engine (`sync(PlayerState|ByteBuffer)`, `following()`, `authority()`, `authorityTime()`, `drift()`,
   `tolerance(ms)` default 1 s): latest snapshot wins (no revision compare); the ticker mirrors status (start/
-  startPaused/pause/resume/stop), adopts `repeat` and `speed`, and corrects time with `seekQuick(authorityTime)` when
-  `|drift| > tolerance` and the 1 s `SEEK_COOLDOWN_NS` elapsed; no rate trimming; ERROR players are left alone.
+  startPaused/pause/resume/stop), adopts `repeat` and `speed`, and corrects time with `seekQuick` when
+  `|drift| > tolerance`; no rate trimming; ERROR players are left alone.
+  - Landing: the ticker sees the pipeline play again (PLAYING or PAUSED) after it saw it BUFFERING (`flying`) or
+    after a new `seekNanos` stamp. `seekNanos` (package-private, volatile) is written by `FFMediaPlayer` when a
+    public `seek`/`seekQuick` is taken, the host's as much as the follower's. ⚠ The ticker reads the stamp before
+    the status, so a seek taken in between shows as BUFFERING; a stamp seen while LOADING is never timed.
+  - Cooldown: `SEEK_COOLDOWN_NS` (1 s) counts from the landing (`landedNanos`), or from the request until it lands.
+    It used to count from the follower's own request only, so a host's seek and a slow landing left none.
+  - Aim: `latencyMs` is the flight of the last timed seek (capped at `LATENCY_MAX_MS`, 5 s) and the correction goes
+    to `authorityTime(heard, latencyMs)`, where the session will be when it lands. Aimed at where the session is,
+    every seek landed its own flight behind and a flight over the tolerance asked for the next one forever.
+  - Chain: corrections less than `CHAIN_NS` (10 s) apart count up, and the third in a row warns once per player
+    (`chainWarned`, "Sync keeps correcting"). DEBUG "Sync: seek landed in Xms, Yms away from the session" per landing.
   A BUFFERING session holds the follower like a pause; a dormant (WAITING/STOPPED/ENDED) follower is started once per
   dormancy, an ENDED one only while the session sits before its own media's end; a STOPPED session stops only a
   running follower, never an ENDED one; live or durationless sessions get no time correction.
@@ -923,6 +950,10 @@ requested, and SVG yields RGBA when RGBA is requested (everything else is conver
   on format/bits/size/colour change (refusal latches `uploadRefused`); `colorimetry(...)` maps FFmpeg tags to
   `Colorimetry` (matrix BT709/BT601/BT2020, range, siting, PQ/HLG transfer, BT.2020 primaries) with `Colorimetry.guess`
   fallback. Video drives the clock only without audio.
+- Seek landing report: a public `seek`/`seekQuick` the clock took stamps `seekNanos` and `seekTargetMs`, and the
+  consumption loop logs one DEBUG line once the clock runs again and the first picture is up ("Seek to Xms landed:
+  clock at Yms after Zms, picture at Yms after Zms, N frames skipped"). A clock far from the target, a picture far
+  behind the clock or many skipped frames are what a frozen picture comes from.
 - Starvation → BUFFERING after `STARVATION_THRESHOLD_MS=500` (never a seek); rate monitor warns once outside 0.9..1.1;
   EOF: zero frames decoded → ERROR (`ERR_FFPLAYER_NO_FRAMES` "Failed to decode video due to no frames emitted, the
   stream is unsupported or broken"), stills honour `displayTime`, `repeat()` → `requestSeek(0)`,
@@ -1678,15 +1709,18 @@ System properties: `watermedia.engine`, `watermedia.app` (child JVM flag), `wate
   `ScanTest`, `PentestTest` (hostile corpus; every refusal must start with the `(wm_err:NNNN)` of the guard its
   fixture targets, and an accepted file must decode or lose only the chunk under attack), `BcReaderTest`,
   `DdsHeaderTest`, PNG/GIF `ChunkContractTest`,
-  `FFDecoderTest` (`InputOptions`: transport and probe policy, headers only when present, `request_size` for
-  YouTube's CDN alone, the options of a CDN link reading a loopback file past 10 MiB through bounded requests (raw
-  `avformat`, so a fork that drops `request_size` fails), open requests for any other host, RTMP without `timeout`
+  `FFDecoderTest` (`InputOptions`: transport and probe policy, headers only when present, `request_size` and
+  `multiple_requests` for YouTube's CDN alone, the options of a CDN link reading a loopback file past 10 MiB through
+  bounded requests that keep their connection (raw `avformat`, so a fork that drops `request_size` fails), open
+  requests for any other host, the socket buffer for `udp` and `rtp` alone, RTMP without `timeout`
   and an RTMP input that connects; `IdleConnections`: a segment download reset or left silent in the middle of its
   body while the demuxer is held is asked for again and every frame decodes, the silent one after the real 10 s
   timeout; `SegmentRetries`: a first segment refused twice still decodes; `Abort`, `EmbeddedAudio`,
   `SeparateTracks` (track choice and fallback, plus the video beside a track: every frame decodes while nobody takes
   the sound and its queue stays full, and a track paced at twice its bitrate still feeds the video faster than it
-  plays), `OutputOrder`, `LanguageMatch`),
+  plays; a seek between two cues of an Opus WebM track lands on its target; an HLS main input whose origin holds the
+  segment after a seek leaves 2.5 s of the track to play; the `Linear` timeline double hands over one quick seek),
+  `OutputOrder`, `LanguageMatch`),
   `QueueLifecycleTest`, `FFEncoderTest` (each container is probed for the codec ids and the audio length it wrote),
   `FFTranscoderTest` (`Arguments`: jobs refused before anything opens; `Media`: probe of files and of a file-based HLS
   playlist whose bitrate it measures, copies, audio-only containers, encodes, mixed copy and encode, a separate audio
@@ -1718,7 +1752,10 @@ System properties: `watermedia.engine`, `watermedia.app` (child JVM flag), `wate
   (upload size, native and scaled), `FFHoldResumeTest` (an HLS VOD of MPEG-TS segments served like YouTube's by an
   `IdleOrigin` that resets idle connections; a pause in the middle of a segment and a paused launch held the real
   10 s keep playing from the paused frame, a short pause resumes without BUFFERING or a second request of the
-  segment), `FFControlContractTest`, `FFAudioTracksTest` (pick, language, hot switch), `ColorimetryTest`,
+  segment), `FFFollowerTest` (a video-only player following a `ServerMediaPlayer` over an origin that answers every
+  request 800 ms late, with an all-keyframe ProRes MOV so only the flight is left to miss by: the start and a host's
+  seek each take one correction and stay aligned, and with a 1 ms tolerance the chain warns once),
+  `FFControlContractTest`, `FFAudioTracksTest` (pick, language, hot switch), `ColorimetryTest`,
   `TxStaticImageTest` (stills, timed or not, and bodies typed by their bytes), `TxAnimatedImageTest` (streaming and
   frame steps in both modes), `TxScalingTest` (+ `FrameTextures`), `TxControlContractTest`, `TxReleaseTest`,
   engines `GFXEngineTest`, `GLEngineTest`, `VKEngineTest` (a DEVICE upload must import its planes in place),
@@ -1773,8 +1810,9 @@ System properties: `watermedia.engine`, `watermedia.app` (child JVM flag), `wate
   and rotation, read back with libavformat; `track(type)`), `MediaBootstrap` (`client()`, `ffmpegAvailable()` one shared
   bootstrap in a temp dir, `runProbe(type, dir, scenario, omitBindings)`, whose failures carry the log of the child,
   a probe killed at its 45 s limit included), `PlayerWait` (`awaitStatus`,
-  `awaitCondition`), `LocalHttp` (loopback `HttpServer`, one context with any handler, `respond`, `respondRange`,
-  `expiresIn`, `freePort` (a loopback port nobody listens on)), `IdleOrigin`
+  `awaitCondition`), `LocalHttp` (loopback `HttpServer`, one context with any handler, `respond`, `respondRange`
+  (announces `Connection: close` unless `persistent`), `expiresIn`, `freePort` (a loopback port nobody listens on)),
+  `IdleOrigin`
   (keep-alive HTTP/1.1 with bodies per path and byte ranges that resets, `resetting`, or goes silent, `silent`, on an
   idle connection; `serve`, `stream` (a body served like YouTube's segments: 200 chunked, no ranges, paced), `uri`,
   `requests(path)`, `cuts`, `cuts(path)` (downloads of a path cut in the middle of their body), `connections`,
