@@ -48,6 +48,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.bytedeco.ffmpeg.global.avcodec.AVDISCARD_ALL;
@@ -110,6 +111,11 @@ public class FFDecoderTest {
     private static final int SEEK_SECONDS = 20;
     private static final long SEEK_TARGET_MS = 12_500L;
     private static final long SEEK_SLACK_MS = 60L; // THREE OPUS PACKETS
+    // A MAIN INPUT BLOCKED AFTER A SEEK: FOUR 2 s SEGMENTS, AND MORE SOUND PAST THE TARGET THAN THREE 256 ms PACKETS HOLD
+    private static final int BLOCKED_SEGMENTS = 4;
+    private static final int BLOCKED_SEGMENT_SECONDS = 2;
+    private static final long BLOCKED_TARGET_MS = 2_500L;
+    private static final long RUNWAY_MS = 2_500L;
 
     // ==========================================================================
     // INTERNAL API
@@ -881,6 +887,69 @@ public class FFDecoderTest {
                 assertTrue(Math.abs(landed - SEEK_TARGET_MS) <= SEEK_SLACK_MS, "the track must land on " + SEEK_TARGET_MS + " ms, landed on " + landed + " ms");
             } finally {
                 decoder.close();
+            }
+        }
+
+        @Test
+        @DisplayName("A main input that blocks on its origin after a seek leaves the separate track seconds of sound to play")
+        void blockedMainInputLeavesTheTrackARunway(@TempDir final Path directory) throws Exception {
+            final Map<String, byte[]> bodies = new HashMap<>();
+            final StringBuilder playlist = new StringBuilder("#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:" + BLOCKED_SEGMENT_SECONDS + "\n#EXT-X-MEDIA-SEQUENCE:0\n");
+            final List<Path> segments = Fixtures.transportSegments(directory, 64, 40, FPS, BLOCKED_SEGMENT_SECONDS, BLOCKED_SEGMENTS, 8);
+            for (int i = 0; i < BLOCKED_SEGMENTS; i++) {
+                bodies.put("/segment" + i + ".ts", Files.readAllBytes(segments.get(i)));
+                playlist.append("#EXTINF:").append(BLOCKED_SEGMENT_SECONDS).append(".0,\nsegment").append(i).append(".ts\n");
+            }
+            bodies.put("/media.m3u8", playlist.append("#EXT-X-ENDLIST\n").toString().getBytes(StandardCharsets.UTF_8));
+            final Path track = directory.resolve("track.wav");
+            Fixtures.wav(track, RATE_HZ, 1, Fixtures.tone(GERMAN, RATE_HZ * BLOCKED_SEGMENT_SECONDS * BLOCKED_SEGMENTS));
+
+            // ONCE HOLDING, THE ORIGIN ANSWERS NO SEGMENT: THE FIRST READ AFTER THE SEEK OPENS ONE AND STAYS THERE
+            final AtomicBoolean holding = new AtomicBoolean();
+            final CountDownLatch asked = new CountDownLatch(1);
+            final CountDownLatch gate = new CountDownLatch(1);
+            final ExecutorService workers = Executors.newCachedThreadPool();
+            try (final LocalHttp origin = LocalHttp.start("/", exchange -> {
+                final String path = exchange.getRequestURI().getPath();
+                if (holding.get() && path.endsWith(".ts")) {
+                    asked.countDown();
+                    try {
+                        gate.await(CUT_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+                    } catch (final InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
+                }
+                LocalHttp.respondRange(exchange, path.endsWith(".m3u8") ? "application/vnd.apple.mpegurl" : "video/mp2t", bodies.get(path));
+            }, workers)) {
+                final Recorder host = new Recorder(new FFDecoder.Pcm(SampleType.S16, 1));
+                final Linear timeline = new Linear(true);
+                final FFDecoder decoder = new FFDecoder("FFThread-Runway", origin.uri("/media.m3u8"), new HttpHeaders(), true,
+                        new AudioChoice(List.of(new Track("Deutsch", "de", track.toUri())), AudioChoice.AUTO, -1, null), timeline, host);
+                try {
+                    decoder.start();
+                    assertTrue(host.opened.await(OPEN_TIMEOUT_MS, TimeUnit.MILLISECONDS), "the playlist must open");
+                    assertNull(host.failure, "the playlist must open without a failure");
+                    holding.set(true);
+                    timeline.seek(BLOCKED_TARGET_MS);
+                    assertTrue(PlayerWait.awaitCondition(() -> !timeline.seekPending(), OPEN_TIMEOUT_MS), "the seek must be served");
+                    timeline.release();
+                    assertTrue(asked.await(OPEN_TIMEOUT_MS, TimeUnit.MILLISECONDS), "the main input must ask for its segment");
+
+                    // THE SOUND IS TAKEN AS A PLAYER WOULD WHILE THE SEGMENT NEVER ARRIVES
+                    final long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(ABORT_MS);
+                    long reached = 0;
+                    while (reached < BLOCKED_TARGET_MS + RUNWAY_MS
+                            && PlayerWait.awaitCondition(() -> decoder.audioFrames().peek() != null, TimeUnit.NANOSECONDS.toMillis(deadline - System.nanoTime()))) {
+                        reached = decoder.audioFrames().peek().ptsMs;
+                        decoder.audioFrames().next();
+                    }
+                    assertTrue(reached >= BLOCKED_TARGET_MS + RUNWAY_MS, "the track must play " + RUNWAY_MS + " ms past the target beside a blocked main input, reached " + reached + " ms");
+                } finally {
+                    gate.countDown();
+                    decoder.close();
+                }
+            } finally {
+                workers.shutdownNow();
             }
         }
     }

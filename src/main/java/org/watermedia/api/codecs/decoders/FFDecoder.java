@@ -78,6 +78,10 @@ public final class FFDecoder {
     private static final int VIDEO_FRAME_QUEUE_SLOTS = 3;
     private static final int AUDIO_FRAME_QUEUE_SLOTS = 9;
 
+    // SEPARATE TRACK RUNWAY: THE SOUND IT QUEUES RIGHT AFTER A SEEK (ABOUT 4 s OF OPUS) AND THE MOST THAT MAY TAKE
+    private static final long TRACK_RUNWAY_BYTES = 64L * 1_024;
+    private static final long TRACK_RUNWAY_NS = 250_000_000L;
+
     // YOUTUBE CDN: A REQUEST OVER 10 MiB IS SERVED AT ABOUT TWICE THE BITRATE
     private static final String YOUTUBE_CDN = "googlevideo.com";
     private static final long YOUTUBE_REQUEST_BYTES = 10L * 1_024 * 1_024;
@@ -457,6 +461,8 @@ public final class FFDecoder {
         // HOW FAR EACH INPUT WAS READ IN SECONDS, NaN UNTIL A PACKET SAYS
         double mainSec = Double.NaN;
         double trackSec = Double.NaN;
+        // THE TRACK OWES ITS RUNWAY: AT THE START AND AFTER EVERY SEEK
+        boolean runway = true;
 
         LOGGER.debug(IT, "Demux loop starting: videoIdx={}, audioIdx={}, useAudioTrack={}, nb_streams={}",
                 this.videoStreamIndex, this.audioStreamIndex, this.useAudioTrack,
@@ -479,6 +485,7 @@ public final class FFDecoder {
                     trackHeld = false;
                     mainSec = Double.NaN;
                     trackSec = Double.NaN;
+                    runway = true;
 
                     if (precise) {
                         this.stopDecodeThreads();
@@ -575,9 +582,12 @@ public final class FFDecoder {
                 // AHEAD UNTIL ITS QUEUE FILLED, AND FROM THEN ON THE VIDEO GOT ONE PACKET PER trackPacketReads OF SOUND PLAYED (FROZEN PICTURE)
                 if (this.useAudioTrack && !trackEof && this.trackFormatContext != null && trackPacket != null) {
                     final int reads = WaterMediaConfig.codecs.ffmpeg.trackPacketReads;
-                    for (int i = 0; i < reads; i++) {
+                    // THE FIRST READ OF THE MAIN INPUT AFTER A SEEK WAITS FOR THE NETWORK (AN HLS SEGMENT TO OPEN) WITH NO SOUND QUEUED: THE
+                    // TRACK READS A RUNWAY FIRST, FOR A BOUNDED TIME SO A SLOW TRACK NEVER HOLDS THE VIDEO
+                    final long runwayEnd = runway ? System.nanoTime() + TRACK_RUNWAY_NS : 0L;
+                    for (int i = 0; i < reads || runway && this.audioPacketQueue.byteSize() < TRACK_RUNWAY_BYTES && System.nanoTime() < runwayEnd; i++) {
                         if (!trackHeld) {
-                            if (!mainEof && trackSec > mainSec && this.audioPacketQueue.byteSize() > 0) break;
+                            if (!runway && !mainEof && trackSec > mainSec && this.audioPacketQueue.byteSize() > 0) break;
                             if (avformat.av_read_frame(this.trackFormatContext, trackPacket) < 0) {
                                 trackEof = true;
                                 LOGGER.debug(IT, "Audio track reached EOF after {} packets", demuxAudioPackets);
@@ -599,6 +609,7 @@ public final class FFDecoder {
                         demuxAudioPackets++;
                         moved = true;
                     }
+                    runway = false;
                 }
 
                 // READ PACKET (MAIN CONTEXT)
