@@ -341,7 +341,9 @@ Package map (`src/main/java/org/watermedia`):
 - `build-test.yml` (push/PR on `master`, `3.0.x`): job `build` on ubuntu-22.04 (`gradle build --warning-mode fail`
   after `SetupJava.ps1` and the Linux media runtime packages); job `native` matrix (linux x64/arm64, windows, macOS
   x64/arm64, plus a Java 17 "compatibility" leg) running `gradle test -Prequire_natives=true` with explicit `--tests`
-  filters (FF players, decoders, encoders; the compat leg: bootstrap, network, AL/AWT/SFX/spatial, NetRequest).
+  filters (FF players, decoders, encoders, `FFmpegLogRoutingTest`; the compat leg: bootstrap, network,
+  AL/AWT/SFX/spatial, NetRequest, `FFmpegLogRoutingTest`). Every leg plays with FFmpeg's log routed through its native
+  callback; a failed leg keeps its `hs_err_pid*.log` and test results as artifact `native-failure-<platform>`.
   Both jobs set `ALSOFT_DRIVERS=null`, so OpenAL opens its null device and the `OpenALContext` cases run.
   ⚠ No filter reaches the FFmpeg cases of `ColorimetryTest` (`Tags`) and `StatusDeliveryTest`
   (`LockFreeRelease`): only the `build` job runs them, where natives are optional and a failed load skips them.
@@ -519,8 +521,16 @@ status queries `ffmpegLoaded`, `ffmpegError` and `vulkanDecode` stay supported. 
   - `start(...)`: server → return; no Binaries class → WARN; else `startFFmpeg()`: honours `codecs.ffmpeg.disable`,
     builds the preload path (`WaterMediaBinaries.pathOf("ffmpeg")` then `codecs.ffmpeg.customPath`), sets JavaCPP
     properties, logs component versions, probes hwdevice types, `FFTool.startTLS()`, publishes `ffmpegLoaded`. Failure
-    → `ffmpegFailure` (boolean accessor only). ⚠ Native FFmpeg log routing (`av_log_set_callback`) is commented out
-    (JVM crashes on macOS/Linux; `FFmpegLogRoutingTest` is `@Disabled`).
+    → `ffmpegFailure` (boolean accessor only). FFmpeg's log goes to the WaterMedia logger under the `FFmpeg` marker
+    (nested `NativeLog`, installed once by `startFFmpeg`): the preset's C trampoline `setLogCallback` formats each line
+    and filters by `av_log_get_level` natively, so no `va_list` crosses into Java, and the callback only joins a
+    thread's fragments and queues the line (`CAPACITY` 4096, then dropped and warned once). One `FFmpeg-Log` daemon
+    thread logs it: FFmpeg ERROR and worse as ERROR, WARNING as WARN, INFO as DEBUG (its INFO lines name every URL it
+    opens, a viewer's address included on YouTube). ⚠ Log4j and the redaction never run on a native FFmpeg thread (a
+    small stack on macOS). ⚠ The level is QUIET while the callback swaps (the trampoline is set before its callback) and
+    from the JVM shutdown hook `FFmpeg-Log-Quiet` on, so a decoder thread never enters a dying VM. Users reported JVM
+    crashes on macOS ARM and Linux with an earlier routing (outputs lost), hence `FFmpegLogRoutingTest` in the CI native
+    matrix of every platform.
 - `ImageReader` (abstract, `Closeable`): `MAX_DECODED_BYTES = 512 MiB` (aggregate `readAll()` budget, stream read cap,
   BC texture cap). Subclass contract: `width()`, `height()`, `decodedFormat()`, `scan()`, `hasMore()`, `decode()`
   (reader-owned reused direct buffer at position 0), `rewind()`, `dispose()`. Public: `name()`, `frameWidth()/Height()`
@@ -1675,7 +1685,8 @@ System properties: `watermedia.engine`, `watermedia.app` (child JVM flag), `wate
 
 ## 15. Logging, errors and hardening
 - Redaction is universal (`WaterMedia.logger` → `DataTool.redact` on message, parameters and stack traces); tests
-  `LoggerRedactionTest`. Links are never censored (owner decision 2026-11-01), only secrets inside them. Native FFmpeg logs are not routed (disabled block, PENDING H9).
+  `LoggerRedactionTest`. Links are never censored (owner decision 2026-11-01), only secrets inside them. Native FFmpeg
+  logs are routed under the `FFmpeg` marker (§ CodecsAPI, `NativeLog`), redacted like any other line.
 - Error policy by layer: codecs throw `CodecException`/`UnsupportedFormatException` (279 + 16 throw sites), platforms
   `PlatformException` (112), players/engines `IllegalStateException` for lifecycle misuse and `IllegalArgumentException`
   for bad input; engines log and drop bad frames instead of throwing (except `ALEngine` on AL errors); status failures
@@ -1800,7 +1811,8 @@ System properties: `watermedia.engine`, `watermedia.app` (child JVM flag), `wate
   `JpegTest` (progressive fixtures plus the baseline `7.jpg`, also read as extended sequential), `NetpbmTest` (whole
   rasters against the samples read straight from the file), `PngTest`, `WebpTest`, `WebpMalformedTest`, `SvgTest`,
   `AlphaDecoderTest`,
-  `HuffmanTableTest`, `VP8LosslessDecoderTest`, `FFmpegLogRoutingTest` (disabled); network `NetworkServerTest`
+  `HuffmanTableTest`, `VP8LosslessDecoderTest`, `FFmpegLogRoutingTest` (fragments joined, levels, redaction, 8 threads at once, a broken H.264 decoded on FFmpeg's
+  own threads, and a child JVM that exits while they log with no `hs_err`); network `NetworkServerTest`
   (snapshots and restores `remoteUrl` with the other `network.*` keys; `Port`: a busy port fails before the storage
   exists, a port `remoteUrl` reaches starts, an unreachable, a foreign or an invalid `remoteUrl` fails and gives the
   port and the storage lock back), `NetworkAPITest`
@@ -1914,7 +1926,7 @@ System properties: `watermedia.engine`, `watermedia.app` (child JVM flag), `wate
   Vulkan device, so they only run on a dev machine without the layer); symlink tests skip without the Windows
   privilege; `SiteListsTest.ShareStrings` and the share cases of `WaterPlatformTest` are Windows only;
   `FFAudioTracksTest` aborts its `Embedded` and `Separate` cases when no Java Sound line plays mono S16 at 48 kHz;
-  `FFmpegLogRoutingTest` is `@Disabled`. CI native matrix filters are listed in §4.
+  CI native matrix filters are listed in §4.
 - Clock-dependent cases that a slow host can stall retry up to 3 times with 5 s pauses and rethrow the last failure
   (owner rule): `PlatformSearchTest.Discard.typedQueryWaitsForTheNextKey`,
   `FFControlContractTest.Loading.speedBeforeStart` (2x rate window,
@@ -1974,7 +1986,7 @@ System properties: `watermedia.engine`, `watermedia.app` (child JVM flag), `wate
 - Known doc drift: PENDING H5 names a `WaterMedia.stop()` that does not exist.
 
 ## 19. Known gaps and disabled code
-- Disabled: native FFmpeg log routing (`CodecsAPI.startFFmpeg`, `FFmpegLogRoutingTest`), libplacebo deinterlace
+- Disabled: libplacebo deinterlace
   (`Placebo.OPTIONS`), `@SuppressWarnings("deprecation")` on `VKEngine.twinStep` (`lock_queue`).
 - Not implemented (by design, tracked in `TODO.md`): BC texture sampling in any engine and DDS dispatch in
   `CodecsAPI.reader`; VK `preload`/`frame` fast path; HDR tone mapping on software engines.
