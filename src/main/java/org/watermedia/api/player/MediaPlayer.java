@@ -776,6 +776,11 @@ public abstract sealed class MediaPlayer permits ServerMediaPlayer, FFMediaPlaye
         }
     }
 
+    // FOLLOWER HOOKS, CALLED ON THE TICKER: catchUp BRINGS A PLAYER THAT FELL BEHIND THE SESSION TO ms, AND guide SAYS WHERE THE SESSION
+    // IS WHILE A SEEK OF THE PLAYER IS STILL IN FLIGHT. A PLAYER THAT CAN DROP WHAT IT ALREADY READ OVERRIDES BOTH
+    boolean catchUp(final long ms) { return this.seekQuick(ms); }
+    void guide(final long ms) {}
+
     // SHARED-TICKER CALLBACK. THE BASE RUNS THE FOLLOWER ENGINE; ServerMediaPlayer LAYERS ITS CLOCK MAINTENANCE ON TOP
     void tick() {
         // ONE READ FOR THE WHOLE PASS: A RELEASE OR A NEWER SNAPSHOT LANDING MID-PASS NEVER MIXES INTO IT
@@ -935,7 +940,11 @@ public abstract sealed class MediaPlayer permits ServerMediaPlayer, FFMediaPlaye
         current = this.status();
         // A SEEK TAKEN WHILE LOADING LANDS WITH THE OPEN, WHICH SAYS NOTHING ABOUT HOW LONG THE NEXT ONE TAKES
         if (current == Status.LOADING) this.seekSeen = seek;
-        if (current == Status.BUFFERING) this.flying = true;
+        if (current == Status.BUFFERING) {
+            this.flying = true;
+            // A SEEK STILL IN FLIGHT LANDS WHERE THE SESSION IS BY THEN, NOT WHERE IT WAS WHEN THE SEEK LEFT
+            if (seek != this.seekSeen && target == Status.PLAYING) this.guide(authorityTime(heard, 0L));
+        }
         if (current != Status.PLAYING && current != Status.PAUSED) return;
 
         // LANDING: THE PIPELINE PLAYS AGAIN AFTER A SEEK OR A REBUFFER. THE COOLDOWN COUNTS FROM HERE, NOT FROM THE REQUEST, AND
@@ -950,13 +959,13 @@ public abstract sealed class MediaPlayer permits ServerMediaPlayer, FFMediaPlaye
             this.landedNanos = now;
         }
 
-        // ONE CORRECTION, ONE THRESHOLD: PAST THE TOLERANCE, JUMP TO WHERE THE SESSION WILL BE ONCE THE SEEK LANDS (AIMED AT WHERE IT
-        // IS NOW, EVERY SEEK LANDS ITS OWN FLIGHT BEHIND AND ASKS FOR THE NEXT). NO RATE TRIMMING: IT READS AS THE VIDEO RANDOMLY
-        // RUNNING SLOW, AND A CLIENT ONLY FALLS BEHIND A BARE CLOCK
+        // ONE CORRECTION, ONE THRESHOLD: PAST THE TOLERANCE, JUMP TO THE SESSION. NO RATE TRIMMING: IT READS AS THE VIDEO RANDOMLY
+        // RUNNING SLOW, AND A CLIENT ONLY FALLS BEHIND A BARE CLOCK. BEHIND IT, THE PLAYER CATCHES UP (guide KEEPS THE LANDING ON THE
+        // SESSION). AHEAD OF IT, ONLY A SEEK GOES BACK, AIMED AT WHERE THE SESSION WILL BE WHEN IT LANDS
         final long drift = this.drift(heard);
         if (Math.abs(drift) <= this.toleranceMs || now - this.landedNanos < SEEK_COOLDOWN_NS) return;
         this.landedNanos = now;
-        if (!this.seekQuick(authorityTime(heard, this.latencyMs))) return;
+        if (!(drift > 0 ? this.catchUp(authorityTime(heard, 0L)) : this.seekQuick(authorityTime(heard, this.latencyMs)))) return;
 
         // A CORRECTION THIS SOON AFTER THE LAST ONE MEANS THAT ONE MISSED
         this.corrections = now - this.correctedNanos < CHAIN_NS ? this.corrections + 1 : 1;

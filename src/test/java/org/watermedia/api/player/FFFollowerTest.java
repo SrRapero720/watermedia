@@ -29,6 +29,7 @@ import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -36,9 +37,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
- * Verifies how an {@link FFMediaPlayer} follows a session over an origin that answers late, where every seek lands
- * its own flight behind the session: its start and a seek of the host are each corrected once, aimed at where the session
- * will be when the correction lands, and corrections that keep missing the tolerance are reported once.
+ * Verifies how an {@link FFMediaPlayer} follows a session over an origin that answers late, where every seek flies for a
+ * request: its start aligns, a seek of the host lands where the session is by then, a player that falls behind catches up
+ * from what it already read without a request, and corrections that keep missing the tolerance are reported once.
  */
 @DisplayName("FFMediaPlayer following a session")
 public class FFFollowerTest {
@@ -57,6 +58,7 @@ public class FFFollowerTest {
     // FOLLOWER
     private static final long TOLERANCE_MS = 400L; // HALF A FLIGHT: A SEEK AIMED AT WHERE THE SESSION IS NEVER LANDS INSIDE IT
     private static final long SEEK_MS = 30_000L;
+    private static final long JUMP_MS = 2_000L;    // PAST THE TOLERANCE, INSIDE THE REACH OF A CATCH-UP (FFMediaPlayer.CATCH_UP_MS)
     private static final int REPORTED_SEEKS = 4;   // THE THIRD CORRECTION IN A ROW IS REPORTED, THE FOURTH MUST STAY QUIET
 
     @TempDir
@@ -90,8 +92,8 @@ public class FFFollowerTest {
     }
 
     @Test
-    @DisplayName("A start and a seek of the host that land late are each corrected once, aimed at where the session will be when the correction lands")
-    void lateLandingIsCorrectedOnce() {
+    @DisplayName("A start aligns with the session and a seek of the host that flies for a request lands where the session is by then")
+    void hostSeekLandsOnTheSession() {
         try (final Session session = Session.open(TOLERANCE_MS)) {
             final FFMediaPlayer player = session.player();
             assertTrue(session.clock().start());
@@ -107,19 +109,40 @@ public class FFFollowerTest {
             assertTrue(player.seekQuick(SEEK_MS), "the viewer must take the host's seek");
             assertTrue(PlayerWait.awaitCondition(() -> aligned(player), ALIGN_TIMEOUT_MS), () -> "the seek must align: " + session);
             assertFalse(PlayerWait.awaitCondition(() -> !aligned(player), SETTLE_MS), () -> "the seek must stay aligned: " + session);
-            final long seeks = session.seeks();
-            assertTrue(seeks >= 1 && seeks <= 2, () -> "the host's seek takes at most one correction: " + session);
+            // THE LANDING FOLLOWS THE SESSION WHILE THE SEEK FLIES, SO IT NEEDS NO CORRECTION
+            assertEquals(1L, session.seeks(), () -> "the host's seek lands on the session at once: " + session);
+        }
+    }
+
+    @Test
+    @DisplayName("A player that falls behind its session inside what it already read catches up without asking the origin again")
+    void catchUpWithoutRequest() {
+        try (final Session session = Session.open(TOLERANCE_MS)) {
+            final FFMediaPlayer player = session.player();
+            assertTrue(session.clock().start());
+            player.sync(session.clock().snapshot());
+            assertTrue(PlayerWait.awaitCondition(() -> aligned(player), ALIGN_TIMEOUT_MS), () -> "the start must align: " + session);
+            assertFalse(PlayerWait.awaitCondition(() -> !aligned(player), SETTLE_MS), () -> "the start must stay aligned: " + session);
+
+            // THE SESSION RUNS AHEAD WITHOUT AN ECHO, AS IT DOES PAST A PLAYER THAT STALLED. THE READERS ARE ALREADY THERE
+            final int requests = session.requests().get();
+            session.heard().clear();
+            assertTrue(session.clock().seek(session.clock().time() + JUMP_MS));
+            player.sync(session.clock().snapshot());
+            assertTrue(PlayerWait.awaitCondition(() -> session.seeks() > 0 && aligned(player), ALIGN_TIMEOUT_MS), () -> "the player must catch up: " + session);
+            assertEquals(requests, session.requests().get(), () -> "the catch-up drops what it had read up to the session, without a request: " + session);
+            assertEquals(1L, session.seeks(), () -> "the catch-up lands on the session at once: " + session);
         }
     }
 
     @Test
     @DisplayName("Corrections that keep missing the tolerance are reported once")
     void missedCorrectionsAreReportedOnce() {
-        // NO SEEK LANDS WITHIN A MILLISECOND OF THE SESSION, SO EVERY LANDING ASKS FOR THE NEXT ONE
+        // NO SEEK LANDS WITHIN A MILLISECOND OF THE SESSION, SO EVERY LANDING ASKS FOR THE NEXT ONE. THE START BUFFERS TOO
         try (final LogCapture capture = new LogCapture(WaterMedia.ID); final Session session = Session.open(1L)) {
             assertTrue(session.clock().start());
             session.player().sync(session.clock().snapshot());
-            assertTrue(PlayerWait.awaitCondition(() -> session.seeks() >= REPORTED_SEEKS, ALIGN_TIMEOUT_MS), () -> "the corrections must keep coming: " + session);
+            assertTrue(PlayerWait.awaitCondition(() -> session.seeks() >= REPORTED_SEEKS + 1, ALIGN_TIMEOUT_MS), () -> "the corrections must keep coming: " + session);
             final long reports = capture.events().stream()
                     .filter(event -> event.getLevel() == Level.WARN && event.getMessage().getFormattedMessage().startsWith("Sync keeps correcting")).count();
             assertEquals(1L, reports, () -> "the missed corrections are reported once: " + session);
@@ -139,14 +162,16 @@ public class FFFollowerTest {
     // NESTED TYPES
     // ==========================================================================
 
-    // THE CLIP ON A LATE ORIGIN, THE PLATFORM THAT RESOLVES IT WITHOUT A REQUEST, A VIDEO-ONLY PLAYER RECORDING EVERY STATUS IT HEARS
-    // AND THE SESSION CLOCK IT FOLLOWS; CLOSING RELEASES BOTH PLAYERS, UNREGISTERS THE PLATFORM AND CLOSES THE ORIGIN
-    private record Session(LocalHttp origin, ExecutorService workers, Platform platform, FFMediaPlayer player, ServerMediaPlayer clock,
-                           List<Status> heard) implements AutoCloseable {
+    // THE CLIP ON A LATE ORIGIN COUNTING ITS REQUESTS, THE PLATFORM THAT RESOLVES IT WITHOUT A REQUEST, A VIDEO-ONLY PLAYER RECORDING
+    // EVERY STATUS IT HEARS AND THE SESSION CLOCK IT FOLLOWS. CLOSING RELEASES BOTH PLAYERS, UNREGISTERS THE PLATFORM AND CLOSES THE ORIGIN
+    private record Session(LocalHttp origin, AtomicInteger requests, ExecutorService workers, Platform platform, FFMediaPlayer player,
+                           ServerMediaPlayer clock, List<Status> heard) implements AutoCloseable {
 
         private static Session open(final long toleranceMs) {
             final ExecutorService workers = Executors.newCachedThreadPool();
+            final AtomicInteger requests = new AtomicInteger();
             final LocalHttp origin = LocalHttp.start("/", exchange -> {
+                requests.incrementAndGet();
                 try {
                     Thread.sleep(DELAY_MS);
                 } catch (final InterruptedException e) {
@@ -176,7 +201,7 @@ public class FFFollowerTest {
                 player.onStatus((source, previous, current) -> heard.add(current));
                 final ServerMediaPlayer clock = PlayerAPI.serverPlayer();
                 clock.syncDuration(SECONDS * 1_000L);
-                return new Session(origin, workers, platform, player, clock, heard);
+                return new Session(origin, requests, workers, platform, player, clock, heard);
             } catch (final RuntimeException | Error e) {
                 PlatformAPI.unregister(platform);
                 origin.close();
@@ -185,7 +210,7 @@ public class FFFollowerTest {
             }
         }
 
-        // EVERY SEEK TAKES THE PLAYER THROUGH BUFFERING ONCE
+        // EVERY SEEK TAKES THE PLAYER THROUGH BUFFERING ONCE, AND SO DOES ITS START
         private long seeks() {
             return this.heard.stream().filter(status -> status == Status.BUFFERING).count();
         }

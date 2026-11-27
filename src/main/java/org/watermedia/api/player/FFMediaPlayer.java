@@ -80,7 +80,9 @@ public final class FFMediaPlayer extends MediaPlayer {
     private static final long BEHIND_MS = 3_000;
     private static final long CUSHION_MS = 1_000;
     private static final long CUSHION_WINDOW_MS = 30_000;
-    // HOW FAR AHEAD A SEEK IS SERVED BY DROPPING WHAT WAS READ (VP9 AND AV1 DECODE EVERY FRAME THEY DROP)
+    // HOW FAR PAST THE TARGET OF ITS SEEK THE SESSION OF A FOLLOWER MAY BE FOR THE LANDING TO FOLLOW IT, AND HOW FAR AHEAD A SEEK IS
+    // SERVED BY DROPPING WHAT WAS READ (VP9 AND AV1 DECODE EVERY FRAME THEY DROP)
+    private static final long GUIDE_RANGE_MS = 10_000;
     private static final long CATCH_UP_MS = 3_000;
     // THE SOUND A REPEAT MAY CUT WHEN IT FLUSHES THE ENGINE
     private static final long TAIL_MS = 50;
@@ -178,8 +180,9 @@ public final class FFMediaPlayer extends MediaPlayer {
     private boolean settled;
     private boolean fromStart; // THE LANDING PLAYS FROM THE BEGINNING OF THE MEDIA
     private long floorMs = Long.MIN_VALUE;
-    // THE MEDIA A REBUFFER WAITS FOR
+    // THE MEDIA A REBUFFER WAITS FOR, AND WHERE THE FOLLOWER SAYS THE SESSION IS WHILE A SEEK FLIES
     private volatile long cushionMs;
+    private volatile long guideMs = Long.MIN_VALUE;
 
     // PERFORMANCE COUNTERS
     private long perfLastCheckMs;
@@ -303,12 +306,12 @@ public final class FFMediaPlayer extends MediaPlayer {
 
     @Override
     public boolean seek(final long timeMs) {
-        return this.requestClampedSeek(timeMs, true);
+        return this.requestClampedSeek(timeMs, true, false);
     }
 
     @Override
     public boolean seekQuick(final long timeMs) {
-        return this.requestClampedSeek(timeMs, false);
+        return this.requestClampedSeek(timeMs, false, false);
     }
 
     // FRAME STEPPING IS A PAUSED-ONLY CONTROL ON EVERY PLAYER
@@ -465,6 +468,14 @@ public final class FFMediaPlayer extends MediaPlayer {
     @Override
     boolean holdStatus() { return this.releasing; }
 
+    // BEHIND THE SESSION, WHAT WAS ALREADY READ MAY REACH IT: THE CONSUMPTION LOOP DROPS UP TO THERE, OR SEEKS WHEN IT DOES NOT REACH
+    @Override
+    boolean catchUp(final long ms) { return this.requestClampedSeek(ms, false, true); }
+
+    // READ BY THE CONSUMPTION LOOP WHILE A SEEK HAS NOT LANDED
+    @Override
+    void guide(final long ms) { this.guideMs = ms; }
+
     // ==========================================================================
     // HELPERS
     // ==========================================================================
@@ -504,7 +515,7 @@ public final class FFMediaPlayer extends MediaPlayer {
 
     // CLAMP ONLY AGAINST A KNOWN DURATION: duration() RETURNS NO_DURATION (0)
     // FOR UNPROBED/UNKNOWN MEDIA, AND CLAMPING AGAINST THAT SENDS EVERY SEEK TO 0.
-    private boolean requestClampedSeek(final long timeMs, final boolean precise) {
+    private boolean requestClampedSeek(final long timeMs, final boolean precise, final boolean ahead) {
         if (!this.canSeek()) {
             LOGGER.debug(IT, "Seek to {}ms ignored: source is not seekable", timeMs);
             return false;
@@ -515,7 +526,7 @@ public final class FFMediaPlayer extends MediaPlayer {
         // A FINISHED OR STOPPED PIPELINE IS GONE: SCRUBBING IT MEANS A PAUSED RESTART AT THE TARGET
         final Status status = this.clock.status();
         if (status == Status.ENDED || status == Status.STOPPED) return this.launch(true, target);
-        if (!this.clock.requestSeek(target, precise, false)) return false;
+        if (!this.clock.requestSeek(target, precise, ahead)) return false;
         // STAMPED ONCE THE CLOCK BUFFERS: THE FOLLOWER TIMES THE LANDING AND THE CONSUMPTION LOOP REPORTS IT
         this.seekTargetMs = target;
         this.seekNanos = System.nanoTime();
@@ -727,7 +738,7 @@ public final class FFMediaPlayer extends MediaPlayer {
                 final boolean audioOn = this.sfx != null && decoder.audio();
                 if (this.settled && (current == Status.PLAYING || current == Status.PAUSED)) playMs = this.clock.timeMs();
 
-                // SEEKS: A NEW GENERATION OF THE DECODER, OR ONLY A FLOOR WHEN A STEP AHEAD STAYS INSIDE WHAT WAS ALREADY READ. THE
+                // SEEKS: A NEW GENERATION OF THE DECODER, OR ONLY A FLOOR WHEN A STEP OR A CATCH-UP STAYS INSIDE WHAT WAS ALREADY READ. THE
                 // SOUND OF THE OLD POSITION STOPS AT ONCE AND NOTHING PLAYS UNTIL EVERY STREAM HAS A FRAME OF THE NEW ONE
                 final MasterClock.Seek seek = this.clock.consumeSeek();
                 if (seek != null) {
@@ -742,6 +753,7 @@ public final class FFMediaPlayer extends MediaPlayer {
                     this.settled = false;
                     this.fromStart = seek.targetMs() == 0;
                     this.cushionMs = 0;
+                    this.guideMs = Long.MIN_VALUE;
                     if (this.sfx != null) this.sfx.flush();
                     continue;
                 }
@@ -831,6 +843,13 @@ public final class FFMediaPlayer extends MediaPlayer {
                 long landVideoMs = -1;
                 long landAudioMs = -1;
                 if (!this.settled) {
+                    // THE FOLLOWER SAYS WHERE THE SESSION IS WHILE ITS SEEK FLIES: THE LANDING GOES THERE, NOT WHERE THE SEEK WAS SENT
+                    final long guide = this.guideMs;
+                    if (guide > this.floorMs && guide >= this.seekTargetMs && guide - this.seekTargetMs <= GUIDE_RANGE_MS) {
+                        this.floorMs = guide;
+                        decoder.floor(this.generation, guide);
+                        continue;
+                    }
                     // A REBUFFER ALSO WAITS FOR ITS CUSHION OF QUEUED MEDIA
                     if (videoOn && decoder.videoComing() && (videoHead == null || !decoder.videoHolds(this.cushionMs))
                             || audioOn && decoder.audioComing() && (audioHead == null || !decoder.audioHolds(this.cushionMs))) {
@@ -1213,6 +1232,7 @@ public final class FFMediaPlayer extends MediaPlayer {
         this.settled = false;
         this.fromStart = initial == null || initial.targetMs() == 0;
         this.cushionMs = 0;
+        this.guideMs = Long.MIN_VALUE;
         this.decoder = decoder; // PUBLISHED BEFORE IT RUNS, SO abort() ALWAYS REACHES ITS NATIVE I/O
         decoder.start();
     }
