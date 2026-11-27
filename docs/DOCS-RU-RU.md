@@ -178,7 +178,7 @@ dependencies {
 
 > [!NOTE]
 > Настраивается: `codecs.ffmpeg.disable`, `customPath`, `hardwareAccel`, `analyzeDuration`, `probeSize`,
-> `trackPacketReads`, `cache` и `cacheMaxResponse`. Смотрите их комментарии в `config/watermedia.toml`.
+> `cache` и `cacheMaxResponse`. Смотрите их комментарии в `config/watermedia.toml`.
 
 _WATERMeDIA: Binaries_ загружается вместе с WATERMeDIA и подготавливает нативные библиотеки до сети, кодеков и плеера.
 

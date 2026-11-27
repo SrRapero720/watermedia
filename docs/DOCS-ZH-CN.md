@@ -153,7 +153,7 @@ _FFmpeg_ 原生库覆盖以下平台；图片在任何能运行 Java 的地方�
 > 跟不上时，会改用软件解码；`codecs.ffmpeg.hardwareAccel = false` 则始终使用软件解码。
 
 > [!NOTE]
-> 可配置项：`codecs.ffmpeg.disable`、`customPath`、`hardwareAccel`、`analyzeDuration`、`probeSize`、`trackPacketReads`、
+> 可配置项：`codecs.ffmpeg.disable`、`customPath`、`hardwareAccel`、`analyzeDuration`、`probeSize`、
 > `cache` 和 `cacheMaxResponse`。请查看 `config/watermedia.toml` 中它们的注释。
 
 _WATERMeDIA: Binaries_ 随 WATERMeDIA 一起加载，并在网络、编解码器和播放器之前准备好原生库。

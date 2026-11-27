@@ -141,8 +141,8 @@ public final class WaterMediaConfig extends WaterMedia.Module {
             public boolean hardwareAccel = true;
 
             @Spec.Field(suffix = "packets", control = Control.SEEKBAR)
-            @Comment("Configures how many audio packets to read per loop when the video carries a separate audio track")
-            @Comment("Increment this value if you find YouTube videos with slow playback")
+            @Comment("No longer used: a separate audio track is read on its own thread, as far ahead as the video")
+            @Comment("The key stays so existing config files keep loading")
             @NumberConditions(minInt = 1, maxInt = 12)
             public int trackPacketReads = 3;
 

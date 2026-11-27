@@ -177,7 +177,7 @@ Los nativos de _FFmpeg_ cubren estas plataformas; las imágenes se decodifican e
 
 > [!NOTE]
 > Configurable: `codecs.ffmpeg.disable`, `customPath`, `hardwareAccel`, `analyzeDuration`, `probeSize`,
-> `trackPacketReads`, `cache` y `cacheMaxResponse`. Mirá sus comentarios en `config/watermedia.toml`.
+> `cache` y `cacheMaxResponse`. Mirá sus comentarios en `config/watermedia.toml`.
 
 _WATERMeDIA: Binaries_ carga junto con WATERMeDIA y prepara los nativos antes que la red, los códecs y el reproductor.
 

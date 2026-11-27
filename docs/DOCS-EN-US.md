@@ -170,7 +170,7 @@ The _FFmpeg_ natives cover these platforms; pictures decode everywhere Java runs
 
 > [!NOTE]
 > Configurable: `codecs.ffmpeg.disable`, `customPath`, `hardwareAccel`, `analyzeDuration`, `probeSize`,
-> `trackPacketReads`, `cache` and `cacheMaxResponse`. See their comments in `config/watermedia.toml`.
+> `cache` and `cacheMaxResponse`. See their comments in `config/watermedia.toml`.
 
 _WATERMeDIA: Binaries_ loads with WATERMeDIA and prepares the natives before the network, the codecs and the player.
 
