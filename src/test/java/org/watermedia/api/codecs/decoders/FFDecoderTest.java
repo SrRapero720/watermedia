@@ -129,7 +129,10 @@ public class FFDecoderTest {
     // UTILITY
     // ==========================================================================
     private static FFDecoder decoder(final URI uri, final Recorder host) {
-        return new FFDecoder("FFThread-Test", uri, new HttpHeaders(), true, null, new Linear(true), host);
+        // HELD, SO ITS READERS PARK ONCE THE INPUT IS OPEN
+        final FFDecoder decoder = new FFDecoder("FFThread-Test", uri, new HttpHeaders(), true, null, host);
+        decoder.hold(true);
+        return decoder;
     }
 
     // THE PROBE POLICY THE CONTEXT OPENED WITH AND THE I/O TIMEOUT ITS CONNECTION TOOK
@@ -159,10 +162,10 @@ public class FFDecoderTest {
         origin.serve("/media.m3u8", "application/vnd.apple.mpegurl", playlist.append("#EXT-X-ENDLIST\n").toString().getBytes(StandardCharsets.UTF_8));
 
         final Recorder host = new Recorder(new FFDecoder.Pcm(SampleType.S16, 1));
-        final Linear timeline = new Linear(true);
         final FFDecoder decoder = new FFDecoder("FFThread-Idle", origin.uri("/media.m3u8"), new HttpHeaders(), false,
-                new AudioChoice(List.of(), AudioChoice.AUTO, -1, null), timeline, host);
+                new AudioChoice(List.of(), AudioChoice.AUTO, -1, null), host);
         try {
+            decoder.hold(true);
             decoder.start();
             assertTrue(host.opened.await(OPEN_TIMEOUT_MS, TimeUnit.MILLISECONDS), "the playlist must open");
             assertNull(host.failure, "the playlist must open without a failure");
@@ -172,9 +175,9 @@ public class FFDecoderTest {
             final List<String> stalled = new ArrayList<>();
             for (int i = 0; i < SEGMENTS; i++) if (origin.cuts("/segment" + i + ".mkv") > 0) stalled.add("/segment" + i + ".mkv");
             assertFalse(stalled.isEmpty(), "the origin must cut a segment download in the middle of its body");
-            timeline.release();
+            decoder.hold(false);
 
-            final int[] frames = framesPerSegment(decoder, timeline);
+            final int[] frames = framesPerSegment(decoder);
             final int[] whole = new int[SEGMENTS];
             Arrays.fill(whole, SEGMENT_SECONDS * 10); // Fixtures.segment WRITES 100 ms PACKETS, ONE FRAME EACH
             assertArrayEquals(whole, frames, "every packet of every segment must decode, frames per segment: " + Arrays.toString(frames));
@@ -187,11 +190,11 @@ public class FFDecoderTest {
     }
 
     // DRAINS THE DECODER TO THE END OF ITS INPUT AND RETURNS EVERY DECODED FRAME, COUNTED BY THE SEGMENT ITS SAMPLES NAME
-    private static int[] framesPerSegment(final FFDecoder decoder, final Linear timeline) {
+    private static int[] framesPerSegment(final FFDecoder decoder) {
         final int[] frames = new int[SEGMENTS];
         final long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(DRAIN_TIMEOUT_MS);
-        while (!timeline.finished || decoder.decoding() || !decoder.audioFrames().empty()) {
-            final boolean ready = PlayerWait.awaitCondition(() -> decoder.audioFrames().peek() != null || timeline.finished && !decoder.decoding(),
+        while (!decoder.ended() || !decoder.audioFrames().empty()) {
+            final boolean ready = PlayerWait.awaitCondition(() -> decoder.audioFrames().peek() != null || decoder.ended(),
                     TimeUnit.NANOSECONDS.toMillis(deadline - System.nanoTime()));
             assertTrue(ready, "the input must play to its end, frames per segment so far: " + Arrays.toString(frames));
             if (decoder.audioFrames().peek() == null) continue;
@@ -215,7 +218,7 @@ public class FFDecoderTest {
     // THE FIRST FRAME DECODED; THE CALLER CLOSES IT, A FAILED OPEN CLOSES IT HERE
     private static FFDecoder decode(final URI uri, final AudioChoice choice) throws Exception {
         final Recorder host = new Recorder(new FFDecoder.Pcm(SampleType.S16, 1));
-        final FFDecoder decoder = new FFDecoder("FFThread-Audio", uri, new HttpHeaders(), false, choice, new Linear(false), host);
+        final FFDecoder decoder = new FFDecoder("FFThread-Audio", uri, new HttpHeaders(), false, choice, host);
         try {
             decoder.start();
             assertTrue(host.opened.await(OPEN_TIMEOUT_MS, TimeUnit.MILLISECONDS), "the input must open");
@@ -239,7 +242,7 @@ public class FFDecoderTest {
         Files.write(video, Fixtures.webm(64, 40, seconds * FPS, FPS));
         final Recorder host = new Recorder(new FFDecoder.Pcm(SampleType.S16, 1));
         final FFDecoder decoder = new FFDecoder("FFThread-Beside", video.toUri(), new HttpHeaders(), true,
-                new AudioChoice(List.of(track), AudioChoice.AUTO, -1, null), new Linear(false), host);
+                new AudioChoice(List.of(track), AudioChoice.AUTO, -1, null), host);
         try {
             decoder.start();
             assertTrue(host.opened.await(OPEN_TIMEOUT_MS, TimeUnit.MILLISECONDS), "the video must open");
@@ -573,14 +576,13 @@ public class FFDecoderTest {
         }
 
         @Test
-        @DisplayName("An abort that cuts a read short never reports the end of the input to the timeline")
+        @DisplayName("An abort that cuts a read short never passes for the end of the input")
         void abortedReadIsNotTheEnd() throws Exception {
             final byte[] webm = Fixtures.webm(96, 64, 180, 30);
             // HALF THE FILE ON A CONNECTION THAT STAYS OPEN: THE DEMUXER WAITS INSIDE av_read_frame FOR THE REST
             try (final Origin origin = Origin.endless(Arrays.copyOf(webm, webm.length / 2), "video/webm")) {
                 final Recorder host = new Recorder(null);
-                final Linear timeline = new Linear(false);
-                final FFDecoder decoder = new FFDecoder("FFThread-Read", origin.uri(".webm"), new HttpHeaders(), true, null, timeline, host);
+                final FFDecoder decoder = new FFDecoder("FFThread-Read", origin.uri(".webm"), new HttpHeaders(), true, null, host);
                 try {
                     decoder.start();
                     assertTrue(host.opened.await(OPEN_TIMEOUT_MS, TimeUnit.MILLISECONDS), "the partial input must open");
@@ -594,7 +596,7 @@ public class FFDecoderTest {
                         return now - since[0] >= TimeUnit.MILLISECONDS.toNanos(BLOCKED_MS);
                     }, OPEN_TIMEOUT_MS), "the demuxer must wait inside one read for the rest of the input");
                     decoder.stop();
-                    assertFalse(timeline.finished, "an aborted read is the end of the decoder, not of the input");
+                    assertFalse(decoder.ended(), "an aborted read is the end of the decoder, not of the input");
                 } finally {
                     decoder.close();
                 }
@@ -651,15 +653,14 @@ public class FFDecoderTest {
                 LocalHttp.respondRange(exchange, path.endsWith(".m3u8") ? "application/vnd.apple.mpegurl" : "video/x-matroska", bodies.get(path));
             }, workers)) {
                 final Recorder host = new Recorder(new FFDecoder.Pcm(SampleType.S16, 1));
-                final Linear timeline = new Linear(false);
                 final FFDecoder decoder = new FFDecoder("FFThread-Retry", origin.uri("/media.m3u8"), new HttpHeaders(), false,
-                        new AudioChoice(List.of(), AudioChoice.AUTO, -1, null), timeline, host);
+                        new AudioChoice(List.of(), AudioChoice.AUTO, -1, null), host);
                 try {
                     decoder.start();
                     assertTrue(host.opened.await(OPEN_TIMEOUT_MS, TimeUnit.MILLISECONDS), "the playlist must open");
                     assertNull(host.failure, "the playlist must open without a failure");
 
-                    final int[] frames = framesPerSegment(decoder, timeline);
+                    final int[] frames = framesPerSegment(decoder);
                     final int[] whole = new int[SEGMENTS];
                     Arrays.fill(whole, SEGMENT_SECONDS * 10); // Fixtures.segment WRITES 100 ms PACKETS, ONE FRAME EACH
                     assertArrayEquals(whole, frames, "the refused segment must decode whole, frames per segment: " + Arrays.toString(frames));
@@ -769,7 +770,7 @@ public class FFDecoderTest {
         @DisplayName("An input reopened after a failed seek keeps the stream that played instead of the first one")
         void reopenKeepsThePlayingStream(@TempDir final Path directory) throws Exception {
             final FFDecoder decoder = new FFDecoder("FFThread-Reopen", dubbed(directory), new HttpHeaders(), false,
-                    new AudioChoice(List.of(), AudioChoice.AUTO, -1, "fr"), new Linear(true), new Recorder(new FFDecoder.Pcm(SampleType.S16, 1)));
+                    new AudioChoice(List.of(), AudioChoice.AUTO, -1, "fr"), new Recorder(new FFDecoder.Pcm(SampleType.S16, 1)));
             try {
                 // NEVER STARTED: THE OPEN AND THE REOPEN RUN ON THIS THREAD, SO NO DEMUX OR DECODE THREAD TOUCHES THE CONTEXTS
                 final Method init = FFDecoder.class.getDeclaredMethod("init");
@@ -882,8 +883,8 @@ public class FFDecoderTest {
                 origin.stream("/track.wav", "audio/wav", Files.readAllBytes(track), PACED_RATE_HZ * 2L * 2L);
                 final FFDecoder decoder = beside(directory, PACED_SECONDS, new Track("Deutsch", "de", origin.uri("/track.wav")));
                 try {
-                    // THE TRACK IS ONLY READ AS FAR AS THE VIDEO GOT, SO A DOWNLOAD AT TWICE ITS BITRATE FEEDS THE VIDEO AT TWICE ITS SPEED.
-                    // THE FIRST SIXTH IS MEASURED, WHILE MOST OF THE TRACK IS STILL DOWNLOADING
+                    // THE TRACK HAS ITS OWN READER, SO A DOWNLOAD AT TWICE ITS BITRATE NEVER HOLDS THE VIDEO BACK. THE FIRST SIXTH IS
+                    // MEASURED, WHILE MOST OF THE TRACK IS STILL DOWNLOADING
                     final int measured = PACED_SECONDS / 6;
                     final long started = System.nanoTime();
                     final int frames = videoFrames(decoder, measured * FPS, measured * 1_000L);
@@ -903,19 +904,17 @@ public class FFDecoderTest {
             Fixtures.segment(main, RATE_HZ, SEEK_SECONDS, Fixtures.level(0));
             Fixtures.clip(track, Container.WEBM, null, AudioCodec.OPUS, 0, 0, FPS, SEEK_SECONDS);
 
-            // HELD FROM THE OPEN, NOTHING PAST THE HEADERS IS READ: THE CUES ARE ALL THE TRACK'S INDEX KNOWS WHEN THE SEEK COMES
+            // THE SEEK COMES BEFORE THE START, SO NOTHING PAST THE HEADERS IS READ: THE CUES ARE ALL THE TRACK'S INDEX KNOWS BY THEN
             final Recorder host = new Recorder(new FFDecoder.Pcm(SampleType.S16, 2));
-            final Linear timeline = new Linear(true);
-            timeline.seek(SEEK_TARGET_MS);
             final FFDecoder decoder = new FFDecoder("FFThread-Seek", main.toUri(), new HttpHeaders(), false,
-                    new AudioChoice(List.of(new Track("Deutsch", "de", track.toUri())), AudioChoice.AUTO, -1, null), timeline, host);
+                    new AudioChoice(List.of(new Track("Deutsch", "de", track.toUri())), AudioChoice.AUTO, -1, null), host);
             try {
+                assertEquals(1, decoder.seek(SEEK_TARGET_MS, false), "the first seek opens the first generation");
                 decoder.start();
                 assertTrue(host.opened.await(OPEN_TIMEOUT_MS, TimeUnit.MILLISECONDS), "the input must open");
                 assertNull(host.failure, "the input must open without a failure");
-                assertTrue(PlayerWait.awaitCondition(() -> !timeline.seekPending(), OPEN_TIMEOUT_MS), "the seek must be served");
-                timeline.release();
                 assertTrue(PlayerWait.awaitCondition(() -> decoder.audioFrames().peek() != null, OPEN_TIMEOUT_MS), "the track must decode after the seek");
+                assertEquals(1, decoder.audioFrames().peek().generation, "its frames carry the generation of the seek");
                 final long landed = decoder.audioFrames().peek().ptsMs;
                 assertTrue(Math.abs(landed - SEEK_TARGET_MS) <= SEEK_SLACK_MS, "the track must land on " + SEEK_TARGET_MS + " ms, landed on " + landed + " ms");
             } finally {
@@ -924,7 +923,7 @@ public class FFDecoderTest {
         }
 
         @Test
-        @DisplayName("A main input that blocks on its origin after a seek leaves the separate track seconds of sound to play")
+        @DisplayName("A main input that blocks on its origin after a seek never keeps the separate track from being read")
         void blockedMainInputLeavesTheTrackARunway(@TempDir final Path directory) throws Exception {
             final Map<String, byte[]> bodies = new HashMap<>();
             final StringBuilder playlist = new StringBuilder("#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:" + BLOCKED_SEGMENT_SECONDS + "\n#EXT-X-MEDIA-SEQUENCE:0\n");
@@ -955,17 +954,17 @@ public class FFDecoderTest {
                 LocalHttp.respondRange(exchange, path.endsWith(".m3u8") ? "application/vnd.apple.mpegurl" : "video/mp2t", bodies.get(path));
             }, workers)) {
                 final Recorder host = new Recorder(new FFDecoder.Pcm(SampleType.S16, 1));
-                final Linear timeline = new Linear(true);
                 final FFDecoder decoder = new FFDecoder("FFThread-Runway", origin.uri("/media.m3u8"), new HttpHeaders(), true,
-                        new AudioChoice(List.of(new Track("Deutsch", "de", track.toUri())), AudioChoice.AUTO, -1, null), timeline, host);
+                        new AudioChoice(List.of(new Track("Deutsch", "de", track.toUri())), AudioChoice.AUTO, -1, null), host);
                 try {
+                    // HELD UNTIL THE SEEK IS IN, SO NOTHING IS READ FROM THE START
+                    decoder.hold(true);
                     decoder.start();
                     assertTrue(host.opened.await(OPEN_TIMEOUT_MS, TimeUnit.MILLISECONDS), "the playlist must open");
                     assertNull(host.failure, "the playlist must open without a failure");
                     holding.set(true);
-                    timeline.seek(BLOCKED_TARGET_MS);
-                    assertTrue(PlayerWait.awaitCondition(() -> !timeline.seekPending(), OPEN_TIMEOUT_MS), "the seek must be served");
-                    timeline.release();
+                    decoder.seek(BLOCKED_TARGET_MS, false);
+                    decoder.hold(false);
                     assertTrue(asked.await(OPEN_TIMEOUT_MS, TimeUnit.MILLISECONDS), "the main input must ask for its segment");
 
                     // THE SOUND IS TAKEN AS A PLAYER WOULD WHILE THE SEGMENT NEVER ARRIVES
@@ -1000,7 +999,7 @@ public class FFDecoderTest {
             Fixtures.wav(file, RATE_HZ, 4, AV_CH_LAYOUT_4POINT0, pcm.array());
             final Recorder host = new Recorder(new FFDecoder.Pcm(SampleType.S16, 4));
             final FFDecoder decoder = new FFDecoder("FFThread-Quad", file.toUri(), new HttpHeaders(), false,
-                    new AudioChoice(List.of(), AudioChoice.AUTO, -1, null), new Linear(false), host);
+                    new AudioChoice(List.of(), AudioChoice.AUTO, -1, null), host);
             try {
                 decoder.start();
                 assertTrue(host.opened.await(OPEN_TIMEOUT_MS, TimeUnit.MILLISECONDS), "the input must open");
@@ -1066,36 +1065,6 @@ public class FFDecoderTest {
             assertEquals(0, FFDecoder.match("es", null), "an untagged stream matches nothing");
             assertEquals(0, FFDecoder.match("", "en"), "an empty preference matches nothing");
         }
-    }
-
-    // A TIMELINE THAT RECORDS WHETHER THE DEMUXER REPORTED THE END OF THE INPUT AND HANDS OVER THE QUICK SEEK seek() LEAVES;
-    // A HELD ONE STAYS PAUSED, SO THE DEMUXER PARKS ONCE THE INPUT IS OPEN, UNTIL release()
-    private static final class Linear implements FFDecoder.Timeline {
-        private volatile boolean held;
-        private volatile boolean finished;
-        private volatile FFDecoder.Seek seek;
-
-        private Linear(final boolean held) { this.held = held; }
-
-        private void release() { this.held = false; }
-        private void seek(final long targetMs) { this.seek = new FFDecoder.Seek(targetMs, false); }
-
-        // ONLY THE DEMUX THREAD TAKES IT
-        @Override
-        public FFDecoder.Seek consumeSeek() {
-            final FFDecoder.Seek seek = this.seek;
-            this.seek = null;
-            return seek;
-        }
-
-        @Override public boolean seekPending() { return this.seek != null; }
-        @Override public boolean holding() { return this.held; }
-        @Override public void awaitChange(final long timeoutMs) throws InterruptedException { Thread.sleep(timeoutMs > 0 ? timeoutMs : 50); }
-        @Override public void serial(final int serial) {}
-        @Override public void start() {}
-        @Override public void signalDemuxResumed() {}
-        @Override public void signalDemuxFinished() { this.finished = true; }
-        @Override public double frameDurationSec() { return 1.0 / 30.0; }
     }
 
     // RECORDS THE OPEN OR ITS FAILURE AND TAKES THE AUDIO AS pcm (null DROPS IT); NOTHING IS CACHED, SO EVERY INPUT OPENS WHERE IT LIVES

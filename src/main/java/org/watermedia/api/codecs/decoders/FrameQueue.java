@@ -43,7 +43,7 @@ public final class FrameQueue {
     /**
      * Returns the next writable slot, blocking while the queue is full (intentional backpressure), or null when the
      * queue was aborted or the wait was interrupted. The writer moves the decoded frame in with
-     * {@code av_frame_move_ref(slot.frame, decodedFrame)}, fills {@code ptsMs}, {@code serial} and the rest, then calls {@link #push()}.
+     * {@code av_frame_move_ref(slot.frame, decodedFrame)}, fills {@code ptsMs}, {@code generation} and the rest, then calls {@link #push()}.
      */
     public Slot peekWritable() {
         synchronized (this.lock) {
@@ -116,7 +116,7 @@ public final class FrameQueue {
     /**
      * Discards every pending frame with {@code av_frame_unref}, as after a seek. A writer between {@link #peekWritable()}
      * and {@link #push()} still commits into its own slot, which becomes the first readable frame and is then dropped
-     * by the reader for its stale serial.
+     * by the reader for its stale generation.
      */
     public void flush() {
         synchronized (this.lock) {
@@ -165,8 +165,8 @@ public final class FrameQueue {
         /** Estimated frame duration in milliseconds. */
         public long durationMs;
 
-        /** Serial of the {@link PacketQueue} at decode time; the reader drops frames whose serial predates the last seek. */
-        public int serial;
+        /** Generation of the seek the frame was decoded after; the reader drops the frames a newer seek left behind. */
+        public int generation;
 
         // CACHED TO DETECT MID-STREAM FORMAT CHANGES WITHOUT ACCESSING THE AVFrame
         public int width;

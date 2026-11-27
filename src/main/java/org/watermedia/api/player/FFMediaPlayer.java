@@ -74,8 +74,16 @@ public final class FFMediaPlayer extends MediaPlayer {
     private static final double PERF_RATE_WARN_THRESHOLD = 0.90;
     private static final String SLOW_REPORT = "Slow consumption iterations: {} in {}ms (worst={}ms, audio={}ms, video={}ms, frame={}ms)";
 
-    // STARVATION DETECTION
-    private static final long STARVATION_THRESHOLD_MS = 500;
+    // BUFFERING: HOW LONG A STREAM MAY HAVE NOTHING TO PLAY OR THE PICTURE MAY TRAIL ITS DECODER BEFORE BOTH WAIT, AND THE MEDIA EVERY
+    // STREAM QUEUES BEFORE A STARVED ONE RESUMES, DOUBLED WHEN IT STARVES AGAIN WITHIN THE WINDOW
+    private static final long STARVED_MS = 300;
+    private static final long BEHIND_MS = 3_000;
+    private static final long CUSHION_MS = 1_000;
+    private static final long CUSHION_WINDOW_MS = 30_000;
+    // HOW FAR AHEAD A SEEK IS SERVED BY DROPPING WHAT WAS READ (VP9 AND AV1 DECODE EVERY FRAME THEY DROP)
+    private static final long CATCH_UP_MS = 3_000;
+    // THE SOUND A REPEAT MAY CUT WHEN IT FLUSHES THE ENGINE
+    private static final long TAIL_MS = 50;
     // BUFFER SETS OF THE ROTATING UPLOAD POOL (SEE planePool)
     private static final int PLANE_POOL_SETS = 4;
     // A RESUME AFTER THIS LONG ON HOLD READS AN HLS INPUT AGAIN (SEE pause)
@@ -163,9 +171,15 @@ public final class FFMediaPlayer extends MediaPlayer {
     private int cachedUploadFmt = Integer.MIN_VALUE;
     private FFTool.Pixels cachedUploadMapping;
 
-    // SERIAL OF THE LAST FRAME UPLOADED TO THE SFX ENGINE: WHEN IT CHANGES (SEEK,
-    // QUALITY SWITCH) THE ENGINE QUEUE STILL HOLDS PRE-SEEK AUDIO AND MUST BE FLUSHED.
-    private volatile int lastAudioUploadSerial = -1;
+    // WHAT THE RUN PLAYS (LIFECYCLE THREAD ONLY): THE DECODER GENERATION AND THE CLOCK EPOCH, WHETHER THEIR FRAMES LANDED (THE CLOCK RUNS
+    // FROM FRAMES EVERY STREAM HAS) AND THE FLOOR SENT TO THE DECODER, BELOW WHICH NOTHING PLAYS
+    private int generation;
+    private int epoch;
+    private boolean settled;
+    private boolean fromStart; // THE LANDING PLAYS FROM THE BEGINNING OF THE MEDIA
+    private long floorMs = Long.MIN_VALUE;
+    // THE MEDIA A REBUFFER WAITS FOR
+    private volatile long cushionMs;
 
     // PERFORMANCE COUNTERS
     private long perfLastCheckMs;
@@ -179,6 +193,7 @@ public final class FFMediaPlayer extends MediaPlayer {
     private boolean refusedWarned;
     private boolean decodedWarned;
     private boolean starvationWarned;
+    private boolean behindWarned;
 
     // NOTHING IS OPENED UNTIL start(); THE HEAVY FFMPEG SETUP RUNS ON THE DECODER'S THREADS SPAWNED THEN.
     // A NULL gfx MEANS AUDIO-ONLY AND A NULL sfx VIDEO-ONLY PLAYBACK
@@ -251,14 +266,14 @@ public final class FFMediaPlayer extends MediaPlayer {
         final FFDecoder decoder = this.decoder;
         final long heldMs = this.clock.heldMs();
         final boolean reread = !paused && heldMs >= REREAD_HOLD_MS && decoder != null && decoder.hls() && this.canSeek()
-                && !this.clock.demuxFinished() && this.clock.reread();
+                && !decoder.ended() && this.clock.reread();
         final boolean changed = reread || this.clock.paused(paused);
         // THE AUDIO ENGINE FOLLOWS, OR OPENAL PLAYS ITS QUEUE INTO AN UNDERRUN AND RESUMES FROM A STOPPED SOURCE (AUDIBLE
         // GAP). ONLY ON A REAL TRANSITION: play() ON A TERMINAL STATE (ENDED/STOPPED) WOULD REPLAY THE RESIDUAL QUEUE
         if (changed && this.sfx != null) {
             if (paused) this.sfx.pause();
-            // A STALE QUEUE (SEEK, REREAD) STAYS QUIET: drainAudio FLUSHES IT AND STARTS THE ENGINE
-            else if (this.lastAudioUploadSerial == this.clock.serial()) this.sfx.play();
+            // A CLOCK THAT STILL BUFFERS (SEEK, REREAD) STAYS QUIET: ITS LANDING STARTS THE ENGINE
+            else if (this.clock.status() == Status.PLAYING) this.sfx.play();
         }
         if (reread) LOGGER.debug(IT, "Resume after a {}ms hold reads the HLS input again from {}ms", heldMs, this.time());
         else if (changed) LOGGER.debug(IT, "Pause -> {}", paused);
@@ -300,7 +315,7 @@ public final class FFMediaPlayer extends MediaPlayer {
     @Override
     public boolean previousFrame() {
         if (!super.previousFrame() || !this.paused() || !this.canSeek()) return false;
-        return this.clock.requestSeek(Math.max(0, this.time() - this.clock.frameDurationMs()), true);
+        return this.clock.requestSeek(Math.max(0, this.time() - this.clock.frameDurationMs()), true, false);
     }
 
     @Override
@@ -308,7 +323,8 @@ public final class FFMediaPlayer extends MediaPlayer {
         if (!super.nextFrame() || !this.paused() || !this.canSeek()) return false;
         final long duration = this.duration();
         final long target = this.time() + this.clock.frameDurationMs();
-        return this.clock.requestSeek(duration > 0 ? Math.min(target, duration) : target, true);
+        // THE NEXT FRAME IS ALMOST ALWAYS READ ALREADY, SO THE STEP DROPS UP TO IT INSTEAD OF ASKING THE INPUT AGAIN
+        return this.clock.requestSeek(duration > 0 ? Math.min(target, duration) : target, true, true);
     }
 
     @Override
@@ -341,12 +357,14 @@ public final class FFMediaPlayer extends MediaPlayer {
 
     @Override
     public int buffered() {
-        // AFTER DEMUX EOF THERE IS NOTHING LEFT TO READ AHEAD, AND A PIPELINE THAT IS PLAYING OR
-        // PAUSED IS KEEPING UP; ONLY LOADING/BUFFERING REPORT THE REAL QUEUE FILL
+        // A PIPELINE THAT IS PLAYING OR PAUSED IS KEEPING UP, AND ONE THAT READ ITS INPUT TO THE END HAS NOTHING LEFT TO WAIT FOR.
+        // LOADING AND BUFFERING REPORT THE STREAM WITH THE LEAST QUEUED, AGAINST THE MEDIA THE PLAYER WAITS FOR
         final Status status = this.clock.status();
-        if (this.opened && (this.clock.demuxFinished() || status == Status.PLAYING || status == Status.PAUSED)) return 100;
         final FFDecoder decoder = this.decoder;
-        return decoder == null ? 0 : decoder.buffered();
+        if (decoder == null) return 0;
+        if (this.opened && (status == Status.PLAYING || status == Status.PAUSED || decoder.ended())) return 100;
+        final long wanted = Math.max(CUSHION_MS, this.cushionMs);
+        return (int) (Math.min(decoder.buffered(), wanted) * 100L / wanted);
     }
 
     @Override
@@ -497,7 +515,7 @@ public final class FFMediaPlayer extends MediaPlayer {
         // A FINISHED OR STOPPED PIPELINE IS GONE: SCRUBBING IT MEANS A PAUSED RESTART AT THE TARGET
         final Status status = this.clock.status();
         if (status == Status.ENDED || status == Status.STOPPED) return this.launch(true, target);
-        if (!this.clock.requestSeek(target, precise)) return false;
+        if (!this.clock.requestSeek(target, precise, false)) return false;
         // STAMPED ONCE THE CLOCK BUFFERS: THE FOLLOWER TIMES THE LANDING AND THE CONSUMPTION LOOP REPORTS IT
         this.seekTargetMs = target;
         this.seekNanos = System.nanoTime();
@@ -603,10 +621,10 @@ public final class FFMediaPlayer extends MediaPlayer {
         return this.swsContext != null;
     }
 
-    // EAGER AUDIO UPLOADS, LIFECYCLE LOOP ONLY (A SECOND CONSUMER RACES THE PIPELINE). THE ENGINE
+    // EAGER AUDIO UPLOADS WHILE THE CLOCK RUNS, LIFECYCLE LOOP ONLY (A SECOND CONSUMER RACES THE PIPELINE). THE ENGINE
     // POOL IS THE BACKPRESSURE AND THE CLOCK TRACKS THE AUDIBLE POSITION; A JUST-IN-TIME GATE
     // UNDERRUNS ON EVERY HICCUP; AUDIO_MAX_LEAD_SEC ONLY CAPS RUNAWAY PTS JUMPS.
-    private boolean drainAudio(final FFDecoder decoder, final Status current) {
+    private boolean drainAudio(final FFDecoder decoder) {
         if (this.sfx == null || !decoder.audio()) return false;
         final FrameQueue frames = decoder.audioFrames();
         boolean didWork = false;
@@ -614,20 +632,16 @@ public final class FFMediaPlayer extends MediaPlayer {
             final FrameQueue.Slot slot = frames.peek();
             if (slot == null) break;
 
-            // SERIAL CHECK: DISCARD PRE-SEEK FRAMES
-            if (slot.serial != this.clock.serial()) {
+            // LEFT BEHIND BY A SEEK, OR ENDS BEFORE THE FLOOR
+            if (slot.generation != this.generation || slot.ptsMs + slot.durationMs <= this.floorMs) {
                 frames.next();
                 didWork = true;
                 continue;
             }
-            if (current != Status.BUFFERING) {
-                final double lead = (slot.ptsMs / 1_000.0) - this.clock.time();
-                if (lead > AUDIO_MAX_LEAD_SEC) break;
-            }
+            if (slot.ptsMs / 1_000.0 - this.clock.time() > AUDIO_MAX_LEAD_SEC) break;
 
             final long framePtsMs = slot.ptsMs;
             final long frameDurationMs = slot.durationMs;
-            final int frameSerial = slot.serial;
 
             // THE DECODER QUEUES INTERLEAVED PCM IN THE LAYOUT THE ENGINE WAS FORMATTED WITH
             final int bytesPerSample = av_get_bytes_per_sample(slot.frame.format());
@@ -637,40 +651,22 @@ public final class FFMediaPlayer extends MediaPlayer {
                     .asBuffer()
                     .clear();
 
-            // SERIAL HANDOFF (SEEK/QUALITY SWITCH): DROP THE ENGINE'S QUEUED AUDIO FROM THE
-            // PREVIOUS POSITION BEFORE THE FIRST POST-SEEK UPLOAD SO IT NEITHER FINISHES NOR REPLAYS.
-            if (frameSerial != this.lastAudioUploadSerial) {
-                this.sfx.flush();
-                this.lastAudioUploadSerial = frameSerial;
-            }
-
             // ENGINE FULL: ITS BUFFER POOL IS THE BACKPRESSURE; STOP UNTIL IT FREES SLOTS
             if (!this.sfx.upload(audioData)) {
-                if (this.clock.status() == Status.BUFFERING)
-                    LOGGER.debug(IT, "drainAudio: SFX engine full during BUFFERING, can't upload PTS={}ms", framePtsMs);
                 // RE-ASSERT PLAY EVEN ON FAILURE: A STALE MAINTENANCE pause() RACING A RESUME WOULD
                 // OTHERWISE DEADLOCK: A PAUSED ENGINE NEVER FREES BUFFERS, SO UPLOADS FAIL FOREVER
                 if (!this.clock.pauseRequested()) this.sfx.play();
                 break;
             }
 
-            // DON'T START THE SOURCE WHEN A PAUSE IS REQUESTED: WARM-UP UPLOADS
-            // DURING BUFFERING→PAUSED WOULD OTHERWISE LEAK A FEW MS OF AUDIO
+            // DON'T START THE SOURCE WHEN A PAUSE IS REQUESTED: AN UPLOAD THAT RACES IT WOULD LEAK A FEW MS OF AUDIO
             if (!this.clock.pauseRequested()) this.sfx.play();
             frames.next();
             this.perfAudioUploads++;
 
             // CLOCK = AUDIBLE POSITION: THE FRAME PTS ALONE WOULD RUN AHEAD BY THE ENGINE'S QUEUE
             // DEPTH, SO SUBTRACT THE PENDING (LATENCY-COMPENSATED) AUDIO FROM THIS FRAME'S END.
-            final long audiblePtsMs = framePtsMs + frameDurationMs - this.sfx.pendingMs();
-
-            final Status beforeUpdate = this.clock.status();
-            this.clock.updateMs(audiblePtsMs, frameSerial);
-            final Status afterUpdate = this.clock.status();
-            if (beforeUpdate != afterUpdate)
-                LOGGER.debug(IT, "Clock update: {} → {} (PTS={}ms, audible={}ms, serial={}, clockSerial={})",
-                        beforeUpdate, afterUpdate, framePtsMs, audiblePtsMs, frameSerial, this.clock.serial());
-
+            this.clock.update((framePtsMs + frameDurationMs - this.sfx.pendingMs()) / 1_000.0, this.epoch);
             didWork = true;
         }
         return didWork;
@@ -690,27 +686,20 @@ public final class FFMediaPlayer extends MediaPlayer {
             this.clock.reset();
             // A stop() THAT RACED THIS RESTART ALREADY MOVED THE FRESH CLOCK TO STOPPED: THE USER WINS
             if (!this.clock.transition(Status.LOADING)) return;
-            // THE PAUSE INTENT AND THE RESTART POSITION LATCH INTO LOADING; start() LANDS PAUSED AND, WITH A
-            // PENDING SEEK, IN BUFFERING AT THE TARGET
+            // THE PAUSE INTENT AND THE RESTART POSITION LATCH INTO LOADING: THE DECODER OPENS AT THE POSITION AND THE LANDING
+            // RESOLVES INTO PAUSED
             if (paused) this.clock.paused(true);
-            if (seekMs >= 0) this.clock.requestSeek(seekMs, true);
+            if (seekMs >= 0) this.clock.requestSeek(seekMs, true, false);
             this.totalSkippedFrames = 0;
             this.totalRenderedFrames = 0;
             double renderDebtSec = 0; // ADAPTIVE FRAME DROPPING: CONVERT+UPLOAD TIME OWED TO THE FRAME BUDGET
             this.switchRequest = false; // THE QUALITY AND AUDIO PICK ARE ALREADY THE LATEST; A STALE SWITCH WOULD REBUILD THE FRESH PIPELINE
-            // STARVATION DETECTION
-            long starvationStartMs = 0;
-            long lastStarvationRecoveryMs = Long.MIN_VALUE / 4; // "NEVER", FAR ENOUGH FROM ANY MONOTONIC STAMP
-            // SEEK LANDING REPORT: THE SEEK IT FOLLOWS, THEN WHERE AND HOW LATE THE CLOCK STARTED AND THE FIRST PICTURE CAME
-            boolean landing = false;
-            long landStamp = this.seekNanos;
-            long landTargetMs = 0;
-            long landSkipped = 0;
-            long landClockMs = -1;
-            long landClockTookMs = 0;
-            long landVideoMs = -1;
-            long landVideoTookMs = 0;
-            this.lastAudioUploadSerial = -1;
+            // BUFFERING DETECTION: SINCE WHEN A STREAM HAS NOTHING TO PLAY, SINCE WHEN THE PICTURE TRAILS ITS DECODER, THE LAST REBUFFER
+            long starvedStartMs = 0;
+            long behindStartMs = 0;
+            long lastRebufferMs = Long.MIN_VALUE / 4; // "NEVER", FAR ENOUGH FROM ANY MONOTONIC STAMP
+            long playMs = 0; // WHERE THE CLOCK LAST WAS ONCE LANDED, PLAYING OR PAUSED
+            long landStamp = this.seekNanos; // THE SEEK WHOSE LANDING WAS ALREADY REPORTED
             this.hlsLiveSource = null;
             this.opened = false;
             this.fps = 0f;
@@ -734,12 +723,51 @@ public final class FFMediaPlayer extends MediaPlayer {
                 final FFDecoder decoder = this.decoder;
                 final FrameQueue videoFrames = decoder.videoFrames();
                 final FrameQueue audioFrames = decoder.audioFrames();
+                final boolean videoOn = this.gfx != null && decoder.video();
+                final boolean audioOn = this.sfx != null && decoder.audio();
+                if (this.settled && (current == Status.PLAYING || current == Status.PAUSED)) playMs = this.clock.timeMs();
 
-                if (this.clock.demuxFinished() && !decoder.decoding() && videoFrames.empty() && audioFrames.empty()) {
-                    // A VIDEO STREAM THAT DRAINED WITHOUT EMITTING A FRAME (NEITHER RENDERED NOR SKIPPED) IS A DECODE FAILURE,
-                    // E.G. AN AV1 STREAM THE SELECTED DECODER CANNOT HANDLE: ENDED WOULD LOOK LIKE AN INSTANT 0-LENGTH PLAYBACK
-                    // AND repeat() WOULD RETRY IT FOREVER
-                    if (decoder.video() && this.totalRenderedFrames == 0 && this.totalSkippedFrames == 0) {
+                // SEEKS: A NEW GENERATION OF THE DECODER, OR ONLY A FLOOR WHEN A STEP AHEAD STAYS INSIDE WHAT WAS ALREADY READ. THE
+                // SOUND OF THE OLD POSITION STOPS AT ONCE AND NOTHING PLAYS UNTIL EVERY STREAM HAS A FRAME OF THE NEW ONE
+                final MasterClock.Seek seek = this.clock.consumeSeek();
+                if (seek != null) {
+                    if (seek.ahead() && this.settled && seek.targetMs() > playMs && seek.targetMs() - playMs <= CATCH_UP_MS && decoder.covers(seek.targetMs())) {
+                        this.floorMs = seek.targetMs();
+                        decoder.floor(this.generation, this.floorMs);
+                    } else {
+                        this.generation = decoder.seek(seek.targetMs(), seek.precise());
+                        this.floorMs = seek.precise() ? seek.targetMs() : Long.MIN_VALUE;
+                    }
+                    this.epoch = seek.epoch();
+                    this.settled = false;
+                    this.fromStart = seek.targetMs() == 0;
+                    this.cushionMs = 0;
+                    if (this.sfx != null) this.sfx.flush();
+                    continue;
+                }
+
+                // PAUSED BY REQUEST AND LANDED, THE READERS PARK. A PAUSE THAT CAME BEFORE THE LANDING STILL READS UP TO ITS FRAMES
+                decoder.hold(this.settled && this.clock.holding());
+
+                // READ BEFORE THE HEADS: A DECODER PUSHES ITS LAST FRAMES BEFORE IT SAYS IT IS DONE, SO NONE OF THEM IS LEFT BEHIND
+                final boolean ended = decoder.ended();
+
+                // WHAT A SEEK OR THE FLOOR LEFT BEHIND NEVER PLAYS, NOR COUNTS AS SOMETHING TO PLAY
+                FrameQueue.Slot videoHead;
+                while ((videoHead = videoFrames.peek()) != null
+                        && (videoHead.generation != this.generation || videoHead.ptsMs + videoHead.durationMs <= this.floorMs)) {
+                    if (videoHead.generation == this.generation) this.totalSkippedFrames++;
+                    videoFrames.next();
+                }
+                FrameQueue.Slot audioHead;
+                while ((audioHead = audioFrames.peek()) != null
+                        && (audioHead.generation != this.generation || audioHead.ptsMs + audioHead.durationMs <= this.floorMs))
+                    audioFrames.next();
+
+                if (ended && videoHead == null && audioHead == null) {
+                    // A VIDEO STREAM THAT DRAINED WITHOUT DECODING A FRAME IS A DECODE FAILURE, E.G. AN AV1 STREAM THE SELECTED DECODER
+                    // CANNOT HANDLE: ENDED WOULD LOOK LIKE AN INSTANT 0-LENGTH PLAYBACK AND repeat() WOULD RETRY IT FOREVER
+                    if (decoder.video() && decoder.videoDecoded() == 0) {
                         LOGGER.error(IT, DataTool.errCode(WaterMedia.ERR_FFPLAYER_NO_FRAMES_LOG) + "Failed to decode video for {} due to no frames emitted, failing instead of reporting ENDED", decoder.uri());
                         this.exception(new IOException(DataTool.errCode(WaterMedia.ERR_FFPLAYER_NO_FRAMES) + "Failed to decode video due to no frames emitted, the stream is unsupported or broken"));
                         this.publishTransition(Status.ERROR);
@@ -747,7 +775,7 @@ public final class FFMediaPlayer extends MediaPlayer {
                     }
                     // A STILL (ONE VIDEO FRAME, NO AUDIO) BEHAVES LIKE THE IMAGE PLAYER'S: SHOWN UNTIL displayTime
                     // ENDS IT, FOREVER WHEN UNTIMED, NEVER LOOPED (REPLAYING THE PIPELINE FOR THE SAME PIXELS BUYS NOTHING)
-                    if (!decoder.audio() && this.totalRenderedFrames + this.totalSkippedFrames <= 1) {
+                    if (!decoder.audio() && decoder.videoDecoded() <= 1) {
                         this.hlsLiveSource = false; // A FULLY DRAINED FINITE SOURCE IS NEVER LIVE
                         final long shown = this.displayTimeMs;
                         if (shown > 0) {
@@ -761,8 +789,13 @@ public final class FFMediaPlayer extends MediaPlayer {
                         continue;
                     }
                     if (this.repeat()) {
-                        // ALL DATA CONSUMED: SEEK TO THE BEGINNING AFTER THE FULL DRAIN, NOT AT DEMUX EOF, SO NO PACKET IS LOST
-                        this.clock.requestSeek(0, false);
+                        // ALL DATA CONSUMED: SEEK TO THE BEGINNING AFTER THE FULL DRAIN, NOT AT THE END OF THE INPUT, SO NO PACKET IS LOST.
+                        // THE SEEK FLUSHES THE ENGINE, SO IT WAITS UNTIL THE LAST SOUND WAS HEARD
+                        if (audioOn && this.sfx.pendingMs() > TAIL_MS) {
+                            this.clock.awaitChange(TAIL_MS);
+                            continue;
+                        }
+                        this.clock.requestSeek(0, false, false);
                         continue;
                     }
                     this.publishTransition(Status.ENDED);
@@ -776,26 +809,50 @@ public final class FFMediaPlayer extends MediaPlayer {
                     break;
                 }
 
-                if (current == Status.PAUSED) {
-                    // KEEP THE ENGINE PAUSED EVEN WHEN PAUSED WAS REACHED INTERNALLY
-                    // (BUFFERING→PAUSED VIA pauseIntent) AND NOT THROUGH pause(true)
+                if (current == Status.PAUSED && this.settled) {
+                    // KEEP THE ENGINE PAUSED EVEN WHEN PAUSED WAS REACHED BY A LANDING AND NOT THROUGH pause(true)
                     if (this.sfx != null) this.sfx.pause();
                     this.clock.awaitChange(50);
                     continue;
                 }
 
                 // STOPPED, ERROR AND EVERY OTHER STATUS LEFT HERE END THE LOOP
-                if (current != Status.PLAYING && current != Status.BUFFERING) break;
+                if (current != Status.PLAYING && current != Status.BUFFERING && current != Status.PAUSED) break;
+                // A CLOCK THAT RUNS WITHOUT A LANDING HAS NO FRAMES UNDER IT: IT BUFFERS UNTIL IT DOES
+                if (current == Status.PLAYING && !this.settled) {
+                    this.clock.transition(Status.BUFFERING);
+                    continue;
+                }
 
-                // A NEWER SEEK STARTS ITS LANDING REPORT OVER
-                final long seekStamp = this.seekNanos;
-                if (seekStamp != landStamp) {
+                // LANDING: A START, A SEEK OR A REBUFFER ENDS WHEN EVERY STREAM THAT STILL DELIVERS HAS A FRAME, AND THE CLOCK STARTS
+                // WHERE THE LAST OF THEM STARTS, SO SOUND AND PICTURE COME BACK TOGETHER
+                boolean landing = false;
+                long landMs = 0;
+                long landVideoMs = -1;
+                long landAudioMs = -1;
+                if (!this.settled) {
+                    // A REBUFFER ALSO WAITS FOR ITS CUSHION OF QUEUED MEDIA
+                    if (videoOn && decoder.videoComing() && (videoHead == null || !decoder.videoHolds(this.cushionMs))
+                            || audioOn && decoder.audioComing() && (audioHead == null || !decoder.audioHolds(this.cushionMs))) {
+                        Thread.sleep(1);
+                        continue;
+                    }
+                    // WHAT A STREAM HAS BEFORE THE START OF THE OTHER IS DROPPED, HERE AND IN ITS DECODER, AND THE WAIT GOES ON. THE SOUND A
+                    // REBUFFER LEFT IN THE ENGINE PLAYS FIRST, SO THE SOUND STARTS WHERE IT IS AUDIBLE (A SEEK FLUSHED THE ENGINE)
+                    final long videoStart = videoHead != null ? videoHead.ptsMs : Long.MIN_VALUE;
+                    final long audioStart = audioHead != null ? audioHead.ptsMs - (audioOn ? this.sfx.pendingMs() : 0L) : Long.MIN_VALUE;
+                    // FROM THE BEGINNING NOTHING IS DROPPED: A STREAM THAT STARTS LATE (A DELAYED AUDIO TRACK) JOINS WHEN IT STARTS, AND
+                    // THE CLOCK NEVER STARTS BEFORE 0 FOR THE PRE-ROLL OF A CODEC
+                    final long start = this.fromStart && videoHead != null && audioHead != null ? Math.max(0L, Math.min(videoStart, audioStart)) : Math.max(videoStart, audioStart);
+                    if (videoHead != null && videoHead.ptsMs + videoHead.durationMs <= start || audioHead != null && audioHead.ptsMs + audioHead.durationMs <= start) {
+                        this.floorMs = start;
+                        decoder.floor(this.generation, start);
+                        continue;
+                    }
                     landing = true;
-                    landStamp = seekStamp;
-                    landTargetMs = this.seekTargetMs;
-                    landSkipped = this.totalSkippedFrames;
-                    landClockMs = -1;
-                    landVideoMs = -1;
+                    landMs = start != Long.MIN_VALUE ? start : this.clock.timeMs();
+                    if (videoHead != null) landVideoMs = videoHead.ptsMs;
+                    if (audioHead != null) landAudioMs = audioHead.ptsMs;
                 }
 
                 boolean didWork = false;
@@ -830,33 +887,35 @@ public final class FFMediaPlayer extends MediaPlayer {
 
                 final long iterStart = System.nanoTime();
 
-                // AUDIO: FILL THE ENGINE QUEUE EAGERLY (SEE drainAudio)
-                didWork |= this.drainAudio(decoder, current);
+                // AUDIO: FILL THE ENGINE QUEUE EAGERLY (SEE drainAudio). NOTHING SOUNDS BEFORE THE LANDING
+                if (!landing) didWork |= this.drainAudio(decoder);
                 final long afterAudio = System.nanoTime();
 
                 // VIDEO: ONE FRAME PER ITERATION (INLINED POLL: A/V SYNC, ADAPTIVE DROP, THEN
                 // UPLOAD VIA NATIVE PLANES OR sws_scale). A SECOND CONSUMER ON THIS QUEUE WOULD RACE.
-                if (this.gfx != null && decoder.video()) {
+                if (videoOn) {
                     while (true) {
                         final FrameQueue.Slot slot = videoFrames.peek();
                         if (slot == null) break;
 
-                        // SERIAL CHECK: DISCARD PRE-SEEK FRAMES
-                        if (slot.serial != this.clock.serial()) {
+                        // LEFT BEHIND BY A SEEK, OR ENDS BEFORE THE FLOOR
+                        if (slot.generation != this.generation || slot.ptsMs + slot.durationMs <= this.floorMs) {
                             videoFrames.next();
                             continue;
                         }
 
-                        // A/V SYNC, BYPASSED WHILE BUFFERING SO THE FIRST AVAILABLE FRAME RECALIBRATES THE CLOCK (clock.update)
-                        // AND RESOLVES BUFFERING: THE CLOCK IS FROZEN THEN, SO A TIMESTAMP GAP WOULD REJECT EVERY FRAME AS TOO EARLY
-                        final boolean buffering = this.clock.status() == Status.BUFFERING;
+                        // A/V SYNC, BYPASSED BY THE LANDING: ITS FRAME IS THE ONE THE CLOCK IS ABOUT TO START ON, AND IT GOES UP EVEN
+                        // WHEN THE LANDING RESOLVES INTO PAUSED, SO A SEEK ON A PAUSED PLAYER SHOWS ITS TARGET
                         final double clockSec = this.clock.time();
                         final double frameSec = slot.ptsMs / 1_000.0;
-                        final int frameSerial = slot.serial;
                         final double diff = frameSec - clockSec;
 
-                        if (!buffering && diff > AV_SYNC_TOO_EARLY_SEC) break;
-                        if (!buffering && diff < -(this.clock.skipThresholdMs() / 1_000.0)) {
+                        if (!landing && diff > AV_SYNC_TOO_EARLY_SEC) break;
+                        if (!landing && diff < -(this.clock.skipThresholdMs() / 1_000.0)) {
+                            // LATE: THE DECODER DROPS WHAT PLAYS BEFORE THE CLOCK ITSELF, BEFORE IT LEAVES THE GPU OR TAKES A SLOT, INSTEAD
+                            // OF HANDING EVERY LATE FRAME OVER TO BE SKIPPED HERE
+                            this.floorMs = Math.max(this.floorMs, (long) (clockSec * 1_000.0));
+                            decoder.floor(this.generation, this.floorMs);
                             videoFrames.next();
                             this.totalSkippedFrames++;
                             continue;
@@ -864,7 +923,7 @@ public final class FFMediaPlayer extends MediaPlayer {
 
                         // ADAPTIVE FRAME DROP
                         final double frameDurSec = this.clock.frameDurationSec();
-                        if (renderDebtSec >= frameDurSec) {
+                        if (!landing && renderDebtSec >= frameDurSec) {
                             final FrameQueue.Slot nextSlot = videoFrames.peekNext();
                             if (nextSlot != null) {
                                 renderDebtSec -= frameDurSec;
@@ -1013,19 +1072,15 @@ public final class FFMediaPlayer extends MediaPlayer {
                         if (workSec > frameDurSec) renderDebtSec += (workSec - frameDurSec);
                         else renderDebtSec = Math.max(0, renderDebtSec - (frameDurSec - workSec));
 
-                        // CONSUME (frameSec AND frameSerial ALREADY HOLD THE TIMING; slot IS RECYCLED BY next())
+                        // CONSUME (frameSec ALREADY HOLDS THE TIMING; slot IS RECYCLED BY next())
                         videoFrames.next();
                         if (!this.uploadRefused) {
                             this.totalRenderedFrames++;
                             this.perfVideoRenders++;
                         }
-                        if (landing && landVideoMs < 0) {
-                            landVideoMs = (long) (frameSec * 1_000.0);
-                            landVideoTookMs = (System.nanoTime() - landStamp) / 1_000_000L;
-                        }
 
-                        // CLOCK UPDATE (ONLY WHEN VIDEO DRIVES THE CLOCK: NO AUDIO, OR DURING BUFFERING)
-                        if (!decoder.audio() || this.clock.status() == Status.BUFFERING) this.clock.update(frameSec, frameSerial);
+                        // CLOCK UPDATE: THE PICTURE DRIVES THE CLOCK ONLY WITHOUT SOUND
+                        if (!audioOn && !landing) this.clock.update(frameSec, this.epoch);
 
                         didWork = true;
                         break;
@@ -1033,8 +1088,31 @@ public final class FFMediaPlayer extends MediaPlayer {
                 }
                 final long afterVideo = System.nanoTime();
 
+                if (landing) {
+                    // A LANDING A NEWER SEEK BEAT IS LEFT FOR THE NEXT PASS TO SERVE. THE STAMP IS READ FIRST: A SEEK STAMPED AFTER THE
+                    // LANDING NEVER TAKES ITS REPORT, AND ONE STAMPED BEFORE ALREADY MOVED THE EPOCH, SO THE LANDING FAILS
+                    final long stamp = this.seekNanos;
+                    final long target = this.seekTargetMs;
+                    if (this.clock.land(landMs / 1_000.0, this.epoch)) {
+                        this.settled = true;
+                        starvedStartMs = 0;
+                        behindStartMs = 0;
+                        // THE LANDING MOVED THE CLOCK, SO THE RATE WINDOW STARTS THERE
+                        this.perfLastCheckMs = nowMs();
+                        this.perfLastClockMs = landMs;
+                        if (audioOn && !this.clock.pauseRequested()) this.sfx.play();
+                        // WHERE EACH STREAM STARTED AGAINST THE TARGET, AND HOW LONG THE SEEK TOOK TO GET THERE
+                        if (stamp != landStamp) {
+                            landStamp = stamp;
+                            LOGGER.debug(IT, "Seek to {}ms landed at {}ms after {}ms (picture at {}ms, sound at {}ms, -1 without one)",
+                                    target, landMs, (System.nanoTime() - stamp) / 1_000_000L, landVideoMs, landAudioMs);
+                        }
+                    }
+                    continue;
+                }
+
                 // AUDIO AGAIN AFTER VIDEO (REFILL WHAT THE ENGINE CONSUMED DURING VIDEO UPLOAD)
-                didWork |= this.drainAudio(decoder, current);
+                didWork |= this.drainAudio(decoder);
                 final long afterWork = System.nanoTime();
 
                 // PERFORMANCE MONITOR
@@ -1051,72 +1129,37 @@ public final class FFMediaPlayer extends MediaPlayer {
                     }
                 }
 
-                // TRACK BUFFERING→PLAYING RECOVERY FOR STARVATION COOLDOWN
-                if (current == Status.BUFFERING && this.clock.status() == Status.PLAYING) lastStarvationRecoveryMs = nowMs();
-
-                // SEEK LANDING REPORT, ONCE THE CLOCK RUNS AGAIN AND THE FIRST PICTURE IS UP: A CLOCK OR A PICTURE FAR FROM THE
-                // TARGET, OR ONE MUCH LATER THAN THE OTHER, IS WHAT A FROZEN PICTURE OR A FOLLOWER THAT KEEPS SEEKING COMES FROM
-                if (landing) {
-                    final Status landed = this.clock.status();
-                    if (landClockMs < 0 && (landed == Status.PLAYING || landed == Status.PAUSED)) {
-                        landClockMs = this.clock.timeMs();
-                        landClockTookMs = (System.nanoTime() - landStamp) / 1_000_000L;
+                // BUFFERING, DECIDED BY THE STREAM THAT HAS THE LEAST. A STREAM WITH NOTHING TO PLAY NOR TO DECODE WHILE MORE IS DUE WAITS
+                // FOR THE NETWORK, AND A PICTURE WITH PACKETS BUT NO FRAME TRAILS ITS DECODER. EITHER WAY BOTH STREAMS WAIT, SO THE SOUND
+                // NEVER RUNS ON OVER A FROZEN PICTURE, AND NEVER THROUGH A SEEK: THE PIPELINE STILL READS
+                final long checkMs = nowMs();
+                final boolean starved = videoOn && videoFrames.empty() && decoder.videoBuffered() == 0 && decoder.videoComing()
+                        || audioOn && audioFrames.empty() && decoder.audioBuffered() == 0 && decoder.audioComing();
+                final boolean behind = videoOn && videoFrames.empty() && decoder.videoBuffered() > 0;
+                starvedStartMs = !starved ? 0 : starvedStartMs == 0 ? checkMs : starvedStartMs;
+                behindStartMs = !behind ? 0 : behindStartMs == 0 ? checkMs : behindStartMs;
+                if (starved && checkMs - starvedStartMs > STARVED_MS || behind && checkMs - behindStartMs > BEHIND_MS) {
+                    if (starved && !this.starvationWarned) LOGGER.warn(IT, "Starvation: BUFFERING (clock={}ms)", this.clock.timeMs());
+                    if (!starved && !this.behindWarned) LOGGER.warn(IT, "The picture fell {}ms behind its decoder: BUFFERING (clock={}ms)", BEHIND_MS, this.clock.timeMs());
+                    this.starvationWarned |= starved;
+                    this.behindWarned |= !starved;
+                    // A STARVED STREAM COMES BACK WITH A CUSHION, TWICE AS LARGE WHEN IT STARVED AGAIN SOON. A PICTURE THAT TRAILS COMES
+                    // BACK AS SOON AS IT REACHES THE CLOCK, WHICH STAYS WHERE IT STOPPED
+                    this.cushionMs = !starved ? 0 : checkMs - lastRebufferMs < CUSHION_WINDOW_MS ? CUSHION_MS * 2 : CUSHION_MS;
+                    lastRebufferMs = checkMs;
+                    starvedStartMs = 0;
+                    behindStartMs = 0;
+                    if (this.clock.transition(Status.BUFFERING)) {
+                        this.settled = false;
+                        this.fromStart = false;
+                        this.floorMs = Math.max(this.floorMs, this.clock.timeMs());
+                        decoder.floor(this.generation, this.floorMs);
+                        if (this.sfx != null) this.sfx.pause();
                     }
-                    if (landClockMs >= 0 && (landVideoMs >= 0 || this.gfx == null || !decoder.video())) {
-                        landing = false;
-                        if (landVideoMs < 0) LOGGER.debug(IT, "Seek to {}ms landed: clock at {}ms after {}ms", landTargetMs, landClockMs, landClockTookMs);
-                        else LOGGER.debug(IT, "Seek to {}ms landed: clock at {}ms after {}ms, picture at {}ms after {}ms, {} frames skipped",
-                                landTargetMs, landClockMs, landClockTookMs, landVideoMs, landVideoTookMs, this.totalSkippedFrames - landSkipped);
-                    }
+                    continue;
                 }
 
-                if (!didWork) {
-                    // STARVATION GOES TO BUFFERING, NEVER A SEEK: requestSeek BUMPS THE SERIAL, FLUSHES THE QUEUES AND CALLS
-                    // av_seek_frame, A FEEDBACK LOOP WHEN FRAMES ARRIVE IN BURSTS (GC PAUSES, RENDER LAG). THE PIPELINE STILL
-                    // RUNS, AND clock.update() RETURNS TO PLAYING WHEN FRAMES ARRIVE
-                    if (current == Status.PLAYING && !this.clock.demuxFinished()) {
-                        final long starvNowMs = nowMs();
-                        final boolean queuesEmpty = videoFrames.empty() && audioFrames.empty();
-
-                        // UNREACHABLE FRAMES STARVE TOO: QUEUED BUT ALL PAST PTS_DISCONTINUITY_SEC AHEAD OF THE CLOCK, AS ON LIVE
-                        // HLS WHOSE PTS STARTS AT THE STREAM'S ELAPSED TIME (E.G. 14890s) WHILE THE CLOCK STARTS AT 0. THEY STAY
-                        // TOO EARLY FOREVER AND THE QUEUES NEVER EMPTY, SO PLAIN STARVATION WOULD NEVER FIRE
-                        boolean unreachable = false;
-                        if (!queuesEmpty) {
-                            final double clockSec = this.clock.time();
-                            unreachable = true;
-                            final FrameQueue.Slot a = audioFrames.peek();
-                            if (a != null && a.serial == this.clock.serial()
-                                    && (a.ptsMs / 1_000.0 - clockSec) <= FFDecoder.PTS_DISCONTINUITY_SEC)
-                                unreachable = false;
-                            if (unreachable) {
-                                final FrameQueue.Slot v = videoFrames.peek();
-                                if (v != null && v.serial == this.clock.serial()
-                                        && (v.ptsMs / 1_000.0 - clockSec) <= FFDecoder.PTS_DISCONTINUITY_SEC)
-                                    unreachable = false;
-                            }
-                        }
-
-                        final boolean starving = queuesEmpty || unreachable;
-                        if (starving && starvNowMs - lastStarvationRecoveryMs > STARVATION_THRESHOLD_MS * 4) {
-                            if (starvationStartMs == 0) {
-                                starvationStartMs = starvNowMs;
-                            } else if (starvNowMs - starvationStartMs > STARVATION_THRESHOLD_MS) {
-                                if (!this.starvationWarned) LOGGER.warn(IT, "Starvation: BUFFERING (clock={}ms)", this.clock.timeMs());
-                                this.starvationWarned = true;
-                                this.clock.transition(Status.BUFFERING);
-                                starvationStartMs = 0;
-                            }
-                        } else {
-                            starvationStartMs = 0;
-                        }
-                    } else {
-                        starvationStartMs = 0;
-                    }
-                    Thread.sleep(1);
-                } else {
-                    starvationStartMs = 0;
-                }
+                if (!didWork) Thread.sleep(1);
             }
 
             LOGGER.debug(IT, "Consumption loop exited (R: {}, S: {}, clock: {}ms, status: {})",
@@ -1160,7 +1203,16 @@ public final class FFMediaPlayer extends MediaPlayer {
         final FFDecoder.AudioChoice audio = this.sfx == null ? null : pick == null
                 ? new FFDecoder.AudioChoice(this.source.audioTracks(), FFDecoder.AudioChoice.AUTO, -1, this.audioLanguage())
                 : new FFDecoder.AudioChoice(this.source.audioTracks(), pick.track(), pick.stream(), pick.lang() != null ? pick.lang() : this.audioLanguage());
-        final FFDecoder decoder = new FFDecoder(this.group, uri, this.source.headers(), this.gfx != null, audio, this.clock, this.host);
+        final FFDecoder decoder = new FFDecoder(this.group, uri, this.source.headers(), this.gfx != null, audio, this.host);
+        // THE POSITION ASKED FOR SO FAR IS WHERE THE DECODER OPENS, SO IT NEVER READS FROM THE BEGINNING FIRST. A SEEK THAT COMES
+        // WHILE IT OPENS STAYS PENDING FOR THE CONSUMPTION LOOP
+        final MasterClock.Seek initial = this.clock.consumeSeek();
+        this.generation = initial == null ? decoder.generation() : decoder.seek(initial.targetMs(), initial.precise());
+        this.epoch = initial == null ? this.clock.epoch() : initial.epoch();
+        this.floorMs = initial != null && initial.precise() ? initial.targetMs() : Long.MIN_VALUE;
+        this.settled = false;
+        this.fromStart = initial == null || initial.targetMs() == 0;
+        this.cushionMs = 0;
         this.decoder = decoder; // PUBLISHED BEFORE IT RUNS, SO abort() ALWAYS REACHES ITS NATIVE I/O
         decoder.start();
     }
@@ -1187,19 +1239,14 @@ public final class FFMediaPlayer extends MediaPlayer {
 
         this.totalSkippedFrames = 0;
         this.totalRenderedFrames = 0;
-        this.lastAudioUploadSerial = -1;
         if (this.sfx != null) this.sfx.flush();
 
         // A PAUSE OR RESUME THAT RACED THE TEARDOWN STILL RELOADS, ONLY A TERMINAL STATUS ENDS THE SWITCH. THE PAUSE INTENT STAYS
-        // LATCHED, SO THE FIRST FRAME AT THE NEW QUALITY SETTLES BUFFERING INTO PAUSED WHEN IT WAS
+        // LATCHED, SO THE LANDING AT THE NEW QUALITY RESOLVES INTO PAUSED WHEN IT WAS
         if (!this.clock.reload()) return;
-        if (!live) this.clock.requestSeek(currentMs, true);
+        if (!live) this.clock.requestSeek(currentMs, true, false);
         this.open();
         if (this.clock.awaitNotStatus(Status.LOADING, 0) == Status.ERROR) return;
-
-        // THE FIRST DECODED FRAME CALIBRATES THE CLOCK THROUGH clock.update() → BUFFERING→PLAYING. WITHOUT IT, start()
-        // SETS PLAYING AT PTS=0 AND STARVATION DETECTION FIRES BEFORE FRAMES ARRIVE
-        if (live) this.clock.transition(Status.BUFFERING);
 
         LOGGER.info(IT, "Switched to quality {} and audio {}", this.quality, this.audioTrack);
     }
@@ -1460,6 +1507,8 @@ public final class FFMediaPlayer extends MediaPlayer {
             player.playable = true;
             LOGGER.info(IT, "FFMediaPlayer started - video: {} (hw: {}{}), audio: {}", decoder.video(), decoder.hardware(),
                     !decoder.vulkan() ? "" : decoder.filters() ? ", frames stay on the GPU through libplacebo" : ", frames stay on the GPU", decoder.audio());
+            // LOADING ENDS HERE: THE CLOCK BUFFERS UNTIL THE CONSUMPTION LOOP LANDS IT ON THE FIRST FRAMES
+            player.clock.start();
         }
 
         @Override

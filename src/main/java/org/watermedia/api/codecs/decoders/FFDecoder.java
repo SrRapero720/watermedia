@@ -42,18 +42,21 @@ import static org.bytedeco.ffmpeg.global.avutil.*;
 import static org.watermedia.WaterMedia.LOGGER;
 
 /**
- * FFmpeg demuxer and decoders of one input. A demux thread opens the input, then fills one packet queue per stream; a
- * video and an audio thread decode them into the {@link #videoFrames()} and {@link #audioFrames()} queues a player
- * consumes. Hardware decoders download to RAM, except on the player's Vulkan device, whose frames stay on the GPU and
- * may pass through libplacebo. The audio is the stream an {@link AudioChoice} picks in a separate track or in the main
- * input, and the streams nobody decodes are discarded. The player's clock drives it through a {@link Timeline}; one
- * decoder serves one run.
+ * FFmpeg demuxer and decoders of one input. A reader thread per input (the main one, and a separate audio track when
+ * it plays) fills one packet queue per stream; a video and an audio thread decode them into the
+ * {@link #videoFrames()} and {@link #audioFrames()} queues a player consumes. Hardware decoders download to RAM, except
+ * on the player's Vulkan device, whose frames stay on the GPU and may pass through libplacebo. The audio is the stream
+ * an {@link AudioChoice} picks in a separate track or in the main input, and the streams nobody decodes are discarded.
+ * <p>The player drives it and the decoder knows no clock: {@link #seek(long, boolean)} opens a generation that every
+ * packet and frame carries, so what a newer seek left behind is dropped wherever it is found,
+ * {@link #floor(int, long)} drops what plays before an instant as it decodes and {@link #hold(boolean)} parks the
+ * readers. One decoder serves one run.
  */
 public final class FFDecoder {
     private static final Marker IT = MarkerManager.getMarker(FFDecoder.class.getSimpleName());
     // PIPELINE THREADS ARE OWNED WORKERS NAMED BY THE PLAYER'S GROUP, FFThread-<PLAYER>-<ROLE>
     private static final ThreadFactory THREADS = ThreadTool.workerFactory("FFThread", Thread.NORM_PRIORITY);
-    // ONE CALLBACK FOR EVERY DECODER, READING THE ABORT FLAG ITS opaque POINTS AT: JAVACPP BINDS AT MOST 10 LIVE INSTANCES PER
+    // ONE CALLBACK FOR EVERY INPUT, READING THE FLAG ITS opaque POINTS AT: JAVACPP BINDS AT MOST 10 LIVE INSTANCES PER
     // CALLBACK CLASS AND FREES ONE ONLY ON DEALLOCATION, SO A CALLBACK PER DECODER WOULD STOP WORKING AFTER THE TENTH
     public static final Callback_Pointer INTERRUPT = new Callback_Pointer() {
         @Override
@@ -70,17 +73,22 @@ public final class FFDecoder {
 
     // THREADING
     private static final int MAX_DECODE_THREADS = ThreadTool.processors() / 2;
-    private static final long PARK_MS = 50L; // A PARKED DEMUXER RECHECKS: A WAKEUP SENT RIGHT BEFORE ITS WAIT IS LOST
+    private static final long PARK_MS = 50L; // A PARKED READER RECHECKS: A QUEUE THAT EMPTIED WAKES NOBODY
 
-    // QUEUE CAPACITIES
+    // READ AHEAD: A READER STOPS ONCE ITS QUEUE HOLDS THIS MUCH MEDIA IN MORE THAN A FEW PACKETS, OR THIS MANY BYTES
+    private static final long READ_AHEAD_MS = 20_000L;
+    private static final int READ_AHEAD_PACKETS = 25;
     private static final long VIDEO_PACKET_QUEUE_BYTES = 16L * 1_024 * 1_024;
     private static final long AUDIO_PACKET_QUEUE_BYTES = 8L * 1_024 * 1_024;
     private static final int VIDEO_FRAME_QUEUE_SLOTS = 3;
     private static final int AUDIO_FRAME_QUEUE_SLOTS = 9;
 
-    // SEPARATE TRACK RUNWAY: THE SOUND IT QUEUES RIGHT AFTER A SEEK (ABOUT 4 s OF OPUS) AND THE MOST THAT MAY TAKE
-    private static final long TRACK_RUNWAY_BYTES = 64L * 1_024;
-    private static final long TRACK_RUNWAY_NS = 250_000_000L;
+    // FLOOR: NONE AT ALL, HOW FAR BEFORE IT A VIDEO PACKET DECODES WITHOUT ITS NON-REFERENCE FRAMES, AND HOW FAR PAST AN INSTANT
+    // THE QUEUES MUST REACH FOR A FLOOR THERE TO NEED NO SEEK
+    private static final long NO_FLOOR = Long.MIN_VALUE;
+    private static final long SKIP_MARGIN_MS = 1_000L;
+    private static final long COVER_MARGIN_MS = 500L;
+    private static final double TIME_LIMIT_MS = Long.MAX_VALUE / 4.0; // EVERY TIMESTAMP IN MILLISECONDS STAYS INSIDE IT (SEE ms)
 
     // YOUTUBE CDN: A REQUEST OVER 10 MiB IS SERVED AT ABOUT TWICE THE BITRATE
     private static final String YOUTUBE_CDN = "googlevideo.com";
@@ -125,7 +133,6 @@ public final class FFDecoder {
     private final HttpHeaders headers;
     private final boolean videoWanted;
     private final AudioChoice audioChoice; // null: NO AUDIO WANTED
-    private final Timeline timeline;
     private final Host host;
 
     // FFMPEG COMPONENTS
@@ -134,6 +141,11 @@ public final class FFDecoder {
     private AVCodecContext videoCodecContext;
     private AVCodecContext audioCodecContext;
     private SwrContext swrContext;
+    // COPIES OF WHAT THE DECODERS NEED FROM THEIR STREAMS, SO THEIR THREADS NEVER READ AN INPUT A FAILED SEEK IS REOPENING
+    private AVCodecParameters videoParams;
+    private AVRational videoRational;
+    private int videoCodecId;
+    private int audioCodecId;
 
     // HW
     private volatile AVBufferRef hwDeviceCtx;
@@ -145,41 +157,54 @@ public final class FFDecoder {
     // STREAMS
     private volatile int videoStreamIndex = -1;
     private volatile int audioStreamIndex = -1;
-    private AVStream videoStream; // HELD SO THE DECODE THREAD NEVER INDEXES THE STREAM ARRAY THE DEMUXER MAY GROW (MPEG-TS ADDS STREAMS)
+    private AVStream videoStream; // THE MAIN READER'S, FOR THE OPEN: THE DEMUXER MAY GROW THE STREAM ARRAY (MPEG-TS ADDS STREAMS)
+    private boolean videoCover; // THE VIDEO STREAM IS A COVER PICTURE (MAIN READER ONLY)
     private boolean useAudioTrack;
-    private double videoTimeBase;
-    private double audioTimeBase;
+    private volatile double videoTimeBase;
+    private volatile double audioTimeBase;
     // EVERY AUDIO STREAM OF THE OPENED INPUTS AND THE ONE DECODING, READ BY THE PLAYER ONCE THE INPUT OPENED
     private volatile List<AudioStream> audioStreams = List.of();
     private volatile AudioStream audioStream;
 
-    // THREADS: THE DECODERS ARE (RE)STARTED BY THE DEMUXER'S SEEK PATH, SO THEIR CREATION AND TEARDOWN SHARE decodeLock: TWO
-    // DECODERS ON ONE CODEC CONTEXT CRASH NATIVELY
-    private final Object decodeLock = new Object();
-    private volatile Thread demuxThread;
+    // THREADS: A READER PER INPUT AND A DECODER PER STREAM, STARTED BY THE MAIN READER ONCE THE INPUTS ARE OPEN AND ALIVE UNTIL stop()
+    private final Reader main = new Reader();
+    private final Reader track = new Reader();
     private volatile Thread videoDecodeThread;
     private volatile Thread audioDecodeThread;
 
     // QUEUES
-    private final PacketQueue videoPacketQueue = new PacketQueue(VIDEO_PACKET_QUEUE_BYTES);
-    private final PacketQueue audioPacketQueue = new PacketQueue(AUDIO_PACKET_QUEUE_BYTES);
+    private final PacketQueue videoPacketQueue = new PacketQueue();
+    private final PacketQueue audioPacketQueue = new PacketQueue();
     private final FrameQueue videoFrameQueue = new FrameQueue(VIDEO_FRAME_QUEUE_SLOTS);
     private final FrameQueue audioFrameQueue = new FrameQueue(AUDIO_FRAME_QUEUE_SLOTS);
 
+    // SEEK STATE, WRITTEN UNDER control: EVERY SEEK OPENS A GENERATION. PACKETS AND FRAMES CARRY THE ONE THEY WERE READ IN, SO
+    // WHAT A NEWER SEEK LEFT BEHIND IS DROPPED WHEREVER IT IS FOUND, AND A FRAME THAT ENDS BEFORE THE FLOOR IS DROPPED AS IT DECODES
+    private final Object control = new Object();
+    private volatile int generation;
+    private volatile long seekMs;
+    private volatile long floorMs = NO_FLOOR;
+    private volatile boolean held;
+    // THE GENERATION WHOSE END OF INPUT EACH DECODER DRAINED, AND THE VIDEO FRAMES DECODED SO FAR
+    private volatile int videoDone = -1;
+    private volatile int audioDone = -1;
+    private volatile long videoDecoded;
+
     // STATE
     private volatile boolean aborted;
-    private final IntPointer abortFlag = new IntPointer(new int[1]); // aborted AS INTERRUPT READS IT, FREED WITH THIS DECODER
     private boolean closed;
-    private Throwable failure; // WHY THE OPEN FAILED, REPORTED BY THE DEMUX THREAD THAT RECORDED IT
+    private Throwable failure; // WHY THE OPEN FAILED, REPORTED BY THE MAIN READER THAT RECORDED IT
     private volatile float fps;
     private boolean hls;
 
     // PTS DISCONTINUITY (HLS AD STITCHING): TWITCH AND SIMILAR SERVICES INSERT ADS VIA #EXT-X-DISCONTINUITY AND FFMPEG'S HLS
-    // DEMUXER DOES NOT ALWAYS NORMALIZE PTS ACROSS THEM (RAW PTS CAN JUMP BY HOURS), SO EACH STREAM KEEPS AN OFFSET
+    // DEMUXER DOES NOT ALWAYS NORMALIZE PTS ACROSS THEM (RAW PTS CAN JUMP BY HOURS), SO EACH STREAM KEEPS AN OFFSET (DECODE THREADS
+    // ONLY). shifted SAYS ONE WAS APPLIED SINCE THE LAST SEEK, SO THE TIMESTAMPS OF THE QUEUED PACKETS NO LONGER NAME THE FRAMES
     private double videoPtsOffset;
     private double lastRawVideoPts = Double.NaN;
     private double audioPtsOffset;
     private double lastRawAudioPts = Double.NaN;
+    private volatile boolean shifted;
 
     // AUDIO FORMAT NEGOTIATION
     private boolean audioPassthrough;
@@ -204,36 +229,75 @@ public final class FFDecoder {
     private boolean trackSeekWarned;
 
     /** Prepares a decoder of {@code uri}, its video when {@code video} and the audio {@code audio} chooses when not null, with its threads named after {@code group}; nothing opens until {@link #start()}. */
-    public FFDecoder(final String group, final URI uri, final HttpHeaders headers, final boolean video, final AudioChoice audio,
-                     final Timeline timeline, final Host host) {
+    public FFDecoder(final String group, final URI uri, final HttpHeaders headers, final boolean video, final AudioChoice audio, final Host host) {
         this.group = group;
         this.uri = uri;
         this.headers = headers;
         this.videoWanted = video;
         this.audioChoice = audio;
-        this.timeline = timeline;
         this.host = host;
     }
 
     // ==========================================================================
     // CONTROL
     // ==========================================================================
-    /** Spawns the demux thread, which opens the input, reports it to the host, starts the clock and the decoders. */
+    /** Spawns the reader of the main input, which opens it, reports it to the host and starts the decoders and the reader of a separate track. */
     public void start() {
         final Thread demux = this.thread("demux", this::demuxLoop);
-        this.demuxThread = demux;
+        this.main.thread = demux;
         demux.start();
     }
 
-    /** Cuts blocking native I/O short and interrupts the demuxer; returns at once. */
+    /**
+     * Sends every stream to {@code targetMs} as a new generation and returns it. A {@code precise} seek drops what
+     * plays before the target as it decodes; any other starts where each input lands. From any thread, and before
+     * {@link #start()} for the position the run opens at.
+     */
+    public int seek(final long targetMs, final boolean precise) {
+        synchronized (this.control) {
+            this.seekMs = targetMs;
+            this.floorMs = precise ? targetMs : NO_FLOOR;
+            final int generation = this.generation + 1;
+            this.generation = generation;
+            this.shifted = false;
+            // A READER BLOCKED ON THE NETWORK IS CUT SHORT INSTEAD OF WAITED FOR
+            if (this.main.live) this.main.interrupt.put(1);
+            if (this.track.live) this.track.interrupt.put(1);
+            this.control.notifyAll();
+            return generation;
+        }
+    }
+
+    /** Raises the floor of {@code generation}: a frame that ends before {@code ms} is dropped as it decodes, before it leaves the GPU or takes a slot. From any thread. */
+    public void floor(final int generation, final long ms) {
+        synchronized (this.control) {
+            if (generation == this.generation && ms > this.floorMs) this.floorMs = ms;
+        }
+    }
+
+    /** Parks the readers while {@code held}, as a paused player wants; a seek is still served. From one thread, the one that consumes the frames. */
+    public void hold(final boolean held) {
+        if (this.held == held) return;
+        synchronized (this.control) {
+            this.held = held;
+            this.control.notifyAll();
+        }
+    }
+
+    /** Cuts blocking native I/O short and wakes the readers; returns at once. */
     public void abort() {
-        this.aborted = true;
-        this.abortFlag.put(1);
-        final Thread demux = this.demuxThread;
+        synchronized (this.control) {
+            this.aborted = true;
+            this.main.interrupt.put(1);
+            this.track.interrupt.put(1);
+            this.control.notifyAll();
+        }
+        // THE OPEN MAY WAIT ON THE HOST'S CACHE, WHICH ONLY AN INTERRUPT CUTS SHORT
+        final Thread demux = this.main.thread;
         if (demux != null) demux.interrupt();
     }
 
-    /** Aborts the queues and joins every decoder thread, the demuxer first so nothing spawns a decoder behind it. */
+    /** Aborts the queues and joins every thread, the main reader first so nothing starts behind it. */
     public void stop() {
         this.abort();
         this.videoPacketQueue.abort();
@@ -241,10 +305,15 @@ public final class FFDecoder {
         this.videoFrameQueue.abort();
         this.audioFrameQueue.abort();
         final boolean wasInterrupted = Thread.interrupted();
-        final Thread demux = this.demuxThread;
+        final Thread demux = this.main.thread;
         if (demux != null) ThreadTool.join(demux);
-        this.demuxThread = null;
-        this.stopDecodeThreads();
+        // READ ONCE THE MAIN READER IS GONE, WHICH IS THE ONE THAT STARTS THEM
+        for (final Thread thread: new Thread[] { this.track.thread, this.videoDecodeThread, this.audioDecodeThread })
+            if (thread != null) ThreadTool.join(thread);
+        this.main.thread = null;
+        this.track.thread = null;
+        this.videoDecodeThread = null;
+        this.audioDecodeThread = null;
         if (wasInterrupted) Thread.currentThread().interrupt();
     }
 
@@ -262,7 +331,7 @@ public final class FFDecoder {
 
     /** Returns whether {@code thread} is one of this decoder's threads. */
     public boolean owns(final Thread thread) {
-        return thread == this.demuxThread || thread == this.videoDecodeThread || thread == this.audioDecodeThread;
+        return thread == this.main.thread || thread == this.track.thread || thread == this.videoDecodeThread || thread == this.audioDecodeThread;
     }
 
     // ==========================================================================
@@ -283,32 +352,57 @@ public final class FFDecoder {
     /** Returns the audio stream that decodes, or null when none does; valid from {@code opened}. */
     public AudioStream audioStream() { return this.audioStream; }
 
-    /** Returns whether a decode thread is still running. */
-    public boolean decoding() {
-        final Thread video = this.videoDecodeThread;
-        final Thread audio = this.audioDecodeThread;
-        return video != null && video.isAlive() || audio != null && audio.isAlive();
+    /** Returns the generation of the last seek, 0 before the first one; every frame carries the one it was decoded in. */
+    public int generation() { return this.generation; }
+
+    /** Returns the media queued ahead of the video decoder in milliseconds, at least 1 while a packet waits. */
+    public long videoBuffered() { return this.videoPacketQueue.durationMs(); }
+    /** Returns the media queued ahead of the audio decoder in milliseconds, at least 1 while a packet waits. */
+    public long audioBuffered() { return this.audioPacketQueue.durationMs(); }
+
+    /** Returns whether the video decoder has {@code ms} of media queued, or all it can have: up to the end of its input or until a byte limit stops its reader. */
+    public boolean videoHolds(final long ms) {
+        return this.videoPacketQueue.durationMs() >= ms || this.videoPacketQueue.closed() || this.capped(false);
+    }
+    /** Returns whether the audio decoder has {@code ms} of media queued, or all it can have: up to the end of its input or until a byte limit stops its reader. */
+    public boolean audioHolds(final long ms) {
+        return this.audioPacketQueue.durationMs() >= ms || this.audioPacketQueue.closed() || this.capped(this.useAudioTrack);
     }
 
-    /** Returns whether the demux thread ended on its own, without {@link #stop()}. */
+    /** Returns the media queued for the stream that has the least in milliseconds, {@code Long.MAX_VALUE} when no stream has more to come. */
+    public long buffered() {
+        long least = Long.MAX_VALUE;
+        if (this.videoComing()) least = Math.min(least, this.videoBuffered());
+        if (this.audioComing()) least = Math.min(least, this.audioBuffered());
+        return least;
+    }
+
+    /** Returns whether more video frames may come in this generation: its input has not ended and the stream is not one the audio left behind. */
+    public boolean videoComing() { return this.videoStreamIndex >= 0 && this.videoDone != this.generation && !this.sparse(true); }
+    /** Returns whether more audio frames may come in this generation: its input has not ended and the stream is not one the video left behind. */
+    public boolean audioComing() { return this.audioStreamIndex >= 0 && this.audioDone != this.generation && !this.sparse(false); }
+
+    /** Returns whether every decoded stream reached the end of its input and decoded all of it; the frames may still wait in their queues. */
+    public boolean ended() {
+        final int generation = this.generation;
+        return (this.videoStreamIndex < 0 || this.videoDone == generation) && (this.audioStreamIndex < 0 || this.audioDone == generation);
+    }
+
+    /** Returns how many video frames the decoder produced in this run, the ones a floor dropped included. */
+    public long videoDecoded() { return this.videoDecoded; }
+
+    /** Returns whether everything up to {@code targetMs} was already read, so a floor there lands without a seek. */
+    public boolean covers(final long targetMs) {
+        if (this.shifted) return false;
+        // SATURATED: A TARGET NEAR Long.MAX_VALUE WOULD WRAP AND PASS FOR COVERED
+        final long reach = targetMs > Long.MAX_VALUE - COVER_MARGIN_MS ? Long.MAX_VALUE : targetMs + COVER_MARGIN_MS;
+        return (!this.videoComing() || this.videoPacketQueue.lastMs() >= reach) && (!this.audioComing() || this.audioPacketQueue.lastMs() >= reach);
+    }
+
+    /** Returns whether the reader of the main input ended on its own, without {@link #stop()}. */
     public boolean demuxDied() {
-        final Thread demux = this.demuxThread;
+        final Thread demux = this.main.thread;
         return demux != null && !demux.isAlive();
-    }
-
-    /** Returns how full the packet queues of the decoding streams are, 0 to 100. */
-    public int buffered() {
-        long sum = 0;
-        int parts = 0;
-        if (this.videoStreamIndex >= 0) {
-            sum += Math.min(100, this.videoPacketQueue.byteSize() * 100 / VIDEO_PACKET_QUEUE_BYTES);
-            parts++;
-        }
-        if (this.audioStreamIndex >= 0) {
-            sum += Math.min(100, this.audioPacketQueue.byteSize() * 100 / AUDIO_PACKET_QUEUE_BYTES);
-            parts++;
-        }
-        return parts == 0 ? 0 : (int) (sum / parts);
     }
 
     /** Returns whether a hardware decoder is in use. */
@@ -388,7 +482,7 @@ public final class FFDecoder {
         if (trackUrl == null) return false;
 
         this.trackFormatContext = avformat.avformat_alloc_context();
-        this.trackFormatContext.interrupt_callback().callback(INTERRUPT).opaque(this.abortFlag);
+        this.trackFormatContext.interrupt_callback().callback(INTERRUPT).opaque(this.track.interrupt);
         final AVDictionary trackOptions = new AVDictionary();
 
         try {
@@ -425,8 +519,9 @@ public final class FFDecoder {
     }
 
     // ==========================================================================
-    // DEMUX THREAD
+    // READER THREADS
     // ==========================================================================
+    // THE MAIN READER: OPENS THE INPUTS AND THE DECODERS, REPORTS THEM AND STARTS EVERY OTHER THREAD BEFORE IT READS
     private void demuxLoop() {
         try {
             if (!this.init()) {
@@ -443,251 +538,167 @@ public final class FFDecoder {
             this.host.failed(e);
             return;
         }
-        // THE CLOCK FOLLOWS THESE QUEUES FROM HERE ON: A DECODER OPENED BY A QUALITY SWITCH STARTS THEM AT SERIAL 0 AGAIN. THE DECODERS
-        // RUN BEFORE THE CLOCK STARTS, UNLESS A SEEK REQUESTED WHILE LOADING STARTS THEM ONCE IT IS SERVED
-        this.timeline.serial(this.videoPacketQueue.serial());
-        if (!this.timeline.seekPending()) this.ensureDecodeThreads();
-        this.timeline.start();
-
-        final AVPacket packet = avcodec.av_packet_alloc();
-        final AVPacket trackPacket = this.useAudioTrack ? avcodec.av_packet_alloc() : null;
-        long demuxVideoPackets = 0;
-        long demuxAudioPackets = 0;
-        boolean mainEof = false;
-        boolean trackEof = false;
-        // A PACKET ITS QUEUE HAD NO ROOM FOR WAITS HERE, SO A FULL QUEUE NEVER KEEPS THE DEMUXER FROM FEEDING THE OTHER ONE
-        boolean mainHeld = false;
-        boolean trackHeld = false;
-        // HOW FAR EACH INPUT WAS READ IN SECONDS, NaN UNTIL A PACKET SAYS
-        double mainSec = Double.NaN;
-        double trackSec = Double.NaN;
-        // THE TRACK OWES ITS RUNWAY: AT THE START AND AFTER EVERY SEEK
-        boolean runway = true;
-
-        LOGGER.debug(IT, "Demux loop starting: videoIdx={}, audioIdx={}, useAudioTrack={}, nb_streams={}",
+        LOGGER.debug(IT, "Readers starting: videoIdx={}, audioIdx={}, useAudioTrack={}, nb_streams={}",
                 this.videoStreamIndex, this.audioStreamIndex, this.useAudioTrack,
                 this.formatContext != null ? this.formatContext.nb_streams() : -1);
 
+        // A stop() THAT CAME DURING THE OPEN JOINS THIS THREAD FIRST AND THE OTHERS AFTER IT, SO NOTHING IS LEFT RUNNING BEHIND
+        if (this.videoStreamIndex >= 0 && this.videoCodecContext != null) {
+            this.videoDecodeThread = this.thread("video", this::videoDecodeLoop);
+            this.videoDecodeThread.start();
+        }
+        if (this.audioStreamIndex >= 0 && this.audioCodecContext != null) {
+            this.audioDecodeThread = this.thread("audio", this::audioDecodeLoop);
+            this.audioDecodeThread.start();
+        }
+        if (this.useAudioTrack) {
+            this.track.thread = this.thread("track", () -> this.read(this.track));
+            this.track.thread.start();
+        }
+        this.read(this.main);
+    }
+
+    // THE LOOP OF A READER: THE SEEK OF A NEW GENERATION FIRST, THEN A PARK WHILE HELD, AT THE END OF ITS INPUT OR WITH ENOUGH QUEUED,
+    // ELSE ONE PACKET INTO THE QUEUE OF ITS STREAM. EACH INPUT HAS ITS OWN, SO A SLOW OR FULL ONE NEVER KEEPS THE OTHER FROM READING
+    private void read(final Reader reader) {
+        final boolean track = reader == this.track;
+        final AVPacket packet = avcodec.av_packet_alloc();
+        int served = 0;
+        boolean eof = false;
+        long packets = 0;
         try {
-            while (!Thread.currentThread().isInterrupted()) {
-                // SEEK HANDLING
-                final Seek seekReq = this.timeline.consumeSeek();
-                if (seekReq != null) {
-                    final long targetMs = seekReq.targetMs();
-                    final boolean precise = seekReq.precise();
+            while (true) {
+                final boolean fed = eof || this.fed(track);
+                final int generation;
+                final long targetMs;
+                synchronized (this.control) {
+                    if (this.aborted) break;
+                    // FROM HERE ON A SEEK RAISES THE FLAG AGAIN, SO THE ONE THIS PASS SERVES NEVER CUTS ITS OWN I/O SHORT
+                    reader.interrupt.put(0);
+                    reader.live = true;
+                    generation = this.generation;
+                    targetMs = this.seekMs;
+                    if (generation == served && (this.held || fed)) {
+                        this.control.wait(PARK_MS);
+                        continue;
+                    }
+                }
 
-                    this.timeline.signalDemuxResumed();
-
-                    // WHAT WAS READ BEFORE THE SEEK BELONGS TO THE OLD POSITION
-                    avcodec.av_packet_unref(packet);
-                    if (trackPacket != null) avcodec.av_packet_unref(trackPacket);
-                    mainHeld = false;
-                    trackHeld = false;
-                    mainSec = Double.NaN;
-                    trackSec = Double.NaN;
-                    runway = true;
-
-                    if (precise) {
-                        this.stopDecodeThreads();
-                        this.videoPacketQueue.reset();
-                        this.audioPacketQueue.reset();
-                        if (this.videoCodecContext != null) avcodec.avcodec_flush_buffers(this.videoCodecContext);
-                        if (this.audioCodecContext != null) avcodec.avcodec_flush_buffers(this.audioCodecContext);
+                if (generation != served) {
+                    // WHAT IS QUEUED BELONGS TO THE OLD POSITION. A TARGET WITHOUT A DURATION TO CLAMP IT (LIVE, RELOAD) IS SATURATED,
+                    // NEVER WRAPPED NEGATIVE
+                    eof = false;
+                    served = generation;
+                    final long ts = Math.min(targetMs, Long.MAX_VALUE / 1_000L) * 1_000L;
+                    // A READ OR A SEEK THIS GENERATION CUT SHORT LEFT THE BUFFER MARKED AT ITS END, AND A SHORT SEEK FORWARD WOULD THEN
+                    // FAIL AS THE END OF THE INPUT. HLS HAS NO BUFFER HERE AND RESETS ITS SEGMENTS ITSELF
+                    final AVIOContext io = (track ? this.trackFormatContext : this.formatContext).pb();
+                    if (!FFTool.isNull(io)) io.eof_reached(0).error(0);
+                    if (track) {
+                        this.audioPacketQueue.flush();
+                        // EVERY PACKET OF THE TRACK'S SOUND IS AN ENTRY POINT, SO IT LANDS ON THE TARGET: WITHOUT ANY, A WEBM LANDS ON
+                        // THE CUE BEFORE IT (UP TO 10 s ON YOUTUBE)
+                        if (avformat.av_seek_frame(this.trackFormatContext, -1, ts, avformat.AVSEEK_FLAG_BACKWARD | avformat.AVSEEK_FLAG_ANY) < 0
+                                && !this.aborted && this.generation == generation) {
+                            if (!this.trackSeekWarned) LOGGER.warn(IT, "Audio track failed to seek to {}ms, its sound keeps the position it had", targetMs);
+                            this.trackSeekWarned = true;
+                        }
                     } else {
-                        // reset(), NOT flush(): ONLY reset() CLEARS THE finished FLAG AN EOF LEFT (AND aborted), WITHOUT WHICH THE
-                        // DECODE THREADS GET null FROM THE EMPTY FINISHED QUEUE AND EXIT AT ONCE WITH ZERO FRAMES
-                        this.videoPacketQueue.reset();
-                        this.audioPacketQueue.reset();
-                    }
-
-                    this.timeline.serial(this.videoPacketQueue.serial());
-                    LOGGER.debug(IT, "Seek serial sync: vQueueSerial={}, aQueueSerial={}", this.videoPacketQueue.serial(), this.audioPacketQueue.serial());
-                    mainEof = false;
-                    trackEof = false;
-
-                    if (this.timeline.seekPending()) {
-                        LOGGER.debug(IT, "Seek to {}ms superseded; skipping", targetMs);
-                        this.ensureDecodeThreads();
-                        continue;
-                    }
-
-                    // A TARGET WITHOUT A DURATION TO CLAMP IT (LIVE, RELOAD) IS SATURATED, NEVER WRAPPED NEGATIVE
-                    final long ffTs = Math.min(targetMs, Long.MAX_VALUE / 1_000L) * 1_000L;
-                    final int seekFlags = avformat.AVSEEK_FLAG_BACKWARD;
-                    boolean reopened = false;
-
-                    int seekResult = avformat.av_seek_frame(this.formatContext, -1, ffTs, seekFlags);
-                    if (seekResult < 0) seekResult = avformat.avformat_seek_file(this.formatContext, -1, Long.MIN_VALUE, ffTs, ffTs, seekFlags);
-                    if (seekResult < 0) seekResult = avformat.av_seek_frame(this.formatContext, -1, ffTs, 0);
-                    if (seekResult < 0) {
-                        // REOPEN NEEDS EXCLUSIVE CODEC ACCESS: ON NON-PRECISE SEEKS THE DECODE THREADS STILL RUN AND reopenFormat()
-                        // FLUSHES THE CODECS THEY USE (NATIVE RACE), SO THEY STOP AND THE QUEUES ARE MADE REUSABLE (ABORT CLEARED, SERIAL RESYNCED)
-                        this.stopDecodeThreads();
-                        final boolean reopenOk = this.reopenFormat();
-                        this.videoPacketQueue.reset();
-                        this.audioPacketQueue.reset();
-                        this.timeline.serial(this.videoPacketQueue.serial());
-                        if (!reopenOk) {
-                            // reopenFormat ALREADY CLOSED THE OLD CONTEXT: WITH NOTHING LEFT TO READ FROM, THE PIPELINE CANNOT RECOVER;
-                            // A REOPEN CUT SHORT BY stop() IS THE CALLER'S OWN DOING, NOT A FAILURE
-                            if (this.aborted) return;
-                            LOGGER.error(IT, DataTool.errCode(WaterMedia.ERR_FFDECODER_SEEK_REOPEN_LOG) + "Failed to seek to {}ms due to input reopen failure, stopping the pipeline", targetMs);
-                            this.host.failed(new IOException(DataTool.errCode(WaterMedia.ERR_FFDECODER_SEEK_REOPEN) + "Failed to seek to " + targetMs + "ms due to input reopen failure"));
-                            return;
-                        }
-                        LOGGER.warn(IT, "Seek to {}ms failed; reopened input from beginning", targetMs);
-                        reopened = true;
-                        seekResult = 0;
-                        if (targetMs > 0) {
-                            seekResult = avformat.av_seek_frame(this.formatContext, -1, ffTs, 0);
-                            if (seekResult < 0) seekResult = avformat.avformat_seek_file(this.formatContext, -1, Long.MIN_VALUE, ffTs, ffTs, 0);
-                        }
-                    }
-                    if (seekResult < 0) {
-                        LOGGER.warn(IT, "Seek to {}ms not honored by reopened input; resuming from beginning", targetMs);
-                        this.ensureDecodeThreads();
-                        continue;
-                    }
-
-                    if (this.timeline.seekPending()) {
-                        LOGGER.debug(IT, "Seek to {}ms superseded after main seek; skipping drain", targetMs);
-                        this.ensureDecodeThreads();
-                        continue;
-                    }
-
-                    // EVERY PACKET OF THE TRACK'S SOUND IS AN ENTRY POINT, SO IT LANDS ON THE TARGET: WITHOUT ANY, A WEBM LANDS ON
-                    // THE CUE BEFORE IT (UP TO 10 s ON YOUTUBE) AND THE CLOCK STARTS THERE
-                    if (this.useAudioTrack && this.trackFormatContext != null
-                            && avformat.av_seek_frame(this.trackFormatContext, -1, ffTs, seekFlags | avformat.AVSEEK_FLAG_ANY) < 0 && !this.aborted) {
-                        if (!this.trackSeekWarned) LOGGER.warn(IT, "Audio track failed to seek to {}ms, its sound keeps the position it had", targetMs);
-                        this.trackSeekWarned = true;
-                    }
-                    if (precise && !(reopened && targetMs == 0)) this.syncDrain(targetMs, packet, trackPacket);
-
-                    this.ensureDecodeThreads();
-
-                    LOGGER.debug(IT, "Seek completed to {}ms (precise={}, serial={})", targetMs, precise, this.videoPacketQueue.serial());
-                    continue;
-                }
-
-                // PAUSE HANDLING
-                if (this.timeline.holding()) {
-                    this.timeline.awaitChange(PARK_MS);
-                    continue;
-                }
-
-                boolean moved = false;
-
-                // SEPARATE AUDIO TRACK: READ ONLY WHILE IT TRAILS THE VIDEO OR ITS QUEUE RAN DRY. A FIXED SHARE OF PACKETS RAN IT MINUTES
-                // AHEAD UNTIL ITS QUEUE FILLED, AND FROM THEN ON THE VIDEO GOT ONE PACKET PER trackPacketReads OF SOUND PLAYED (FROZEN PICTURE)
-                if (this.useAudioTrack && !trackEof && this.trackFormatContext != null && trackPacket != null) {
-                    final int reads = WaterMediaConfig.codecs.ffmpeg.trackPacketReads;
-                    // THE FIRST READ OF THE MAIN INPUT AFTER A SEEK WAITS FOR THE NETWORK (AN HLS SEGMENT TO OPEN) WITH NO SOUND QUEUED: THE
-                    // TRACK READS A RUNWAY FIRST, FOR A BOUNDED TIME SO A SLOW TRACK NEVER HOLDS THE VIDEO
-                    final long runwayEnd = runway ? System.nanoTime() + TRACK_RUNWAY_NS : 0L;
-                    for (int i = 0; i < reads || runway && this.audioPacketQueue.byteSize() < TRACK_RUNWAY_BYTES && System.nanoTime() < runwayEnd; i++) {
-                        if (!trackHeld) {
-                            if (!runway && !mainEof && trackSec > mainSec && this.audioPacketQueue.byteSize() > 0) break;
-                            if (avformat.av_read_frame(this.trackFormatContext, trackPacket) < 0) {
-                                trackEof = true;
-                                LOGGER.debug(IT, "Audio track reached EOF after {} packets", demuxAudioPackets);
-                                this.audioPacketQueue.finish();
-                                break;
+                        this.videoPacketQueue.flush();
+                        if (!this.useAudioTrack) this.audioPacketQueue.flush();
+                        int result = avformat.av_seek_frame(this.formatContext, -1, ts, avformat.AVSEEK_FLAG_BACKWARD);
+                        if (result < 0 && !this.aborted && this.generation == generation) result = avformat.av_seek_frame(this.formatContext, -1, ts, 0);
+                        if (result < 0 && !this.aborted && this.generation == generation) {
+                            // THE REOPEN CLOSES THE INPUT FIRST, SO A FAILED ONE LEAVES NOTHING TO READ: NO NEWER SEEK MAY CUT IT SHORT
+                            synchronized (this.control) {
+                                reader.live = false;
+                                reader.interrupt.put(this.aborted ? 1 : 0);
                             }
-                            moved = true;
-                            if (trackPacket.stream_index() != this.audioStreamIndex) {
-                                avcodec.av_packet_unref(trackPacket);
-                                continue;
+                            if (!this.reopenFormat()) {
+                                // A REOPEN CUT SHORT BY stop() IS THE CALLER'S OWN DOING, NOT A FAILURE
+                                if (this.aborted) return;
+                                LOGGER.error(IT, DataTool.errCode(WaterMedia.ERR_FFDECODER_SEEK_REOPEN_LOG) + "Failed to seek to {}ms due to input reopen failure, stopping the pipeline", targetMs);
+                                this.host.failed(new IOException(DataTool.errCode(WaterMedia.ERR_FFDECODER_SEEK_REOPEN) + "Failed to seek to " + targetMs + "ms due to input reopen failure"));
+                                return;
                             }
-                            final long stamp = trackPacket.dts() != AV_NOPTS_VALUE ? trackPacket.dts() : trackPacket.pts();
-                            if (stamp != AV_NOPTS_VALUE) trackSec = stamp * this.audioTimeBase;
-                            trackHeld = true;
+                            LOGGER.warn(IT, "Seek to {}ms failed; reopened input from beginning", targetMs);
+                            if (targetMs > 0 && avformat.av_seek_frame(this.formatContext, -1, ts, 0) < 0)
+                                LOGGER.warn(IT, "Seek to {}ms not honored by reopened input; resuming from beginning", targetMs);
                         }
-                        if (!this.audioPacketQueue.tryPut(trackPacket)) break;
-                        avcodec.av_packet_unref(trackPacket);
-                        trackHeld = false;
-                        demuxAudioPackets++;
-                        moved = true;
                     }
-                    runway = false;
-                }
-
-                // READ PACKET (MAIN CONTEXT)
-                if (!mainEof && !mainHeld) {
-                    final int result = avformat.av_read_frame(this.formatContext, packet);
-                    // A READ AN ABORT CUT SHORT ENDS THIS DECODER, NOT THE INPUT: THE CLOCK, SHARED WITH THE NEXT DECODER, NEVER HEARS IT AS EOF
-                    if (result < 0 && this.aborted) break;
-                    if (result < 0) {
-                        mainEof = true;
-                        LOGGER.debug(IT, "Main context EOF after {} video packets", demuxVideoPackets);
-                        this.videoPacketQueue.finish();
-                        // WITHOUT A SEPARATE TRACK THE AUDIO PACKETS COME FROM THIS CONTEXT TOO, SO THE AUDIO QUEUE FINISHES AND DRAINS CLEANLY
-                        if (!this.useAudioTrack) this.audioPacketQueue.finish();
-                    } else {
-                        moved = true;
-                        final int streamIndex = packet.stream_index();
-                        if (streamIndex == this.videoStreamIndex) {
-                            final long stamp = packet.dts() != AV_NOPTS_VALUE ? packet.dts() : packet.pts();
-                            if (stamp != AV_NOPTS_VALUE) mainSec = stamp * this.videoTimeBase;
-                            mainHeld = true;
-                        } else if (!this.useAudioTrack && streamIndex == this.audioStreamIndex) mainHeld = true;
-                        else avcodec.av_packet_unref(packet);
-                    }
-                }
-
-                // BOTH AT EOF: SIGNAL IT AND WAIT FOR A SEEK. THE PLAYER HANDLES REPEAT AND ENDED ONCE EVERY DECODED FRAME IS
-                // RENDERED; SEEKING TO 0 HERE WOULD FLUSH THE UNPROCESSED PACKETS INTO A RAPID EOF→SEEK→EOF LOOP RENDERING NOTHING
-                if (mainEof && (trackEof || !this.useAudioTrack)) {
-                    LOGGER.debug(IT, "All contexts EOF (video: {}, audio: {})", demuxVideoPackets, demuxAudioPackets);
-
-                    this.timeline.signalDemuxFinished();
-                    LOGGER.debug(IT, "Demux finished; the player handles ENDED/repeat after drain");
-
-                    while (!this.timeline.seekPending() && !Thread.currentThread().isInterrupted()) {
-                        this.timeline.awaitChange(PARK_MS);
-                    }
-                    if (!this.timeline.seekPending()) break;
-
-                    LOGGER.debug(IT, "Seek after EOF; restarting pipeline");
-                    mainEof = false;
-                    trackEof = false;
-                    this.videoPacketQueue.reset();
-                    this.audioPacketQueue.reset();
+                    LOGGER.debug(IT, "Seek to {}ms served by the {} input (generation={})", targetMs, track ? "track" : "main", generation);
                     continue;
                 }
 
-                // QUEUE THE MAIN PACKET, WHICH STAYS HELD WHILE ITS QUEUE IS FULL
-                if (mainHeld) {
-                    final boolean video = packet.stream_index() == this.videoStreamIndex;
-                    if ((video ? this.videoPacketQueue : this.audioPacketQueue).tryPut(packet)) {
-                        avcodec.av_packet_unref(packet);
-                        mainHeld = false;
-                        moved = true;
-                        if (video) demuxVideoPackets++;
-                        else demuxAudioPackets++;
-                    }
+                final int result = avformat.av_read_frame(track ? this.trackFormatContext : this.formatContext, packet);
+                if (result < 0) {
+                    // A READ AN ABORT OR A NEWER SEEK CUT SHORT IS NOT THE END OF THE INPUT. THE PLAYER HANDLES REPEAT AND ENDED ONCE
+                    // EVERY DECODED FRAME IS OUT, AND UNTIL A SEEK COMES THE READER STAYS PARKED
+                    if (this.aborted) break;
+                    if (this.generation != served) continue;
+                    eof = true;
+                    LOGGER.debug(IT, "The {} input reached its end after {} packets", track ? "track" : "main", packets);
+                    if (!track && this.videoStreamIndex >= 0) this.videoPacketQueue.finish(served);
+                    if (track == this.useAudioTrack && this.audioStreamIndex >= 0) this.audioPacketQueue.finish(served);
+                    continue;
                 }
 
-                // NOTHING TO READ AND NO ROOM TO QUEUE: THE DECODERS HAVE TO CATCH UP
-                if (!moved) Thread.sleep(1);
+                final int index = packet.stream_index();
+                final boolean video = !track && index == this.videoStreamIndex;
+                if (video || track == this.useAudioTrack && index == this.audioStreamIndex) {
+                    final double base = video ? this.videoTimeBase : this.audioTimeBase;
+                    final long stamp = packet.dts() != AV_NOPTS_VALUE ? packet.dts() : packet.pts();
+                    (video ? this.videoPacketQueue : this.audioPacketQueue).put(packet, served,
+                            stamp == AV_NOPTS_VALUE ? Long.MIN_VALUE : ms(stamp * base), (long) (packet.duration() * base * 1_000_000.0));
+                    packets++;
+                    // A COVER PICTURE IS ALL ITS STREAM HAS, AND EVERY SEEK SENDS IT AGAIN: NOTHING ELSE WAITS FOR THAT STREAM
+                    if (video && this.videoCover) this.videoPacketQueue.finish(served);
+                }
+                avcodec.av_packet_unref(packet);
             }
         } catch (final InterruptedException e) {
             Thread.currentThread().interrupt();
+        } catch (final Throwable e) {
+            // WHATEVER AN ABORT LEFT HALF DONE IS NOT A FAILURE
+            if (!this.aborted) {
+                LOGGER.error(IT, DataTool.errCode(WaterMedia.ERR_FFDECODER_READ_EXCEPTION) + "Failed to read the {} input due to an exception", track ? "track" : "main", e);
+                this.host.failed(e);
+            }
         } finally {
-            LOGGER.debug(IT, "Demux loop exiting (video: {}, audio: {}, interrupted: {})",
-                    demuxVideoPackets, demuxAudioPackets, Thread.currentThread().isInterrupted());
-
-            this.videoPacketQueue.finish();
-            this.audioPacketQueue.finish();
-
+            LOGGER.debug(IT, "The {} reader exits after {} packets", track ? "track" : "main", packets);
             avcodec.av_packet_free(packet);
-            if (trackPacket != null) avcodec.av_packet_free(trackPacket);
         }
+    }
+
+    // WHETHER THE QUEUES AN INPUT FEEDS HAVE ENOUGH, AND ONE THAT FEEDS NONE HAS NOTHING TO READ FOR. OF TWO STREAMS OF ONE INPUT, A QUEUE AT
+    // ITS BYTE LIMIT STOPS IT, AND SO DOES ONE WITH ENOUGH BESIDE ANOTHER THAT HAS ENOUGH TOO OR STAYS EMPTY (SEE sparse)
+    private boolean fed(final boolean track) {
+        final boolean video = !track && this.videoStreamIndex >= 0;
+        final boolean audio = track == this.useAudioTrack && this.audioStreamIndex >= 0;
+        final boolean videoEnough = video && enough(this.videoPacketQueue, VIDEO_PACKET_QUEUE_BYTES);
+        final boolean audioEnough = audio && enough(this.audioPacketQueue, AUDIO_PACKET_QUEUE_BYTES);
+        if (!video || !audio) return video ? videoEnough : !audio || audioEnough;
+        return this.capped(track) || videoEnough && (audioEnough || this.audioPacketQueue.empty()) || audioEnough && this.videoPacketQueue.empty();
+    }
+
+    // WHETHER A QUEUE THE INPUT FEEDS IS AT ITS BYTE LIMIT, WHICH PARKS ITS READER: NOTHING MORE COMES UNTIL A DECODER TAKES SOME
+    private boolean capped(final boolean track) {
+        return !track && this.videoStreamIndex >= 0 && this.videoPacketQueue.byteSize() >= VIDEO_PACKET_QUEUE_BYTES
+                || track == this.useAudioTrack && this.audioStreamIndex >= 0 && this.audioPacketQueue.byteSize() >= AUDIO_PACKET_QUEUE_BYTES;
+    }
+
+    // THE STREAM OF A SHARED INPUT THAT STAYS EMPTY WHILE THE OTHER ONE FILLED UP: NOTHING OF IT IS NEAR (COVER ART, A LATE OR BADLY
+    // INTERLEAVED TRACK), SO NOBODY WAITS FOR IT
+    private boolean sparse(final boolean video) {
+        if (this.useAudioTrack || this.videoStreamIndex < 0 || this.audioStreamIndex < 0) return false;
+        return video ? this.videoPacketQueue.empty() && enough(this.audioPacketQueue, AUDIO_PACKET_QUEUE_BYTES)
+                : this.audioPacketQueue.empty() && enough(this.videoPacketQueue, VIDEO_PACKET_QUEUE_BYTES);
     }
 
     // ==========================================================================
     // VIDEO DECODE THREAD
     // ==========================================================================
+    // DECODES ITS QUEUE UNTIL stop(): A SEEK ONLY CHANGES THE GENERATION OF THE PACKETS THAT COME, AND THE END OF THE INPUT DRAINS THE CODEC
     private void videoDecodeLoop() {
         final AVFrame tempFrame = avutil.av_frame_alloc();
         // FRAMES DECODED ON THE ENGINE'S VULKAN DEVICE ARE QUEUED AS THEY ARE; EVERY OTHER ACCELERATOR'S COME DOWN TO RAM
@@ -698,10 +709,13 @@ public final class FFDecoder {
         final AVFrame filtered = filtering ? avutil.av_frame_alloc() : null;
         Placebo placebo = null;
         final int again = avutil.AVERROR_EAGAIN();
-        final int[] serialOut = new int[1];
-        int lastSerial = -1;
+        // WITHOUT A PLAUSIBLE RATE A FRAME COUNTS AS A THIRTIETH OF A SECOND, AS THE PLAYER'S CLOCK ASSUMES
+        final double frameSec = this.fps > 0f ? 1.0 / this.fps : 1.0 / 30.0;
+        int decoding = -1; // THE GENERATION THE CODEC DECODES
         long packetsProcessed = 0;
+        long framesDecoded = 0;
         long framesProduced = 0;
+        long framesDropped = 0;
         long sendFailures = 0;
         long receiveFailures = 0;
 
@@ -712,28 +726,37 @@ public final class FFDecoder {
         boolean hwGaveUp = false;
 
         try {
-            while (!Thread.currentThread().isInterrupted()) {
-                final AVPacket packet = this.videoPacketQueue.get(serialOut);
+            while (true) {
+                final PacketQueue.Entry entry = this.videoPacketQueue.get();
+                if (entry == null) break; // ABORTED BY stop()
 
-                // A null PACKET ENDS THE QUEUE: A CLEAN EOF DRAINS THE DECODER WITH A null FLUSH PACKET, AN abort() FROM stop()/seek()
-                // EXITS (THE BACKLOG IS STALE). DELAYED DECODERS (libdav1d, THE NATIVE av1) RELEASE THEIR REORDER WINDOW ONLY ON
-                // FLUSH, AND ONE THAT BUFFERS THE WHOLE STREAM WOULD OTHERWISE END PLAYBACK WITH ZERO RENDERED FRAMES
+                // AN ENTRY WITHOUT A PACKET IS THE END OF THE INPUT, AND A null PACKET DRAINS THE DECODER. DELAYED DECODERS (libdav1d, THE
+                // NATIVE av1) RELEASE THEIR REORDER WINDOW ONLY THEN, AND ONE THAT BUFFERS THE WHOLE STREAM WOULD OTHERWISE END WITH ZERO FRAMES
+                final AVPacket packet = entry.packet();
                 final boolean eof = packet == null;
-                if (eof && (lastSerial < 0 || !this.videoPacketQueue.endOfFile())) break;
-
-                final int packetSerial = eof ? lastSerial : serialOut[0];
 
                 try {
-                    if (!eof && packetSerial != lastSerial) {
-                        if (lastSerial >= 0) avcodec.avcodec_flush_buffers(this.videoCodecContext);
+                    final int generation = this.generation;
+                    if (entry.generation() != generation) continue; // LEFT BEHIND BY A SEEK
+
+                    if (generation != decoding) {
+                        // A NEW POSITION: NOTHING THE CODEC OR THE GRAPH STILL HOLDS BELONGS TO IT. THE FLUSH ALSO REOPENS A CODEC THE END OF
+                        // THE INPUT DRAINED, WHICH TAKES NO PACKET UNTIL THEN
+                        if (decoding >= 0) avcodec.avcodec_flush_buffers(this.videoCodecContext);
                         if (placebo != null) placebo.close();
                         placebo = null;
-                        lastSerial = packetSerial;
+                        decoding = generation;
                         this.lastRawVideoPts = Double.NaN;
                         this.videoPtsOffset = 0;
                     }
 
-                    if (!eof && packetSerial != this.videoPacketQueue.serial()) continue;
+                    // FAR BEFORE THE FLOOR ONLY THE FRAMES OTHER FRAMES NEED ARE DECODED: H.264, HEVC AND VP8 SKIP THE REST, VP9 AND AV1
+                    // DECODE EVERY ONE REGARDLESS. A DISCONTINUITY OFFSET MAKES THE PACKET TIMES NAME OTHER FRAMES, SO IT TURNS THIS OFF
+                    if (!eof) {
+                        final long floor = this.floorMs;
+                        this.videoCodecContext.skip_frame(floor != NO_FLOOR && !this.shifted && entry.tsMs() != Long.MIN_VALUE && entry.tsMs() < floor - SKIP_MARGIN_MS
+                                ? AVDISCARD_NONREF : AVDISCARD_DEFAULT);
+                    }
 
                     // A null PACKET PUTS THE DECODER INTO DRAIN MODE; A REAL send FAILURE SKIPS ONLY THAT PACKET
                     final int sent = avcodec.avcodec_send_packet(this.videoCodecContext, packet);
@@ -747,6 +770,35 @@ public final class FFDecoder {
                             if (received != again && received != AVERROR_EOF && ++receiveFailures == 1)
                                 logCodecError("video", "receive frame", this.videoCodecContext, this.videoStreamIndex, received);
                             break;
+                        }
+                        this.videoDecoded = ++framesDecoded;
+                        // A SEEK CAME WHILE THE PACKET DECODED: THE REST OF ITS FRAMES BELONG TO THE OLD POSITION AND THE NEXT ENTRY FLUSHES THEM
+                        if (generation != this.generation) {
+                            av_frame_unref(tempFrame);
+                            break;
+                        }
+
+                        // WHEN THE FRAME PLAYS: ITS BEST-EFFORT TIMESTAMP OR pts, SYNTHESIZED WHEN BOTH ARE MISSING (A RAW AV_NOPTS_VALUE WOULD
+                        // LATCH A GARBAGE DISCONTINUITY OFFSET) AND KEPT CONTINUOUS ACROSS THE DISCONTINUITIES OF HLS AD STITCHING
+                        final long bestPts = tempFrame.best_effort_timestamp() != avutil.AV_NOPTS_VALUE ? tempFrame.best_effort_timestamp() : tempFrame.pts();
+                        final double rawPtsSec = bestPts != avutil.AV_NOPTS_VALUE ? bestPts * this.videoTimeBase
+                                : Double.isNaN(this.lastRawVideoPts) ? 0.0 : this.lastRawVideoPts + frameSec;
+                        if (!Double.isNaN(this.lastRawVideoPts)) {
+                            final double jump = rawPtsSec - this.lastRawVideoPts;
+                            if (Math.abs(jump) > PTS_DISCONTINUITY_SEC) {
+                                this.videoPtsOffset = this.lastRawVideoPts + this.videoPtsOffset + frameSec - rawPtsSec;
+                                this.shifted = true;
+                                LOGGER.debug(IT, "Video PTS discontinuity: jump={}s, new offset={}s", String.format("%.1f", jump), String.format("%.1f", this.videoPtsOffset));
+                            }
+                        }
+                        this.lastRawVideoPts = rawPtsSec;
+                        final double ptsSec = rawPtsSec + this.videoPtsOffset;
+
+                        // A FRAME THAT ENDS BEFORE THE FLOOR GOES NO FURTHER: IT NEVER LEAVES THE GPU NOR TAKES A SLOT OF THE QUEUE
+                        if (ms(ptsSec + frameSec) <= this.floorMs) {
+                            av_frame_unref(tempFrame);
+                            framesDropped++;
+                            continue;
                         }
                         AVFrame frameToQueue = tempFrame;
 
@@ -773,7 +825,6 @@ public final class FFDecoder {
                             hwTransferNs += System.nanoTime() - transferStart;
                             if (++hwTransferCount >= HW_TRANSFER_PERF_WINDOW) {
                                 final double avgSec = hwTransferNs / 1_000_000_000.0 / hwTransferCount;
-                                final double frameSec = this.timeline.frameDurationSec();
                                 if (avgSec > frameSec * HW_TRANSFER_BUDGET_RATIO) {
                                     LOGGER.warn(IT, "GPU frame transfer too slow (avg {}ms vs {}ms frame budget); falling back to software decoding",
                                             String.format("%.1f", avgSec * 1_000.0), (long) (frameSec * 1_000.0));
@@ -788,7 +839,7 @@ public final class FFDecoder {
                             if (placebo != null) placebo.close();
                             placebo = null;
                             try {
-                                placebo = Placebo.open(tempFrame, this.hwDeviceCtx, this.videoStream.time_base());
+                                placebo = Placebo.open(tempFrame, this.hwDeviceCtx, this.videoRational);
                             } catch (final IllegalStateException e) {
                                 if (!this.placeboWarned) LOGGER.warn(IT, "Decoded frames keep the engine's own conversion: libplacebo is unavailable on this device", e);
                                 this.placeboWarned = true;
@@ -796,16 +847,14 @@ public final class FFDecoder {
                             }
                         }
                         // A FRAME WITHOUT ANY TIMESTAMP STAYS OUT OF THE GRAPH, WHICH ORDERS FRAMES BY pts; THE ENGINE CONVERTS IT ITSELF
-                        final long bestPts = tempFrame.best_effort_timestamp() != avutil.AV_NOPTS_VALUE ? tempFrame.best_effort_timestamp() : tempFrame.pts();
                         if (placebo != null && tempFrame.format() == AV_PIX_FMT_VULKAN && bestPts != avutil.AV_NOPTS_VALUE) {
                             tempFrame.pts(bestPts);
                             final int pushed = placebo.push(tempFrame);
                             int pulled = again;
                             boolean accepted = true;
                             while (pushed >= 0 && accepted && (pulled = placebo.pull(filtered)) >= 0) {
-                                // THE GRAPH RETIMES pts IN ITS OWN TIME BASE; THE BEST-EFFORT TIMESTAMP IT COPIES IS STILL THE DECODER'S
-                                filtered.best_effort_timestamp(avutil.AV_NOPTS_VALUE);
-                                accepted = this.queueVideo(filtered, filtered, packetSerial, placebo.timeBase);
+                                // THE GRAPH RETIMES pts IN ITS OWN TIME BASE
+                                accepted = this.queueVideo(filtered, filtered.pts() * placebo.timeBase + this.videoPtsOffset, frameSec, generation);
                                 if (accepted) framesProduced++;
                             }
                             if (!accepted) break;
@@ -820,36 +869,30 @@ public final class FFDecoder {
                             if (pushed >= 0) continue;
                         }
 
-                        if (!this.queueVideo(frameToQueue, tempFrame, packetSerial, this.videoTimeBase)) break;
+                        if (!this.queueVideo(frameToQueue, ptsSec, frameSec, generation)) break;
                         framesProduced++;
                     }
 
                     // THE DRAINED DECODER LEAVES THE FRAMES LIBPLACEBO STILL HOLDS TO TIME THEM
                     if (eof && placebo != null && placebo.push(null) >= 0) {
                         while (placebo.pull(filtered) >= 0) {
-                            filtered.best_effort_timestamp(avutil.AV_NOPTS_VALUE);
-                            if (!this.queueVideo(filtered, filtered, packetSerial, placebo.timeBase)) break;
+                            if (!this.queueVideo(filtered, filtered.pts() * placebo.timeBase + this.videoPtsOffset, frameSec, generation)) break;
                             framesProduced++;
                         }
                     }
 
+                    // EVERY FRAME OF THIS GENERATION IS OUT
+                    if (eof) this.videoDone = generation;
                     packetsProcessed++;
                 } finally {
                     if (packet != null) avcodec.av_packet_free(packet);
                 }
-
-                if (eof) break; // DECODER FULLY DRAINED, NOTHING MORE TO PRODUCE
             }
         } finally {
             if (sendFailures > 1 || receiveFailures > 1)
                 LOGGER.warn(IT, "Video decoder suppressed repeated errors: send={}, receive={}, stream={}",
                         Math.max(0L, sendFailures - 1), Math.max(0L, receiveFailures - 1), this.videoStreamIndex);
-            LOGGER.debug(IT, "Video decode exiting (packets: {}, frames produced: {}, interrupted: {})",
-                    packetsProcessed, framesProduced, Thread.currentThread().isInterrupted());
-            // RESET THE CODEC FOR THE NEXT RUN: A CLEAN EOF LEAVES IT DRAINED, REJECTING NEW PACKETS, AND A repeat() RESTARTS THIS
-            // THREAD WITH lastSerial=-1, WHICH SKIPS THE PER-SEEK FLUSH; UNFLUSHED, THE REPEAT WOULD EMIT ZERO FRAMES, TRIP THE
-            // PLAYER'S ZERO-FRAME → ERROR CHECK AND FREEZE THE VIDEO
-            if (this.videoCodecContext != null) avcodec.avcodec_flush_buffers(this.videoCodecContext);
+            LOGGER.debug(IT, "Video decode exiting (packets: {}, frames queued: {}, dropped before a floor: {})", packetsProcessed, framesProduced, framesDropped);
             if (placebo != null) placebo.close();
             avutil.av_frame_free(tempFrame);
             if (hwTransfer != null) avutil.av_frame_free(hwTransfer);
@@ -857,36 +900,16 @@ public final class FFDecoder {
         }
     }
 
-    // QUEUES frame AT THE PRESENTATION TIME OF timing (OFTEN THE SAME FRAME): ITS BEST-EFFORT TIMESTAMP OR pts IN timeBase SECONDS PER TICK,
-    // SYNTHESIZED WHEN MISSING AND KEPT CONTINUOUS ACROSS HLS DISCONTINUITIES. MOVES THE FRAME'S REFERENCE; FALSE WHEN THE QUEUE TAKES NO MORE
-    private boolean queueVideo(final AVFrame frame, final AVFrame timing, final int serial, final double timeBase) {
-        final double frameSec = this.timeline.frameDurationSec();
-        // A RAW AV_NOPTS_VALUE WOULD PRODUCE AN ASTRONOMICAL PTS THAT LATCHES A GARBAGE DISCONTINUITY OFFSET AND WRECKS THE CLOCK
-        long rawPts = timing.best_effort_timestamp();
-        if (rawPts == avutil.AV_NOPTS_VALUE) rawPts = timing.pts();
-        final double rawPtsSec;
-        if (rawPts == avutil.AV_NOPTS_VALUE) rawPtsSec = Double.isNaN(this.lastRawVideoPts) ? 0.0 : this.lastRawVideoPts + frameSec;
-        else rawPtsSec = rawPts * timeBase;
-
-        // PTS DISCONTINUITY DETECTION (HLS AD STITCHING)
-        if (!Double.isNaN(this.lastRawVideoPts)) {
-            final double jump = rawPtsSec - this.lastRawVideoPts;
-            if (Math.abs(jump) > PTS_DISCONTINUITY_SEC) {
-                final double expected = this.lastRawVideoPts + this.videoPtsOffset + frameSec;
-                this.videoPtsOffset = expected - rawPtsSec;
-                LOGGER.debug(IT, "Video PTS discontinuity: jump={}s, new offset={}s", String.format("%.1f", jump), String.format("%.1f", this.videoPtsOffset));
-            }
-        }
-        this.lastRawVideoPts = rawPtsSec;
-
+    // QUEUES frame TO PLAY AT ptsSec FOR frameSec, MOVING ITS REFERENCE, OR FALSE WHEN THE QUEUE TAKES NO MORE
+    private boolean queueVideo(final AVFrame frame, final double ptsSec, final double frameSec, final int generation) {
         final FrameQueue.Slot slot = this.videoFrameQueue.peekWritable();
         if (slot == null) return false;
 
         av_frame_unref(slot.frame);
         av_frame_move_ref(slot.frame, frame);
-        slot.ptsMs = (long) ((rawPtsSec + this.videoPtsOffset) * 1_000.0);
+        slot.ptsMs = ms(ptsSec);
         slot.durationMs = (long) (frameSec * 1_000.0);
-        slot.serial = serial;
+        slot.generation = generation;
         slot.width = slot.frame.width();
         slot.height = slot.frame.height();
         slot.format = slot.frame.format();
@@ -897,29 +920,32 @@ public final class FFDecoder {
     // ==========================================================================
     // AUDIO DECODE THREAD
     // ==========================================================================
+    // DECODES ITS QUEUE UNTIL stop(), AS THE VIDEO DECODER DOES
     private void audioDecodeLoop() {
         final AVFrame tempFrame = avutil.av_frame_alloc();
         final int again = avutil.AVERROR_EAGAIN();
-        final int[] serialOut = new int[1];
-        int lastSerial = -1;
+        int decoding = -1; // THE GENERATION THE CODEC DECODES
         long packetsProcessed = 0;
         long framesProduced = 0;
+        long framesDropped = 0;
         long sendFailures = 0;
         long receiveFailures = 0;
 
         try {
-            while (!Thread.currentThread().isInterrupted()) {
-                final AVPacket packet = this.audioPacketQueue.get(serialOut);
+            while (true) {
+                final PacketQueue.Entry entry = this.audioPacketQueue.get();
+                if (entry == null) break; // ABORTED BY stop()
 
-                // SEE videoDecodeLoop: A null PACKET IS A CLEAN EOF (FLUSH THE DECODER'S BUFFERED BACKLOG) OR AN abort() TEARDOWN (DROP IT)
+                // SEE videoDecodeLoop: AN ENTRY WITHOUT A PACKET IS THE END OF THE INPUT, WHICH DRAINS WHAT THE DECODER STILL BUFFERS
+                final AVPacket packet = entry.packet();
                 final boolean eof = packet == null;
-                if (eof && (lastSerial < 0 || !this.audioPacketQueue.endOfFile())) break;
-
-                final int packetSerial = eof ? lastSerial : serialOut[0];
 
                 try {
-                    if (!eof && packetSerial != lastSerial) {
-                        if (lastSerial >= 0) {
+                    final int generation = this.generation;
+                    if (entry.generation() != generation) continue; // LEFT BEHIND BY A SEEK
+
+                    if (generation != decoding) {
+                        if (decoding >= 0) {
                             avcodec.avcodec_flush_buffers(this.audioCodecContext);
                             // DROP SAMPLES BUFFERED INSIDE THE RESAMPLER: THEY BELONG TO THE PRE-SEEK POSITION AND WOULD LEAK INTO POST-SEEK AUDIO
                             if (!this.audioPassthrough && this.swrContext != null) {
@@ -927,13 +953,11 @@ public final class FFDecoder {
                                 swresample.swr_init(this.swrContext);
                             }
                         }
-                        lastSerial = packetSerial;
+                        decoding = generation;
                         this.lastRawAudioPts = Double.NaN;
                         this.audioPtsOffset = 0;
                         this.audioNextPtsSec = Double.NaN;
                     }
-
-                    if (!eof && packetSerial != this.audioPacketQueue.serial()) continue;
 
                     // A null PACKET PUTS THE DECODER INTO DRAIN MODE; A REAL send FAILURE SKIPS ONLY THAT PACKET
                     final int sent = avcodec.avcodec_send_packet(this.audioCodecContext, packet);
@@ -946,6 +970,11 @@ public final class FFDecoder {
                         if (received < 0) {
                             if (received != again && received != AVERROR_EOF && ++receiveFailures == 1)
                                 logCodecError("audio", "receive frame", this.audioCodecContext, this.audioStreamIndex, received);
+                            break;
+                        }
+                        // SEE videoDecodeLoop: WHAT IS LEFT OF A PACKET A NEWER SEEK OVERTOOK IS FLUSHED BY THE NEXT ENTRY
+                        if (generation != this.generation) {
+                            av_frame_unref(tempFrame);
                             break;
                         }
                         // MID-STREAM PARAMETER CHANGES (CHAINED OGG / ICECAST) NEED A NEW RESAMPLER: FEEDING THE OLD ONE PLAYS AUDIO AT THE WRONG SPEED
@@ -966,6 +995,7 @@ public final class FFDecoder {
                                 final double audioDur = (double) tempFrame.nb_samples() / tempFrame.sample_rate();
                                 final double expected = this.lastRawAudioPts + this.audioPtsOffset + audioDur;
                                 this.audioPtsOffset = expected - rawPtsSec;
+                                this.shifted = true;
                                 LOGGER.debug(IT, "Audio PTS discontinuity: jump={}s, new offset={}s", String.format("%.1f", jump), String.format("%.1f", this.audioPtsOffset));
                             }
                         }
@@ -973,40 +1003,43 @@ public final class FFDecoder {
 
                         final double ptsSec = rawPtsSec + this.audioPtsOffset;
 
-                        if (!this.enqueueResampledAudio(tempFrame, ptsSec, packetSerial)) break;
+                        // SOUND THAT ENDS BEFORE THE FLOOR IS DROPPED BEFORE THE RESAMPLER SEES IT
+                        final double durationSec = (double) tempFrame.nb_samples() / tempFrame.sample_rate();
+                        if (ms(ptsSec + durationSec) <= this.floorMs) {
+                            this.audioNextPtsSec = ptsSec + durationSec;
+                            framesDropped++;
+                            continue;
+                        }
+
+                        if (!this.enqueueResampledAudio(tempFrame, ptsSec, generation)) break;
                         framesProduced++;
 
                         if (!this.audioPassthrough) {
                             final long delay = swresample.swr_get_delay(this.swrContext, this.audioOutputSampleRate);
                             if (delay > AUDIO_SAMPLES / 2) {
-                                if (!this.enqueueResamplerFlush(packetSerial)) break;
+                                if (!this.enqueueResamplerFlush(generation)) break;
                                 framesProduced++;
                             }
                         }
                     }
 
+                    // EVERY FRAME OF THIS GENERATION IS OUT
+                    if (eof) this.audioDone = generation;
                     packetsProcessed++;
                 } finally {
                     if (packet != null) avcodec.av_packet_free(packet);
                 }
-
-                if (eof) break; // DECODER FULLY DRAINED, NOTHING MORE TO PRODUCE
             }
         } finally {
             if (sendFailures > 1 || receiveFailures > 1)
                 LOGGER.warn(IT, "Audio decoder suppressed repeated errors: send={}, receive={}, stream={}",
                         Math.max(0L, sendFailures - 1), Math.max(0L, receiveFailures - 1), this.audioStreamIndex);
-            LOGGER.debug(IT, "Audio decode exiting (packets: {}, frames produced: {}, interrupted: {})",
-                    packetsProcessed, framesProduced, Thread.currentThread().isInterrupted());
-            // RESET THE CODEC FOR THE NEXT RUN, AS THE VIDEO DECODER DOES: A repeat() RESTARTS THIS THREAD WITH lastSerial=-1,
-            // SKIPPING THE PER-SEEK FLUSH, AND A DECODER DRAINED AT EOF WOULD REJECT NEW PACKETS. AUDIO RARELY BUFFERS, BUT IT
-            // KEEPS THE INVARIANT
-            if (this.audioCodecContext != null) avcodec.avcodec_flush_buffers(this.audioCodecContext);
+            LOGGER.debug(IT, "Audio decode exiting (packets: {}, frames queued: {}, dropped before a floor: {})", packetsProcessed, framesProduced, framesDropped);
             avutil.av_frame_free(tempFrame);
         }
     }
 
-    private boolean enqueueResampledAudio(final AVFrame srcFrame, final double ptsSec, final int serial) {
+    private boolean enqueueResampledAudio(final AVFrame srcFrame, final double ptsSec, final int generation) {
         final FrameQueue.Slot slot = this.audioFrameQueue.peekWritable();
         if (slot == null) return false;
 
@@ -1017,9 +1050,9 @@ public final class FFDecoder {
             if (srcFrame.nb_samples() <= 0) return true;
             av_frame_ref(slot.frame, srcFrame);
             final double durationSec = (double) srcFrame.nb_samples() / srcFrame.sample_rate();
-            slot.ptsMs = (long) (ptsSec * 1_000.0);
+            slot.ptsMs = ms(ptsSec);
             slot.durationMs = (long) (durationSec * 1_000.0);
-            slot.serial = serial;
+            slot.generation = generation;
             this.audioNextPtsSec = ptsSec + durationSec;
             this.audioFrameQueue.push();
             return true;
@@ -1055,16 +1088,16 @@ public final class FFDecoder {
 
         final double durationSec = (double) samplesConverted / this.audioOutputSampleRate;
         slot.frame.nb_samples(samplesConverted);
-        slot.ptsMs = (long) (outPtsSec * 1_000.0);
+        slot.ptsMs = ms(outPtsSec);
         slot.durationMs = (long) (durationSec * 1_000.0);
-        slot.serial = serial;
+        slot.generation = generation;
         this.audioNextPtsSec = outPtsSec + durationSec;
 
         this.audioFrameQueue.push();
         return true;
     }
 
-    private boolean enqueueResamplerFlush(final int serial) {
+    private boolean enqueueResamplerFlush(final int generation) {
         final FrameQueue.Slot slot = this.audioFrameQueue.peekWritable();
         if (slot == null) return false;
 
@@ -1093,9 +1126,9 @@ public final class FFDecoder {
         final double ptsSec = Double.isNaN(this.audioNextPtsSec) ? 0.0 : this.audioNextPtsSec;
         final double durationSec = (double) flushed / this.audioOutputSampleRate;
         slot.frame.nb_samples(flushed);
-        slot.ptsMs = (long) (ptsSec * 1_000.0);
+        slot.ptsMs = ms(ptsSec);
         slot.durationMs = (long) (durationSec * 1_000.0);
-        slot.serial = serial;
+        slot.generation = generation;
         this.audioNextPtsSec = ptsSec + durationSec;
 
         this.audioFrameQueue.push();
@@ -1166,109 +1199,6 @@ public final class FFDecoder {
         return thread;
     }
 
-    private void stopDecodeThreads() {
-        this.videoPacketQueue.abort();
-        this.audioPacketQueue.abort();
-        final boolean wasInterrupted = Thread.interrupted();
-        synchronized (this.decodeLock) {
-            if (this.videoDecodeThread != null) {
-                this.videoDecodeThread.interrupt();
-                ThreadTool.join(this.videoDecodeThread);
-            }
-            if (this.audioDecodeThread != null) {
-                this.audioDecodeThread.interrupt();
-                ThreadTool.join(this.audioDecodeThread);
-            }
-            this.videoDecodeThread = null;
-            this.audioDecodeThread = null;
-        }
-        if (wasInterrupted) Thread.currentThread().interrupt();
-    }
-
-    private void ensureDecodeThreads() {
-        synchronized (this.decodeLock) {
-            if ((this.videoDecodeThread == null || !this.videoDecodeThread.isAlive()) && this.videoStreamIndex >= 0 && this.videoCodecContext != null) {
-                this.videoDecodeThread = this.thread("video", this::videoDecodeLoop);
-                this.videoDecodeThread.start();
-            }
-            if ((this.audioDecodeThread == null || !this.audioDecodeThread.isAlive()) && this.audioStreamIndex >= 0 && this.audioCodecContext != null) {
-                this.audioDecodeThread = this.thread("audio", this::audioDecodeLoop);
-                this.audioDecodeThread.start();
-            }
-        }
-    }
-
-    // DECODES ON THE DEMUX THREAD UP TO THE PRECISE SEEK TARGET, WITH THE DECODE THREADS STOPPED
-    private void syncDrain(final long targetMs, final AVPacket packet, final AVPacket trackPacket) {
-        final AVFrame drainFrame = avutil.av_frame_alloc();
-        final long threshold = targetMs - (long) (this.timeline.frameDurationSec() * 1_000.0);
-        int maxDrain = 500;
-        boolean videoReached = this.videoCodecContext == null;
-        boolean audioReached = this.audioCodecContext == null;
-
-        while (maxDrain-- > 0 && !Thread.currentThread().isInterrupted()
-                && !this.timeline.seekPending() && (!videoReached || !audioReached)) {
-
-            if (this.useAudioTrack) {
-                if (!videoReached)
-                    videoReached = this.drainRead(this.formatContext, packet, this.videoStreamIndex, this.videoCodecContext, drainFrame,
-                            this.videoTimeBase, threshold);
-                if (!audioReached && trackPacket != null && this.trackFormatContext != null)
-                    audioReached = this.drainRead(this.trackFormatContext, trackPacket, this.audioStreamIndex, this.audioCodecContext, drainFrame,
-                            this.audioTimeBase, threshold);
-            } else {
-                final int readRes = avformat.av_read_frame(this.formatContext, packet);
-                if (readRes < 0) break;
-                try {
-                    final int idx = packet.stream_index();
-                    if (idx == this.videoStreamIndex) {
-                        if (!videoReached) {
-                            videoReached = this.drainDecode(this.videoCodecContext, packet, drainFrame,
-                                    this.videoTimeBase, threshold);
-                        } else {
-                            // THRESHOLD ALREADY MET: STILL FEED THE CODEC TO KEEP THE DPB INTACT
-                            avcodec.avcodec_send_packet(this.videoCodecContext, packet);
-                            while (avcodec.avcodec_receive_frame(this.videoCodecContext, drainFrame) >= 0) { }
-                        }
-                    } else if (idx == this.audioStreamIndex) {
-                        if (!audioReached) {
-                            audioReached = this.drainDecode(this.audioCodecContext, packet, drainFrame,
-                                    this.audioTimeBase, threshold);
-                        } else {
-                            avcodec.avcodec_send_packet(this.audioCodecContext, packet);
-                            while (avcodec.avcodec_receive_frame(this.audioCodecContext, drainFrame) >= 0) { }
-                        }
-                    }
-                } finally {
-                    avcodec.av_packet_unref(packet);
-                }
-            }
-        }
-        avutil.av_frame_free(drainFrame);
-    }
-
-    private boolean drainRead(final AVFormatContext ctx, final AVPacket pkt,
-                              final int streamIndex, final AVCodecContext codec,
-                              final AVFrame frame, final double timeBase, final long threshold) {
-        final int res = avformat.av_read_frame(ctx, pkt);
-        if (res < 0) return false;
-        try {
-            if (pkt.stream_index() == streamIndex) return this.drainDecode(codec, pkt, frame, timeBase, threshold);
-        } finally {
-            avcodec.av_packet_unref(pkt);
-        }
-        return false;
-    }
-
-    private boolean drainDecode(final AVCodecContext codec, final AVPacket pkt,
-                                final AVFrame frame, final double timeBase, final long threshold) {
-        avcodec.avcodec_send_packet(codec, pkt);
-        while (avcodec.avcodec_receive_frame(codec, frame) >= 0) {
-            if ((long) (frame.pts() * timeBase * 1_000) >= threshold) return true;
-        }
-        return false;
-    }
-
     // ==========================================================================
     // INPUT
     // ==========================================================================
@@ -1327,7 +1257,7 @@ public final class FFDecoder {
         if (this.formatContext != null) avformat.avformat_close_input(this.formatContext);
 
         this.formatContext = avformat.avformat_alloc_context();
-        this.formatContext.interrupt_callback().callback(INTERRUPT).opaque(this.abortFlag);
+        this.formatContext.interrupt_callback().callback(INTERRUPT).opaque(this.main.interrupt);
 
         if (!this.openInput(url)) return false;
 
@@ -1341,25 +1271,28 @@ public final class FFDecoder {
         this.host.duration(duration == AV_NOPTS_VALUE || duration < 0 ? 0 : duration / 1_000);
 
         // RE-RESOLVE STREAM INDICES: A REOPENED INPUT MAY EXPOSE STREAMS IN A DIFFERENT ORDER (COMMON WITH HLS), AND THE CODEC
-        // CONTEXTS ARE KEPT, SO THE NEW STREAMS MUST MATCH THE CODECS THEY WERE OPENED FOR
+        // CONTEXTS ARE KEPT, SO THE NEW STREAMS MUST MATCH THE CODECS THEY WERE OPENED FOR. THE DECODE THREADS KEEP RUNNING: THEY
+        // READ NOTHING OF THE INPUT, AND THE GENERATION THIS SEEK OPENED FLUSHES THEIR CODECS
         int newVideoIndex = -1;
         for (int i = 0; i < this.formatContext.nb_streams() && newVideoIndex < 0; i++) {
             if (this.formatContext.streams(i).codecpar().codec_type() == avutil.AVMEDIA_TYPE_VIDEO) newVideoIndex = i;
         }
         if (this.videoCodecContext != null) {
-            if (newVideoIndex < 0 || this.formatContext.streams(newVideoIndex).codecpar().codec_id() != this.videoCodecContext.codec_id()) {
+            if (newVideoIndex < 0 || this.formatContext.streams(newVideoIndex).codecpar().codec_id() != this.videoCodecId) {
                 LOGGER.error(IT, DataTool.errCode(WaterMedia.ERR_FFDECODER_REOPEN_VIDEO) + "Failed to reopen the format due to missing video stream or codec mismatch (index={})", newVideoIndex);
                 return false;
             }
             this.videoStreamIndex = newVideoIndex;
             this.videoStream = this.formatContext.streams(newVideoIndex);
+            this.videoRational = new AVRational().num(this.videoStream.time_base().num()).den(this.videoStream.time_base().den());
             this.videoTimeBase = av_q2d(this.videoStream.time_base());
+            this.videoCover = (this.videoStream.disposition() & avformat.AV_DISPOSITION_ATTACHED_PIC) != 0;
         }
         if (!this.useAudioTrack && this.audioCodecContext != null) {
             // THE AUDIO THAT PLAYED: ITS INDEX WHILE IT KEEPS ITS LANGUAGE, ELSE THAT LANGUAGE, THE DEFAULT OR THE FIRST STREAM
             final AudioStream played = this.audioStream;
             final int newAudioIndex = audioIndex(this.formatContext, played == null ? -1 : played.stream(), played == null ? null : played.lang(), null);
-            if (newAudioIndex < 0 || this.formatContext.streams(newAudioIndex).codecpar().codec_id() != this.audioCodecContext.codec_id()) {
+            if (newAudioIndex < 0 || this.formatContext.streams(newAudioIndex).codecpar().codec_id() != this.audioCodecId) {
                 LOGGER.error(IT, DataTool.errCode(WaterMedia.ERR_FFDECODER_REOPEN_AUDIO) + "Failed to reopen the format due to missing audio stream or codec mismatch (index={})", newAudioIndex);
                 return false;
             }
@@ -1369,10 +1302,6 @@ public final class FFDecoder {
             this.audioStream = new AudioStream(AudioChoice.MAIN, newAudioIndex, tag(stream, "title", tag(stream, "comment", null)), tag(stream, "language", null));
         }
         discard(this.formatContext, this.videoStreamIndex, this.useAudioTrack ? -1 : this.audioStreamIndex);
-
-        if (this.videoCodecContext != null) avcodec.avcodec_flush_buffers(this.videoCodecContext);
-        if (this.audioCodecContext != null) avcodec.avcodec_flush_buffers(this.audioCodecContext);
-
         return true;
     }
 
@@ -1386,7 +1315,7 @@ public final class FFDecoder {
             if (url == null) return false;
 
             this.formatContext = avformat.avformat_alloc_context();
-            this.formatContext.interrupt_callback().callback(INTERRUPT).opaque(this.abortFlag);
+            this.formatContext.interrupt_callback().callback(INTERRUPT).opaque(this.main.interrupt);
 
             LOGGER.debug(IT, "Opening {}", this.uri);
             if (!this.openInput(url)) return false;
@@ -1413,7 +1342,9 @@ public final class FFDecoder {
                 if (stream.codecpar().codec_type() != avutil.AVMEDIA_TYPE_VIDEO) continue;
                 this.videoStreamIndex = i;
                 this.videoStream = stream;
+                this.videoRational = new AVRational().num(stream.time_base().num()).den(stream.time_base().den());
                 this.videoTimeBase = av_q2d(stream.time_base());
+                this.videoCover = (stream.disposition() & avformat.AV_DISPOSITION_ATTACHED_PIC) != 0;
             }
 
             // AUDIO: THE PICKED ORIGIN, ELSE THE SEPARATE TRACK OF THE PREFERRED LANGUAGE, ELSE THE FIRST ONE (THE PLATFORM'S
@@ -1528,6 +1459,10 @@ public final class FFDecoder {
 
         final AVCodecParameters codecpar = videoStream.codecpar();
         final int codecId = codecpar.codec_id();
+        // KEPT FOR THE SOFTWARE FALLBACK, WHICH RUNS ON THE DECODE THREAD
+        this.videoCodecId = codecId;
+        this.videoParams = avcodec.avcodec_parameters_alloc();
+        if (this.videoParams != null) avcodec_parameters_copy(this.videoParams, codecpar);
 
         final String codecName = FFTool.string(avcodec_get_name(codecId), null);
         final AVCodecDescriptor descriptor = avcodec_descriptor_get(codecId);
@@ -1646,16 +1581,15 @@ public final class FFDecoder {
     // SWAPPED ONLY ON FULL SUCCESS, SO A FAILURE KEEPS THE HW CONTEXT USABLE. THE CURRENT GOP IS LOST UNTIL THE NEXT
     // KEYFRAME, ACCEPTABLE ON AN ALREADY-FAILING PIPELINE
     private boolean reinitVideoCodecSoftware() {
-        final AVStream stream = this.videoStream;
-        final int codecId = stream.codecpar().codec_id();
+        final int codecId = this.videoCodecId;
         // ROUTE AROUND THE HWACCEL-ONLY NATIVE av1 DECODER (SEE softwareVideoDecoder): A FAILED AV1 HWACCEL WOULD OTHERWISE FALL
         // BACK TO A DECODER THAT PRODUCES NO FRAMES
         final AVCodec decoder = softwareVideoDecoder(codecId, avcodec_find_decoder(codecId));
-        if (decoder == null) return false;
+        if (decoder == null || this.videoParams == null) return false;
 
         final AVCodecContext fresh = avcodec.avcodec_alloc_context3(decoder);
         if (fresh == null) return false;
-        if (avcodec_parameters_to_context(fresh, stream.codecpar()) < 0) {
+        if (avcodec_parameters_to_context(fresh, this.videoParams) < 0) {
             avcodec.avcodec_free_context(fresh);
             LOGGER.error(IT, DataTool.errCode(WaterMedia.ERR_FFDECODER_FALLBACK_PARAMS) + "Failed to copy codec parameters for the software fallback");
             return false;
@@ -1691,6 +1625,7 @@ public final class FFDecoder {
         final AVStream audioStream = audioContext.streams(this.audioStreamIndex);
         final AVCodecParameters codecParams = audioStream.codecpar();
         final int codecId = codecParams.codec_id();
+        this.audioCodecId = codecId;
         final AVCodec audioCodec = avcodec.avcodec_find_decoder(codecId);
 
         int errorCode;
@@ -1825,6 +1760,10 @@ public final class FFDecoder {
             avcodec.avcodec_free_context(this.videoCodecContext);
             this.videoCodecContext = null;
         }
+        if (this.videoParams != null) {
+            avcodec.avcodec_parameters_free(this.videoParams);
+            this.videoParams = null;
+        }
         if (this.audioCodecContext != null) {
             avcodec.avcodec_free_context(this.audioCodecContext);
             this.audioCodecContext = null;
@@ -1856,6 +1795,16 @@ public final class FFDecoder {
     // ==========================================================================
     // UTILITY
     // ==========================================================================
+    // WHETHER queue HOLDS ALL A READER READS AHEAD: bytes, OR THE READ AHEAD TIME IN MORE THAN A FEW PACKETS
+    private static boolean enough(final PacketQueue queue, final long bytes) {
+        return queue.holds(bytes, READ_AHEAD_PACKETS, READ_AHEAD_MS);
+    }
+
+    // SECONDS TO MILLISECONDS, KEPT FAR FROM THE long RANGE: A CRAFTED TIMESTAMP NEVER WRAPS THE SUMS AND DIFFERENCES THE PLAYER TAKES
+    private static long ms(final double sec) {
+        return (long) Math.max(-TIME_LIMIT_MS, Math.min(TIME_LIMIT_MS, sec * 1_000.0));
+    }
+
     // THE DECODER'S CONFIGURATION THAT TAKES A DEVICE CONTEXT OF TYPE hw, OR NULL
     private static AVCodecHWConfig hwConfig(final AVCodec decoder, final int hw) {
         for (int i = 0; ; i++) {
@@ -1955,46 +1904,29 @@ public final class FFDecoder {
     // ==========================================================================
     // NESTED TYPES
     // ==========================================================================
-    /** Playback timeline the decoder follows: seeks, pause, queue serials and the end of the input; the player's clock. */
-    public interface Timeline {
-        /** Takes the pending seek, or returns null when none is pending. */
-        Seek consumeSeek();
-        /** Returns whether a seek is pending. */
-        boolean seekPending();
-        /** Returns whether playback is held paused, so the demuxer parks. */
-        boolean holding();
-        /** Waits until the status changes or a seek arrives, at most {@code timeoutMs} (0 waits for it). */
-        void awaitChange(final long timeoutMs) throws InterruptedException;
-        /** Adopts the serial the queues carry after a reset, so frames of that serial count. */
-        void serial(final int serial);
-        /** Starts the clock once the input is open. */
-        void start();
-        /** Records that the demuxer resumed after the end of the input. */
-        void signalDemuxResumed();
-        /** Records that the demuxer reached the end of the input. */
-        void signalDemuxFinished();
-        /** Returns the duration of one video frame in seconds. */
-        double frameDurationSec();
-    }
-
     /** Player side of the decoder: the cache, the Vulkan device, the audio format and the open and failure reports. */
     public interface Host {
-        /** Returns the cached copy of {@code uri}, or null to open it remotely; runs on the demux thread, so it may block. */
+        /** Returns the cached copy of {@code uri}, or null to open it remotely; runs on the main reader thread, so it may block. */
         Path cached(final URI uri) throws IOException;
         /** Returns the player engine's Vulkan device for {@code codecId}, whose reference the decoder then owns, or null. */
         Device vulkan(final int codecId);
         /** Formats the player's audio engine for a source and returns the PCM it takes, or null to drop the audio. */
         Pcm audio(final SampleType type, final int channels, final int rate);
-        /** Reports the duration of the input in milliseconds (0 when unknown, as live) each time it is probed, on the demux thread. */
+        /** Reports the duration of the input in milliseconds (0 when unknown, as live) each time it is probed, on the main reader thread. */
         void duration(final long ms);
-        /** Reports the open input before the clock starts, on the demux thread. */
+        /** Reports the open input before anything of it is read or decoded, on the main reader thread. */
         void opened(final FFDecoder decoder);
-        /** Reports why the input could not open or keep playing; never called for an abort. */
+        /** Reports why the input could not open or keep playing, from a reader thread; never called for an abort. */
         void failed(final Throwable cause);
     }
 
-    /** A seek to {@code targetMs}, frame-exact when {@code precise}. */
-    public record Seek(long targetMs, boolean precise) {}
+    // THE READER OF AN INPUT: ITS THREAD, AND THE FLAG INTERRUPT READS FOR ITS CONTEXT, RAISED BY AN ABORT AND BY A SEEK THAT CUTS A
+    // BLOCKED READ SHORT
+    private static final class Reader {
+        private final IntPointer interrupt = new IntPointer(new int[1]);
+        private volatile Thread thread;
+        private volatile boolean live; // PAST ITS OPEN: FROM THERE ON A SEEK MAY CUT ITS I/O SHORT
+    }
 
     /** A Vulkan device reference and whether libplacebo runs on it. */
     public record Device(AVBufferRef ref, boolean filters) {}

@@ -782,12 +782,11 @@ public final class WaterMedia {
     public static final int ERR_FFDECODER_AUDIO_CODEC_OPEN = 4578;
     public static final int ERR_FFDECODER_SWR_ALLOC = 4579;
     public static final int ERR_FFDECODER_SWR_INIT = 4580;
+    public static final int ERR_FFDECODER_READ_EXCEPTION = 4581;
     // FrameQueue 4620-4629
     public static final int ERR_FRAMEQUEUE_CAPACITY = 4620;
     public static final int ERR_FRAMEQUEUE_PUSH_FULL = 4621;
     public static final int ERR_FRAMEQUEUE_FRAME_ALLOC = 4622;
-    // PacketQueue 4630-4639
-    public static final int ERR_PACKETQUEUE_BYTE_LIMIT = 4630;
     // Placebo 4640-4649
     public static final int ERR_PLACEBO_STEP = 4640;
     // AnimationEncoder 4650-4659

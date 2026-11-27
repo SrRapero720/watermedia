@@ -1,6 +1,5 @@
 package org.watermedia.api.player;
 
-import org.watermedia.api.codecs.decoders.FFDecoder;
 import org.watermedia.api.player.MediaPlayer.Status;
 
 import java.util.ArrayDeque;
@@ -18,10 +17,11 @@ import java.util.function.BiConsumer;
  *   <li>{@code time = ptsDrift + now - elapsed * (1 - speed)} when playing (speed-corrected)</li>
  *   <li>{@code time = pts} when not playing (frozen)</li>
  * </ul>
- * Status is volatile for lock-free reads; all mutations happen under the lock. It is the {@link FFDecoder.Timeline}
- * the FFmpeg decoder follows.
+ * Status is volatile for lock-free reads; all mutations happen under the lock. The clock never starts on its own: a
+ * start, a seek or a rebuffer leaves it buffering, frozen where it will resume, until the player lands it on the
+ * frames every stream has ({@link #land(double, int)}).
  */
-final class MasterClock implements FFDecoder.Timeline {
+final class MasterClock {
     // AUDIO PTS DRIFT FROM THE CLOCK, IN SECONDS, PAST WHICH update() RECALIBRATES ptsDrift
     private static final double DRIFT_RECALIBRATION_SEC = 0.050;
 
@@ -35,15 +35,14 @@ final class MasterClock implements FFDecoder.Timeline {
     private volatile double lastUpdated;
     private volatile double speed = 1.0;
     private volatile Status status = Status.WAITING;
-    private volatile int serial;
 
-    // SEEK STATE: ACCESSED UNDER LOCK
-    private volatile FFDecoder.Seek pendingSeek;
+    // SEEK STATE, WRITTEN UNDER THE LOCK: epoch COUNTS THE SEEKS REQUESTED, SO A FRAME OF THE POSITION A NEWER ONE LEFT NEVER
+    // MOVES THE CLOCK. unsettled SAYS A START, A SEEK OR A REBUFFER HAS NOT LANDED YET
+    private volatile int epoch;
+    private volatile Seek pendingSeek;
+    private volatile boolean unsettled;
     private volatile boolean pauseIntent;
     private volatile long heldSinceNs; // WHEN THE CLOCK LAST ENTERED PAUSED
-
-    // PIPELINE STATE
-    private volatile boolean demuxFinished;
 
     // STATUS LISTENER: TRANSITIONS ARE QUEUED UNDER THE LOCK AND DELIVERED AFTER IT IS RELEASED, IN ORDER
     // AND BY ONE THREAD AT A TIME (draining), SO A LISTENER RUNS UNDER NO LOCK AND MAY RE-ENTER THE CLOCK
@@ -74,41 +73,52 @@ final class MasterClock implements FFDecoder.Timeline {
         return (long) (this.time() * 1_000.0);
     }
 
-    /** Updates the clock from a decoded frame of the current serial (audio, or video while it drives the clock); the first one while buffering resolves the pause intent. */
-    public void update(final double ptsSec, final int serial) {
+    /** Corrects the running clock with a frame of {@code epoch} (audio, or video while it drives the clock); a frame of an older seek and a clock that is not playing are left alone. */
+    public void update(final double ptsSec, final int epoch) {
         this.lock.lock();
         try {
-            // NO BACKWARD GUARD: THE SERIAL REJECTS STALE FRAMES
-            if (serial != this.serial) return;
-            final double now = wallclock();
-
-            // ALWAYS UPDATE PTS (FOR DISPLAY AND BUFFERING TRANSITION)
+            // NO BACKWARD GUARD: THE EPOCH REJECTS STALE FRAMES
+            if (epoch != this.epoch || this.status != Status.PLAYING) return;
             this.pts = ptsSec;
 
-            // RECALIBRATE ONLY ON REAL DESYNC (SEEK, AUDIO GAP): AUDIO CONSUMED LATE BEHIND SLOW VIDEO WORK WOULD OTHERWISE
-            // DRAG THE CLOCK BELOW WALL-CLOCK RATE. time() IS SPEED-CORRECTED, SO THE CHECK HOLDS AT ANY SPEED
-            final double drift = ptsSec - this.time();
-            if (this.status == Status.BUFFERING || Math.abs(drift) > DRIFT_RECALIBRATION_SEC) {
+            // RECALIBRATE ONLY ON REAL DESYNC (AN AUDIO GAP): AUDIO CONSUMED LATE BEHIND SLOW VIDEO WORK WOULD OTHERWISE DRAG THE
+            // CLOCK BELOW WALL-CLOCK RATE. time() IS SPEED-CORRECTED, SO THE CHECK HOLDS AT ANY SPEED
+            if (Math.abs(ptsSec - this.time()) > DRIFT_RECALIBRATION_SEC) {
+                final double now = wallclock();
                 this.ptsDrift = ptsSec - now;
                 this.lastUpdated = now;
-            }
-
-            // IF BUFFERING → FIRST VALID UPDATE → TRANSITION TO PLAYING/PAUSED
-            if (this.status == Status.BUFFERING) {
-                this.status = this.pauseIntent ? Status.PAUSED : Status.PLAYING;
-                if (this.pauseIntent) this.heldSinceNs = System.nanoTime();
-                this.events.addLast(new Status[] { Status.BUFFERING, this.status });
-                this.condition.signalAll();
             }
         } finally {
             this.lock.unlock();
         }
-        this.drain();
     }
 
-    /** Updates the clock from a PTS in milliseconds; see {@link #update(double, int)}. */
-    public void updateMs(final long ptsMs, final int serial) {
-        this.update(ptsMs / 1_000.0, serial);
+    /**
+     * Lands the clock on {@code ptsSec}, where every stream of {@code epoch} has its first frame: buffering resolves
+     * into playing, or into paused when a pause is latched, and a clock already paused just moves there. Returns false
+     * when a newer seek was requested or the clock neither buffers nor holds.
+     */
+    public boolean land(final double ptsSec, final int epoch) {
+        this.lock.lock();
+        try {
+            final Status current = this.status;
+            if (epoch != this.epoch || current != Status.BUFFERING && current != Status.PAUSED) return false;
+            final double now = wallclock();
+            this.pts = ptsSec;
+            this.ptsDrift = ptsSec - now;
+            this.lastUpdated = now;
+            this.unsettled = false;
+            if (current == Status.BUFFERING) {
+                this.status = this.pauseIntent ? Status.PAUSED : Status.PLAYING;
+                if (this.pauseIntent) this.heldSinceNs = System.nanoTime();
+                this.events.addLast(new Status[] { Status.BUFFERING, this.status });
+            }
+            this.condition.signalAll();
+        } finally {
+            this.lock.unlock();
+        }
+        this.drain();
+        return true;
     }
 
     /** Sets the playback speed, recalibrating the clock so the current position stays continuous. */
@@ -149,7 +159,7 @@ final class MasterClock implements FFDecoder.Timeline {
     /** Applies a transition {@link Status#allows(Status)} permits and returns the status it left, or null when rejected. */
     public Status exchange(final Status newStatus) {
         // THE CLOCK FREEZES OR RECALIBRATES AROUND PLAYING AND EVERY WAITER WAKES; THE RETURNED STATUS LETS THE CALLER PUBLISH
-        // THE EXACT PAIR INSTEAD OF A STATUS READ BEFORE OR AFTER THE SWAP. start(), reload(), requestSeek(), update(),
+        // THE EXACT PAIR INSTEAD OF A STATUS READ BEFORE OR AFTER THE SWAP. start(), reload(), requestSeek(), land(),
         // halt() AND reset() OWN THE MOVES THE ENUM LEAVES OUT
         final Status current;
         this.lock.lock();
@@ -169,6 +179,8 @@ final class MasterClock implements FFDecoder.Timeline {
             // STOPPED MEANS "BACK AT THE BEGINNING" FOR EVERY PLAYER
             if (newStatus == Status.STOPPED) this.pts = 0;
             if (newStatus == Status.PAUSED) this.heldSinceNs = System.nanoTime();
+            // A REBUFFER LEAVES ONLY THROUGH land()
+            if (newStatus == Status.BUFFERING) this.unsettled = true;
 
             this.status = newStatus;
             this.events.addLast(new Status[] { current, newStatus });
@@ -207,8 +219,6 @@ final class MasterClock implements FFDecoder.Timeline {
             current = this.status;
             if (current != Status.PLAYING && current != Status.PAUSED && current != Status.BUFFERING) return false;
             if (current == Status.PLAYING) this.pts = this.time();
-            // THE NEXT SOURCE STARTS UNREAD: AN END THE PREVIOUS ONE REPORTED IS NOT ITS END
-            this.demuxFinished = false;
             this.status = Status.LOADING;
             this.events.addLast(new Status[] { current, Status.LOADING });
             this.condition.signalAll();
@@ -219,23 +229,19 @@ final class MasterClock implements FFDecoder.Timeline {
         return true;
     }
 
-    // STARTS THE RUN FROM LOADING AT TIME 0, PLAYING OR PAUSED AS THE LATCHED INTENT SAYS, OR BUFFERING AT A SEEK REQUESTED
-    // WHILE LOADING
-    @Override
+    /** Leaves loading once the input is open: the clock buffers, frozen where a seek requested while loading sent it or at 0, until the player lands it. */
     public void start() {
         this.lock.lock();
         try {
-            final double now = wallclock();
-            final FFDecoder.Seek pending = this.pendingSeek;
             final Status prev = this.status;
             // A RUN THAT WAS STOPPED OR FAILED WHILE OPENING MUST NOT COME BACK TO LIFE
             if (prev != Status.LOADING && prev != Status.WAITING) return;
-            this.pts = pending != null ? pending.targetMs() / 1_000.0 : 0;
+            final double now = wallclock();
             this.ptsDrift = this.pts - now;
             this.lastUpdated = now;
-            this.status = pending != null ? Status.BUFFERING : this.pauseIntent ? Status.PAUSED : Status.PLAYING;
-            if (this.status == Status.PAUSED) this.heldSinceNs = System.nanoTime();
-            if (prev != this.status) this.events.addLast(new Status[] { prev, this.status });
+            this.unsettled = true;
+            this.status = Status.BUFFERING;
+            this.events.addLast(new Status[] { prev, Status.BUFFERING });
             this.condition.signalAll();
         } finally {
             this.lock.unlock();
@@ -247,23 +253,27 @@ final class MasterClock implements FFDecoder.Timeline {
     // PUBLIC API: SEEK AND PAUSE
     // ==========================================================================
 
-    /** Requests a seek, freezing the clock at the target in buffering; false without a pipeline to serve it (waiting, ended, stopped, error). */
-    public boolean requestSeek(final long targetMs, final boolean precise) {
+    /**
+     * Requests a seek, freezing the clock at the target in buffering; false without a pipeline to serve it (waiting,
+     * ended, stopped, error). An {@code ahead} one is a jump the player may serve from what it already read.
+     */
+    public boolean requestSeek(final long targetMs, final boolean precise, final boolean ahead) {
         this.lock.lock();
         try {
             // WHILE LOADING THE REQUEST WAITS FOR start() AND THE STATUS STAYS LOADING
             final Status current = this.status;
             if (current == Status.WAITING || current == Status.ENDED || current == Status.STOPPED || current == Status.ERROR)
                 return false;
-            this.pendingSeek = new FFDecoder.Seek(targetMs, precise);
+            // A NEW EPOCH: NO FRAME OF THE OLD POSITION MOVES OR LANDS THE CLOCK FROM HERE ON
+            final int epoch = this.epoch + 1;
+            this.epoch = epoch;
+            this.pendingSeek = new Seek(targetMs, precise, ahead, epoch);
             this.pts = targetMs / 1_000.0; // FREEZE CLOCK AT TARGET
-            // INVALIDATE ALL CURRENT FRAMES, SO update() NEVER TURNS BUFFERING INTO PLAYING WITH STALE AUDIO
-            this.serial++;
+            this.unsettled = true;
             if (current != Status.LOADING && current != Status.BUFFERING) {
                 this.status = Status.BUFFERING;
                 this.events.addLast(new Status[] { current, Status.BUFFERING });
             }
-            this.demuxFinished = false; // CLEAR EOF FLAG FOR SEEK AFTER EOF
             this.condition.signalAll();
         } finally {
             this.lock.unlock();
@@ -272,11 +282,11 @@ final class MasterClock implements FFDecoder.Timeline {
         return true;
     }
 
-    @Override
-    public FFDecoder.Seek consumeSeek() {
+    /** Takes the pending seek, or returns null when none is pending; the player serves it with its decoder. */
+    public Seek consumeSeek() {
         this.lock.lock();
         try {
-            final FFDecoder.Seek req = this.pendingSeek;
+            final Seek req = this.pendingSeek;
             this.pendingSeek = null;
             return req;
         } finally {
@@ -284,10 +294,10 @@ final class MasterClock implements FFDecoder.Timeline {
         }
     }
 
-    @Override
-    public boolean seekPending() { return this.pendingSeek != null; }
+    /** Returns how many seeks were requested in this run, lock-free: the epoch a frame must carry to move the clock. */
+    public int epoch() { return this.epoch; }
 
-    /** Pauses or resumes, latching the intent that resolves buffering; true when the state, or the intent while loading, changed. */
+    /** Pauses or resumes, latching the intent that resolves buffering; true when the state, or the intent while loading or buffering, changed. */
     public boolean paused(final boolean paused) {
         final boolean changed;
         this.lock.lock();
@@ -296,16 +306,17 @@ final class MasterClock implements FFDecoder.Timeline {
             if (this.status == Status.WAITING) return false;
             final boolean was = this.pauseIntent;
             this.pauseIntent = paused;
-            // WHILE LOADING ONLY THE INTENT CHANGES AND start() APPLIES IT
+            // WHILE LOADING ONLY THE INTENT CHANGES AND THE LANDING APPLIES IT
             if (this.status == Status.LOADING) return was != paused;
             if (paused) {
                 // PAUSE IS ALWAYS ALLOWED (BUFFERING→PAUSED, PLAYING→PAUSED)
                 changed = this.transition(Status.PAUSED);
+            } else if (this.status == Status.BUFFERING) {
+                // NOTHING LANDED YET: THE LANDING RESOLVES INTO PLAYING NOW THAT THE INTENT IS GONE
+                changed = was;
             } else {
-                // RESUME: IF WE WERE PAUSED DURING BUFFERING, GO BACK TO BUFFERING
-                // (NOT PLAYING): THE SEEK HASN'T RESOLVED YET.
-                // update() WILL TRANSITION BUFFERING→PLAYING WHEN DATA ARRIVES.
-                changed = this.status == Status.PAUSED && this.pendingSeek != null
+                // A CLOCK PAUSED BEFORE ITS START, SEEK OR REBUFFER LANDED GOES BACK TO BUFFERING, NOT TO PLAYING WITHOUT FRAMES
+                changed = this.status == Status.PAUSED && this.unsettled
                         ? this.transition(Status.BUFFERING) : this.transition(Status.PLAYING);
             }
         } finally {
@@ -318,9 +329,11 @@ final class MasterClock implements FFDecoder.Timeline {
     /** Whether the latched pause intent resolves buffering into paused rather than playing. */
     public boolean pauseRequested() { return this.pauseIntent; }
 
-    // PLAYBACK IS HELD PAUSED BY REQUEST, SO THE DEMUXER PARKS
-    @Override
+    /** Returns whether playback is held paused by request. */
     public boolean holding() { return this.pauseIntent && this.status == Status.PAUSED; }
+
+    /** Returns whether a start, a seek or a rebuffer has not landed yet. */
+    public boolean unsettled() { return this.unsettled; }
 
     /** Returns how long the clock has been holding in milliseconds, or 0 when it is not holding. */
     public long heldMs() { return this.holding() ? TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - this.heldSinceNs) : 0L; }
@@ -329,10 +342,10 @@ final class MasterClock implements FFDecoder.Timeline {
     public boolean reread() {
         this.lock.lock();
         try {
-            // ONE STEP UNDER THE LOCK: THE PARKED DEMUXER WAKES TO THE SEEK, NEVER TO A READ OF THE CUT CONNECTION
+            // ONE STEP UNDER THE LOCK: THE PARKED READERS WAKE TO THE SEEK, NEVER TO A READ OF THE CUT CONNECTION
             if (!this.holding()) return false;
             this.pauseIntent = false;
-            this.requestSeek(this.timeMs(), true);
+            this.requestSeek(this.timeMs(), true, false);
         } finally {
             this.lock.unlock();
         }
@@ -344,13 +357,12 @@ final class MasterClock implements FFDecoder.Timeline {
     // PUBLIC API: THREAD COORDINATION
     // ==========================================================================
 
-    // BLOCKS UNTIL THE STATUS CHANGES OR A NEW SEEK ARRIVES (timeoutMs 0 = INDEFINITE)
-    @Override
+    /** Blocks until the status changes or a new seek arrives, at most {@code timeoutMs} (0 waits for it). */
     public void awaitChange(final long timeoutMs) throws InterruptedException {
         this.lock.lock();
         try {
             final Status initial = this.status;
-            final FFDecoder.Seek initialSeek = this.pendingSeek;
+            final Seek initialSeek = this.pendingSeek;
             final long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs);
             while (this.status == initial && this.pendingSeek == initialSeek) {
                 final long remaining = timeoutMs > 0 ? TimeUnit.NANOSECONDS.toMillis(deadline - System.nanoTime()) : Long.MAX_VALUE;
@@ -395,57 +407,16 @@ final class MasterClock implements FFDecoder.Timeline {
             this.ptsDrift = -now;
             this.lastUpdated = now;
             this.status = Status.WAITING;
-            this.serial = 0;
+            this.epoch = 0;
             this.pendingSeek = null;
+            this.unsettled = false;
             this.pauseIntent = false;
-            this.demuxFinished = false;
             if (prev != Status.WAITING) this.events.addLast(new Status[] { prev, Status.WAITING });
             this.condition.signalAll();
         } finally {
             this.lock.unlock();
         }
         this.drain();
-    }
-
-    @Override
-    public void signalDemuxFinished() {
-        this.lock.lock();
-        try {
-            this.demuxFinished = true;
-            this.condition.signalAll();
-        } finally {
-            this.lock.unlock();
-        }
-    }
-
-    // THE DEMUX RESUMED AFTER EOF (E.G. AFTER A SEEK)
-    @Override
-    public void signalDemuxResumed() {
-        this.lock.lock();
-        try {
-            this.demuxFinished = false;
-            this.condition.signalAll();
-        } finally {
-            this.lock.unlock();
-        }
-    }
-
-    /** Whether the demuxer reached end-of-stream, lock-free. */
-    public boolean demuxFinished() { return this.demuxFinished; }
-
-    /** Returns the current serial, lock-free. */
-    public int serial() { return this.serial; }
-
-    // ADOPTS THE DECODER'S PACKET QUEUE SERIAL AFTER A SEEK FLUSH, SO update() ACCEPTS POST-SEEK FRAMES AGAIN (A SERIAL MATCH
-    // IS REQUIRED FOR THE BUFFERING TO PLAYING TRANSITION)
-    @Override
-    public void serial(final int serial) {
-        this.lock.lock();
-        try {
-            this.serial = serial;
-        } finally {
-            this.lock.unlock();
-        }
     }
 
     /** Sets the stream rate (at least 1 fps) when the video stream opens, with its frame duration and skip threshold. */
@@ -460,7 +431,7 @@ final class MasterClock implements FFDecoder.Timeline {
     public float fps() { return this.fpsValue; }
     /** Returns the frame duration in milliseconds. */
     public long frameDurationMs() { return (long) (this.frameDurationSec * 1_000.0); }
-    @Override
+    /** Returns the frame duration in seconds. */
     public double frameDurationSec() { return this.frameDurationSec; }
     /** Returns the lateness in milliseconds (~5 frames) past which a video frame is skipped. */
     public long skipThresholdMs() { return this.skipThresholdMs; }
@@ -505,4 +476,11 @@ final class MasterClock implements FFDecoder.Timeline {
     private static double wallclock() {
         return System.nanoTime() / 1_000_000_000.0;
     }
+
+    // ==========================================================================
+    // NESTED TYPES
+    // ==========================================================================
+
+    // A SEEK TO targetMs REQUESTED AS epoch: FRAME-EXACT WHEN precise, AND SERVED FROM WHAT THE PLAYER ALREADY READ WHEN ahead AND IT REACHES
+    record Seek(long targetMs, boolean precise, boolean ahead, int epoch) {}
 }
