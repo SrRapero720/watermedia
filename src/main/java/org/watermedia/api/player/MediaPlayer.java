@@ -105,6 +105,10 @@ public abstract sealed class MediaPlayer permits ServerMediaPlayer, FFMediaPlaye
     // FOLLOWER TUNABLE: HOW FAR PLAYBACK MAY DRIFT BEFORE IT IS PULLED BACK
     private volatile long toleranceMs = 1_000;
 
+    // WHEN THE LAST SEEK WAS TAKEN, BY THE HOST OR BY THE FOLLOWER: STAMPED BY THE PLAYERS WHOSE SEEKS TAKE TIME TO LAND, SO THE
+    // TICKER TIMES THE LANDING
+    volatile long seekNanos;
+
     // FOLLOWER CORRECTION STATE: TOUCHED ONLY FROM THE SINGLE TICKER THREAD
     private boolean tickWarned; // A FAILING TICK IS LOGGED ONCE PER PLAYER
     private boolean startIssued;

@@ -114,6 +114,7 @@ public final class FFMediaPlayer extends MediaPlayer {
     private volatile float fps; // 0 UNTIL THE VIDEO STREAM REPORTS A PLAUSIBLE RATE; AUDIO-ONLY STAYS 0
     private volatile long displayTimeMs; // HOW LONG A SINGLE-FRAME SOURCE STAYS UP BEFORE ENDED (0 = FOREVER)
     private volatile int runSerial; // BUMPED PER lifecycle() RUN SO ASYNC PROBES CANNOT WRITE INTO A LATER RUN
+    private volatile long seekTargetMs; // WHERE THE SEEK STAMPED IN seekNanos WAS SENT, FOR ITS LANDING REPORT
     private volatile Boolean hlsLiveSource;
 
     // NATIVE-FREE SNAPSHOTS FOR PUBLIC GETTERS: duration()/live()/canPlay() RUN ON THE GAME/RENDER THREAD WHILE THE
@@ -496,7 +497,11 @@ public final class FFMediaPlayer extends MediaPlayer {
         // A FINISHED OR STOPPED PIPELINE IS GONE: SCRUBBING IT MEANS A PAUSED RESTART AT THE TARGET
         final Status status = this.clock.status();
         if (status == Status.ENDED || status == Status.STOPPED) return this.launch(true, target);
-        return this.clock.requestSeek(target, precise);
+        if (!this.clock.requestSeek(target, precise)) return false;
+        // STAMPED ONCE THE CLOCK BUFFERS: THE FOLLOWER TIMES THE LANDING AND THE CONSUMPTION LOOP REPORTS IT
+        this.seekTargetMs = target;
+        this.seekNanos = System.nanoTime();
+        return true;
     }
 
     // TERMINAL TRANSITION: THE CLOCK NOTIFIES THE LISTENER ITSELF (SEE THE CONSTRUCTOR); A FAILURE
@@ -696,6 +701,15 @@ public final class FFMediaPlayer extends MediaPlayer {
             // STARVATION DETECTION
             long starvationStartMs = 0;
             long lastStarvationRecoveryMs = Long.MIN_VALUE / 4; // "NEVER", FAR ENOUGH FROM ANY MONOTONIC STAMP
+            // SEEK LANDING REPORT: THE SEEK IT FOLLOWS, THEN WHERE AND HOW LATE THE CLOCK STARTED AND THE FIRST PICTURE CAME
+            boolean landing = false;
+            long landStamp = this.seekNanos;
+            long landTargetMs = 0;
+            long landSkipped = 0;
+            long landClockMs = -1;
+            long landClockTookMs = 0;
+            long landVideoMs = -1;
+            long landVideoTookMs = 0;
             this.lastAudioUploadSerial = -1;
             this.hlsLiveSource = null;
             this.opened = false;
@@ -772,6 +786,17 @@ public final class FFMediaPlayer extends MediaPlayer {
 
                 // STOPPED, ERROR AND EVERY OTHER STATUS LEFT HERE END THE LOOP
                 if (current != Status.PLAYING && current != Status.BUFFERING) break;
+
+                // A NEWER SEEK STARTS ITS LANDING REPORT OVER
+                final long seekStamp = this.seekNanos;
+                if (seekStamp != landStamp) {
+                    landing = true;
+                    landStamp = seekStamp;
+                    landTargetMs = this.seekTargetMs;
+                    landSkipped = this.totalSkippedFrames;
+                    landClockMs = -1;
+                    landVideoMs = -1;
+                }
 
                 boolean didWork = false;
 
@@ -994,6 +1019,10 @@ public final class FFMediaPlayer extends MediaPlayer {
                             this.totalRenderedFrames++;
                             this.perfVideoRenders++;
                         }
+                        if (landing && landVideoMs < 0) {
+                            landVideoMs = (long) (frameSec * 1_000.0);
+                            landVideoTookMs = (System.nanoTime() - landStamp) / 1_000_000L;
+                        }
 
                         // CLOCK UPDATE (ONLY WHEN VIDEO DRIVES THE CLOCK: NO AUDIO, OR DURING BUFFERING)
                         if (!decoder.audio() || this.clock.status() == Status.BUFFERING) this.clock.update(frameSec, frameSerial);
@@ -1024,6 +1053,22 @@ public final class FFMediaPlayer extends MediaPlayer {
 
                 // TRACK BUFFERING→PLAYING RECOVERY FOR STARVATION COOLDOWN
                 if (current == Status.BUFFERING && this.clock.status() == Status.PLAYING) lastStarvationRecoveryMs = nowMs();
+
+                // SEEK LANDING REPORT, ONCE THE CLOCK RUNS AGAIN AND THE FIRST PICTURE IS UP: A CLOCK OR A PICTURE FAR FROM THE
+                // TARGET, OR ONE MUCH LATER THAN THE OTHER, IS WHAT A FROZEN PICTURE OR A FOLLOWER THAT KEEPS SEEKING COMES FROM
+                if (landing) {
+                    final Status landed = this.clock.status();
+                    if (landClockMs < 0 && (landed == Status.PLAYING || landed == Status.PAUSED)) {
+                        landClockMs = this.clock.timeMs();
+                        landClockTookMs = (System.nanoTime() - landStamp) / 1_000_000L;
+                    }
+                    if (landClockMs >= 0 && (landVideoMs >= 0 || this.gfx == null || !decoder.video())) {
+                        landing = false;
+                        if (landVideoMs < 0) LOGGER.debug(IT, "Seek to {}ms landed: clock at {}ms after {}ms", landTargetMs, landClockMs, landClockTookMs);
+                        else LOGGER.debug(IT, "Seek to {}ms landed: clock at {}ms after {}ms, picture at {}ms after {}ms, {} frames skipped",
+                                landTargetMs, landClockMs, landClockTookMs, landVideoMs, landVideoTookMs, this.totalSkippedFrames - landSkipped);
+                    }
+                }
 
                 if (!didWork) {
                     // STARVATION GOES TO BUFFERING, NEVER A SEEK: requestSeek BUMPS THE SERIAL, FLUSHES THE QUEUES AND CALLS
