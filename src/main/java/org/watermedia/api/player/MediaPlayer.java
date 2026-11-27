@@ -53,7 +53,10 @@ public abstract sealed class MediaPlayer permits ServerMediaPlayer, FFMediaPlaye
     public static final long NO_DURATION = 0L;
 
     // FOLLOWER CORRECTION CONSTANTS
-    private static final long SEEK_COOLDOWN_NS = 1_000_000_000L; // 1s BETWEEN SEEKS WHILE THE PIPELINE RESETTLES
+    private static final long SEEK_COOLDOWN_NS = 1_000_000_000L; // 1s OF PLAYBACK AFTER A LANDING BEFORE THE NEXT SEEK
+    private static final long LATENCY_MAX_MS = 5_000L;           // THE FURTHEST A CORRECTION AIMS AHEAD OF THE SESSION
+    private static final long CHAIN_NS = 10_000_000_000L;        // CORRECTIONS CLOSER THAN 10s FOLLOW FROM EACH OTHER
+    private static final int CHAIN_WARN_SEEKS = 3;               // THAT MANY IN A ROW ARE AN ANOMALY
     private static final long SKIP_STEP_MS = 5_000L;             // forward()/rewind() DISTANCE FOR VIDEO AND MUSIC
 
     // SITE LISTS: A PLAIN IPv4 IS FOUR DECIMALS WITHOUT LEADING ZEROS. A DISGUISED HOST HIDES WHERE IT LEADS: IT KEEPS A MARK THE
@@ -111,8 +114,14 @@ public abstract sealed class MediaPlayer permits ServerMediaPlayer, FFMediaPlaye
 
     // FOLLOWER CORRECTION STATE: TOUCHED ONLY FROM THE SINGLE TICKER THREAD
     private boolean tickWarned; // A FAILING TICK IS LOGGED ONCE PER PLAYER
+    private boolean chainWarned; // CORRECTIONS THAT KEEP MISSING ARE LOGGED ONCE PER PLAYER
     private boolean startIssued;
-    private long lastSeekNanos;
+    private boolean flying;      // THE PIPELINE WAS SEEN BUFFERING AND HAS NOT PLAYED AGAIN YET
+    private long landedNanos;    // WHEN IT LAST PLAYED AGAIN, OR WHEN THE FOLLOWER LAST ASKED FOR A SEEK
+    private long correctedNanos; // WHEN THE FOLLOWER LAST ASKED FOR A SEEK
+    private long seekSeen;       // THE seekNanos STAMP WHOSE LANDING IS ALREADY TIMED
+    private long latencyMs;      // HOW LONG THE LAST SEEK TOOK TO LAND
+    private int corrections;     // SEEKS THE FOLLOWER ASKED FOR IN A ROW
 
     // STATUS LISTENERS, CONSUMED BY A TERMINAL TRANSITION; TRANSITIONS QUEUE UP AND ONE THREAD DRAINS THEM IN ORDER, SO
     // A CONTROL ISSUED FROM A CALLBACK NEVER DELIVERS ITS TRANSITION AHEAD OF THE REPORTED ONE. GUARDED BY statusEvents
@@ -226,7 +235,7 @@ public abstract sealed class MediaPlayer permits ServerMediaPlayer, FFMediaPlaye
      */
     public final long authorityTime() {
         final Heard heard = this.heard;
-        return heard == null ? 0 : authorityTime(heard);
+        return heard == null ? 0 : authorityTime(heard, 0L);
     }
 
     /**
@@ -754,7 +763,7 @@ public abstract sealed class MediaPlayer permits ServerMediaPlayer, FFMediaPlaye
             if (this.armed) return;
             this.armed = true;
             // BACKDATE THE COOLDOWN SO THE FIRST CORRECTION IS NEVER BLOCKED (nanoTime ORIGIN IS ARBITRARY)
-            this.lastSeekNanos = System.nanoTime() - SEEK_COOLDOWN_NS;
+            this.landedNanos = System.nanoTime() - SEEK_COOLDOWN_NS;
         }
     }
 
@@ -852,7 +861,7 @@ public abstract sealed class MediaPlayer permits ServerMediaPlayer, FFMediaPlaye
 
     private long drift(final Heard heard) {
         final PlayerState target = heard.snapshot();
-        long drift = authorityTime(heard) - this.time();
+        long drift = authorityTime(heard, 0L) - this.time();
         final long d = target.duration();
         // LOOPING TIMELINES ARE CIRCULAR: MAP INTO [-d/2, d/2) SO THE WRAP NEVER FAKES A HUGE DRIFT
         if (target.repeat() && d > 0 && !target.live()) drift = Math.floorMod(drift + d / 2, d) - d / 2;
@@ -883,10 +892,10 @@ public abstract sealed class MediaPlayer permits ServerMediaPlayer, FFMediaPlaye
                     // MAY DIVERGE (BAD LATCH, MIXED VARIANTS) AND WOULD REPLAY IT FOREVER
                     if (current == Status.ENDED) {
                         final long end = this.duration() > 0 ? this.duration() : authority.duration();
-                        go = end > 0 && authorityTime(heard) < Math.max(end - this.toleranceMs, this.toleranceMs);
+                        go = end > 0 && authorityTime(heard, 0L) < Math.max(end - this.toleranceMs, this.toleranceMs);
                     } else {
                         go = authority.repeat() || authority.duration() <= 0
-                                || authority.duration() - authorityTime(heard) > this.toleranceMs;
+                                || authority.duration() - authorityTime(heard, 0L) > this.toleranceMs;
                     }
                     if (!this.startIssued && go) {
                         this.start();
@@ -921,16 +930,41 @@ public abstract sealed class MediaPlayer permits ServerMediaPlayer, FFMediaPlaye
         if (this.repeat() != authority.repeat()) this.repeat(authority.repeat());
         if (this.speed() != authority.speed()) this.speed(authority.speed());
         if (authority.live() || authority.duration() <= 0) return;
+        // THE STAMP IS READ BEFORE THE STATUS: A SEEK TAKEN IN BETWEEN SHOWS UP AS BUFFERING, NEVER AS A LANDING
+        final long seek = this.seekNanos;
         current = this.status();
-        if (current == Status.LOADING || current == Status.BUFFERING) return;
+        // A SEEK TAKEN WHILE LOADING LANDS WITH THE OPEN, WHICH SAYS NOTHING ABOUT HOW LONG THE NEXT ONE TAKES
+        if (current == Status.LOADING) this.seekSeen = seek;
+        if (current == Status.BUFFERING) this.flying = true;
         if (current != Status.PLAYING && current != Status.PAUSED) return;
 
-        // ONE CORRECTION, ONE THRESHOLD: PAST THE TOLERANCE, JUMP TO THE SESSION. NO RATE TRIMMING: IT READS AS THE VIDEO
-        // RANDOMLY RUNNING SLOW, AND A CLIENT ONLY FALLS BEHIND A BARE CLOCK. THE COOLDOWN LETS A RESETTLING PIPELINE
-        // REPORT ITS POSITION BEFORE THE NEXT SEEK
-        if (Math.abs(this.drift(heard)) > this.toleranceMs && now - this.lastSeekNanos >= SEEK_COOLDOWN_NS) {
-            this.seekQuick(authorityTime(heard));
-            this.lastSeekNanos = now;
+        // LANDING: THE PIPELINE PLAYS AGAIN AFTER A SEEK OR A REBUFFER. THE COOLDOWN COUNTS FROM HERE, NOT FROM THE REQUEST, AND
+        // THE TIME A SEEK TOOK IS HOW FAR BEHIND THE SESSION IT LANDED
+        if (this.flying || seek != this.seekSeen) {
+            if (seek != this.seekSeen) {
+                this.latencyMs = Math.max(0L, Math.min((now - seek) / 1_000_000L, LATENCY_MAX_MS));
+                this.seekSeen = seek;
+                LOGGER.debug(IT, "Sync: seek landed in {}ms, {}ms away from the session", this.latencyMs, this.drift(heard));
+            }
+            this.flying = false;
+            this.landedNanos = now;
+        }
+
+        // ONE CORRECTION, ONE THRESHOLD: PAST THE TOLERANCE, JUMP TO WHERE THE SESSION WILL BE ONCE THE SEEK LANDS (AIMED AT WHERE IT
+        // IS NOW, EVERY SEEK LANDS ITS OWN FLIGHT BEHIND AND ASKS FOR THE NEXT). NO RATE TRIMMING: IT READS AS THE VIDEO RANDOMLY
+        // RUNNING SLOW, AND A CLIENT ONLY FALLS BEHIND A BARE CLOCK
+        final long drift = this.drift(heard);
+        if (Math.abs(drift) <= this.toleranceMs || now - this.landedNanos < SEEK_COOLDOWN_NS) return;
+        this.landedNanos = now;
+        if (!this.seekQuick(authorityTime(heard, this.latencyMs))) return;
+
+        // A CORRECTION THIS SOON AFTER THE LAST ONE MEANS THAT ONE MISSED
+        this.corrections = now - this.correctedNanos < CHAIN_NS ? this.corrections + 1 : 1;
+        this.correctedNanos = now;
+        if (this.corrections == CHAIN_WARN_SEEKS && !this.chainWarned) {
+            this.chainWarned = true;
+            LOGGER.warn(IT, "Sync keeps correcting {}: {} seeks in a row missed the {}ms tolerance, the last one took {}ms and left a drift of {}ms",
+                    this.mrl != null ? this.mrl.uri() : this.getClass().getSimpleName(), this.corrections - 1, this.toleranceMs, this.latencyMs, drift);
         }
     }
 
@@ -953,11 +987,12 @@ public abstract sealed class MediaPlayer permits ServerMediaPlayer, FFMediaPlaye
         }
     }
 
-    // THE SNAPSHOT KEPT AGEING SINCE IT LANDED; A LIVE OR UNKNOWN TIMELINE RUNS FREE, A FINITE ONE WRAPS OR CLAMPS
-    private static long authorityTime(final Heard heard) {
+    // THE SNAPSHOT KEPT AGEING SINCE IT LANDED AND WILL FOR aheadMs MORE; A LIVE OR UNKNOWN TIMELINE RUNS FREE, A FINITE ONE WRAPS
+    // OR CLAMPS
+    private static long authorityTime(final Heard heard, final long aheadMs) {
         final PlayerState target = heard.snapshot();
         if (target.status() != Status.PLAYING) return target.time();
-        final long elapsed = (System.nanoTime() - heard.nanos()) / 1_000_000L;
+        final long elapsed = (System.nanoTime() - heard.nanos()) / 1_000_000L + aheadMs;
         final long run = (long) (elapsed * target.speed());
         // SATURATE LIKE THE AUTHORITY: A LIVE POSITION NEAR Long.MAX_VALUE MUST NOT WRAP NEGATIVE
         final long t = run > Long.MAX_VALUE - target.time() ? Long.MAX_VALUE : target.time() + run;
