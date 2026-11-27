@@ -1,8 +1,22 @@
+<!-- CODE-MAP V2 -->
 # CODE-MAP: WaterMedia
 
 > NOTE: WATERMEDIA IS NOW ON RELEASE CHANNEL, WHICH MEANS NO BREAKING CHANGES WOULD BE ALLOWED ON PUBLIC API, EXCEPT EXPERIMENTAL APIS
 > 
 > CURRENT EXPERIMENTAL APIS: CodecsAPI
+
+## NOTEPAD
+
+Quick notes, pending tasks and reminders of the owner and the agents. The owner manages it.
+- 2026-11-27: `INFORME.md` (untracked, Spanish) holds the seek and buffering investigation with the rework proposed for
+  `FFDecoder`, `FFMediaPlayer` and the follower of `MediaPlayer`. Nothing of it is implemented and its §12 lists the
+  decisions it waits for.
+
+## SCRAPPED IDEAS
+
+Ideas that were discarded, with the reason.
+- Trimming the playback rate so a follower converges on its session: it reads as the video randomly running slow, so a
+  jump past `MediaPlayer.tolerance()` corrects it instead.
 
 Reference map of this repository for agents. Read it before every task and keep it current: when a task changes
 behavior, API, layout or rules, update the matching section (never leave it describing the old code).
