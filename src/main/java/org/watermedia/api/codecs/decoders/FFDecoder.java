@@ -341,8 +341,8 @@ public final class FFDecoder {
         final long analyzeMs = WaterMediaConfig.codecs.ffmpeg.analyzeDuration;
         if (analyzeMs > 0) av_dict_set(options, "analyzeduration", String.valueOf(analyzeMs * 1_000L), 0);
         av_dict_set(options, "probesize", String.valueOf(DataTool.megabytes(WaterMediaConfig.codecs.ffmpeg.probeSize)), 0);
-        // THE SOCKET BUFFER OF A DATAGRAM INPUT, WHICH NO OTHER PROTOCOL READS
-        if (scheme.equals("udp") || scheme.equals("rtp")) av_dict_set(options, "buffer_size", "33554432", 0);
+        // THE SOCKET BUFFER OF A UDP OR RTP INPUT, LEFT UNREAD BY EVERY OTHER PROTOCOL
+        av_dict_set(options, "buffer_size", "33554432", 0);
         // ONLY YOUTUBE'S CDN: ANYWHERE ELSE EACH RANGE WOULD BE ONE MORE REQUEST. ITS RANGES FOLLOW EACH OTHER ON ONE CONNECTION
         if (host.equals(YOUTUBE_CDN) || host.endsWith("." + YOUTUBE_CDN)) {
             av_dict_set(options, "request_size", String.valueOf(YOUTUBE_REQUEST_BYTES), 0);

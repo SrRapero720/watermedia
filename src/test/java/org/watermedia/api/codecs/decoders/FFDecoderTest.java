@@ -454,16 +454,14 @@ public class FFDecoderTest {
         }
 
         @Test
-        @DisplayName("Only a UDP or RTP input gets the socket buffer size, which no other protocol reads")
-        void socketBufferOnlyOnDatagramInputs() {
-            final Map<String, Boolean> schemes = Map.of("udp", true, "RTP", true, "rtsp", false, "https", false, "rtmp", false);
-            for (final Map.Entry<String, Boolean> scheme: schemes.entrySet()) {
+        @DisplayName("Every input carries the socket buffer size, which only UDP and RTP read")
+        void socketBufferOnEveryInput() {
+            for (final String scheme: new String[] { "udp", "RTP", "rtsp", "https", "rtmp" }) {
                 final AVDictionary options = new AVDictionary();
                 try {
-                    FFDecoder.inputOptions(options, URI.create(scheme.getKey() + "://example.org/live/stream"), new HttpHeaders());
+                    FFDecoder.inputOptions(options, URI.create(scheme + "://example.org/live/stream"), new HttpHeaders());
                     final AVDictionaryEntry buffer = av_dict_get(options, "buffer_size", null, 0);
-                    if (scheme.getValue()) assertEquals("33554432", buffer == null ? null : buffer.value().getString(), scheme.getKey() + " sizes its socket buffer");
-                    else assertNull(buffer, scheme.getKey() + " has no socket buffer to size");
+                    assertEquals("33554432", buffer == null ? null : buffer.value().getString(), scheme + " carries the socket buffer size");
                 } finally {
                     av_dict_free(options);
                 }
