@@ -1,8 +1,9 @@
 package org.watermedia.api.codecs;
 
+import org.apache.logging.log4j.Level;
 import org.apache.logging.log4j.Marker;
 import org.apache.logging.log4j.MarkerManager;
-// import org.bytedeco.ffmpeg.avutil.LogCallback; // NATIVE LOG ROUTING, DISABLED IN startFFmpeg
+import org.bytedeco.ffmpeg.avutil.LogCallback;
 import org.bytedeco.ffmpeg.global.avcodec;
 import org.bytedeco.ffmpeg.global.avformat;
 import org.bytedeco.ffmpeg.global.avutil;
@@ -26,6 +27,7 @@ import org.watermedia.binaries.WaterMediaBinaries;
 import org.watermedia.tools.DataTool;
 import org.watermedia.tools.FFTool;
 import org.watermedia.tools.IOTool;
+import org.watermedia.tools.ThreadTool;
 
 import java.io.BufferedOutputStream;
 import java.io.File;
@@ -37,7 +39,10 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Locale;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 
 import static org.watermedia.WaterMedia.LOGGER;
 
@@ -180,7 +185,6 @@ public final class CodecsAPI extends WaterMedia.Module {
     private static final AtomicBoolean LOADED = new AtomicBoolean(); // FLIPS ON THE FIRST CONSTRUCTION, WHEN WATERMEDIA STARTS
     private static volatile boolean ffmpegLoaded;
     private static volatile Throwable ffmpegFailure;
-    // private static LogCallback nativeLog; // KEEPS THE NATIVE LOG THUNK REACHABLE WHILE FFMPEG MAY CALL IT
     private static volatile boolean vulkanHwDecode; // THE BUILD DECODES WITH VULKAN VIDEO AND ITS BINDINGS LINK (PROBED AT BOOT)
 
     /** Creates the codecs module; {@link WaterMedia#start} calls it once per process and a second call throws. */
@@ -559,31 +563,8 @@ public final class CodecsAPI extends WaterMedia.Module {
             LOGGER.info(IT, "• swscale:    {}", FFTool.parseVersion(swscale.swscale_version()));
             LOGGER.info(IT, "• swresample: {}", FFTool.parseVersion(swresample.swresample_version()));
 
-            // NATIVE LOG ROUTING, DISABLED: JVM CRASHES WERE REPORTED ON MACOS AND LINUX DEPENDING ON THE CALLBACK
-            // SIGNATURE. VERIFIED ONLY ON WINDOWS; RE-ENABLE WITH FFmpegLogRoutingTest AFTER TESTING THOSE HOSTS
-            // ROUTES NATIVE FFMPEG LOGS THROUGH THE REDACTING PROJECT LOGGER. setLogCallback INSTALLS av_log_set_callback
-            // WITH JavaCPP'S C TRAMPOLINE, WHICH FORMATS THE va_list NATIVELY SO IT NEVER CROSSES INTO JAVA
-            // if (nativeLog == null) nativeLog = new LogCallback() {
-            //     // FFMPEG EMITS A LINE IN FRAGMENTS PER THREAD; IT IS LOGGED ONCE ITS NEWLINE ARRIVES
-            //     private final ThreadLocal<StringBuilder> lines = ThreadLocal.withInitial(StringBuilder::new);
-            //
-            //     @Override
-            //     public void call(final int level, final BytePointer message) {
-            //         // NOTHING MAY THROW BACK INTO THE NATIVE FFMPEG FRAMES THAT CALLED THIS
-            //         try {
-            //             final StringBuilder line = this.lines.get().append(message.getString(StandardCharsets.UTF_8));
-            //             if (line.isEmpty() || line.charAt(line.length() - 1) != '\n') return;
-            //             final String text = line.toString().strip();
-            //             line.setLength(0);
-            //             final int severity = level & 0xFF;
-            //             if (text.isEmpty()) return;
-            //             if (severity <= AV_LOG_ERROR) LOGGER.error(IT, "FFmpeg: {}", text);
-            //             else if (severity <= AV_LOG_WARNING) LOGGER.warn(IT, "FFmpeg: {}", text);
-            //             else LOGGER.debug(IT, "FFmpeg: {}", text);
-            //         } catch (final Throwable ignored) {}
-            //     }
-            // };
-            // setLogCallback(nativeLog);
+            // FFMPEG'S OWN LINES GO TO THE WATERMEDIA LOGGER UNDER THE FFmpeg MARKER INSTEAD OF THE PROCESS STDERR
+            NativeLog.install();
 
             try {
                 final BytePointer config = avformat.avformat_configuration();
@@ -716,5 +697,65 @@ public final class CodecsAPI extends WaterMedia.Module {
             if (this.out == null) this.out = new BufferedOutputStream(Files.newOutputStream(this.file));
             return this.out;
         }
+    }
+
+    // FFMPEG'S LOG IN THE WATERMEDIA LOGGER UNDER THE FFmpeg MARKER. THE PRESET'S C TRAMPOLINE FORMATS EVERY LINE AND FILTERS BY LEVEL
+    // NATIVELY (NO va_list EVER CROSSES INTO JAVA), AND THE CALLBACK ONLY QUEUES IT: LOG4J AND THE REDACTION RUN ON ONE JAVA THREAD,
+    // NEVER ON A NATIVE FFMPEG THREAD WITH A SMALL STACK
+    private static final class NativeLog extends LogCallback {
+        private static final Marker FFMPEG = MarkerManager.getMarker("FFmpeg");
+        private static final int CAPACITY = 4_096; // LINES WAITING FOR THE LOG THREAD; PAST IT A LINE IS DROPPED, NEVER WAITED FOR
+        private static final BlockingQueue<Line> LINES = new ArrayBlockingQueue<>(CAPACITY);
+        private static final AtomicLong DROPPED = new AtomicLong();
+        private static NativeLog installed; // KEEPS THE NATIVE THUNK REACHABLE WHILE FFMPEG MAY CALL IT
+        private static boolean droppedWarned;
+
+        // FFMPEG BUILDS A LINE IN FRAGMENTS, EACH THREAD ITS OWN, AND IT GOES OUT ONCE ITS NEWLINE ARRIVES
+        private final ThreadLocal<StringBuilder> pending = ThreadLocal.withInitial(StringBuilder::new);
+
+        // INSTALLED ONCE, BY THE THREAD THAT STARTS FFMPEG
+        private static void install() {
+            if (installed != null) return;
+            installed = new NativeLog();
+            // setLogCallback INSTALLS THE TRAMPOLINE BEFORE IT STORES THE CALLBACK: SILENT MEANWHILE, A LINE IN BETWEEN WOULD CALL NULL
+            final int level = avutil.av_log_get_level();
+            avutil.av_log_set_level(avutil.AV_LOG_QUIET);
+            avutil.setLogCallback(installed);
+            avutil.av_log_set_level(level);
+            ThreadTool.thread("FFmpeg-Log", NativeLog::drain);
+            // A DECODER THREAD THAT LOGS WHILE THE JVM SHUTS DOWN WOULD ENTER A DYING VM: FROM THERE ON THE TRAMPOLINE CALLS NOTHING
+            Runtime.getRuntime().addShutdownHook(new Thread(() -> avutil.av_log_set_level(avutil.AV_LOG_QUIET), "FFmpeg-Log-Quiet"));
+        }
+
+        @Override
+        public void call(final int level, final BytePointer message) {
+            // NOTHING MAY THROW BACK INTO THE NATIVE FFMPEG FRAMES THAT CALLED THIS
+            try {
+                final StringBuilder line = this.pending.get().append(message.getString(StandardCharsets.UTF_8));
+                if (line.isEmpty() || line.charAt(line.length() - 1) != '\n') return;
+                final String text = line.toString().strip();
+                line.setLength(0);
+                if (!text.isEmpty() && !LINES.offer(new Line(level & 0xFF, text))) DROPPED.incrementAndGet();
+            } catch (final Throwable ignored) {}
+        }
+
+        // THE LOG THREAD: FFMPEG ERRORS AS ERROR, WARNINGS AS WARN AND EVERYTHING ELSE AS DEBUG, BECAUSE ITS INFO LINES NAME EVERY URL IT
+        // OPENS (AN HLS PLAYLIST OPENS ONE PER SEGMENT, WITH THE VIEWER'S ADDRESS IN IT ON YOUTUBE)
+        private static void drain() {
+            try {
+                while (true) {
+                    final Line line = LINES.take();
+                    final Level level = line.level() <= avutil.AV_LOG_ERROR ? Level.ERROR : line.level() <= avutil.AV_LOG_WARNING ? Level.WARN : Level.DEBUG;
+                    LOGGER.log(level, FFMPEG, "{}", line.text());
+                    final long dropped = DROPPED.getAndSet(0);
+                    if (dropped > 0 && !droppedWarned) LOGGER.warn(FFMPEG, "Dropped {} FFmpeg log lines, they came faster than the log could take them", dropped);
+                    droppedWarned |= dropped > 0;
+                }
+            } catch (final InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
+
+        private record Line(int level, String text) {}
     }
 }
