@@ -344,7 +344,7 @@ public class FFDecoderTest {
         }
 
         @Test
-        @DisplayName("Only YouTube's CDN gets requests of at most 10 MiB, every other host one request for the whole file")
+        @DisplayName("Only YouTube's CDN gets requests of at most 10 MiB on a connection it keeps, every other host one request for the whole file")
         void boundedRequestsOnlyOnYouTubeCdn() {
             final Map<String, Boolean> inputs = Map.of(
                     "https://rr3---sn-abc.googlevideo.com/videoplayback?id=1", true,
@@ -359,8 +359,14 @@ public class FFDecoderTest {
                 try {
                     FFDecoder.inputOptions(options, URI.create(input.getKey()), new HttpHeaders());
                     final AVDictionaryEntry size = av_dict_get(options, "request_size", null, 0);
-                    if (input.getValue()) assertEquals(String.valueOf(REQUEST_BYTES), size == null ? null : size.value().getString(), input.getKey() + " asks for at most 10 MiB");
-                    else assertNull(size, input.getKey() + " asks for the whole file");
+                    final AVDictionaryEntry persistent = av_dict_get(options, "multiple_requests", null, 0);
+                    if (input.getValue()) {
+                        assertEquals(String.valueOf(REQUEST_BYTES), size == null ? null : size.value().getString(), input.getKey() + " asks for at most 10 MiB");
+                        assertEquals("1", persistent == null ? null : persistent.value().getString(), input.getKey() + " keeps its connection for the next request");
+                    } else {
+                        assertNull(size, input.getKey() + " asks for the whole file");
+                        assertNull(persistent, input.getKey() + " has no second request to keep a connection for");
+                    }
                 } finally {
                     av_dict_free(options);
                 }
@@ -368,20 +374,22 @@ public class FFDecoderTest {
         }
 
         @Test
-        @DisplayName("The options of a YouTube CDN link read a file past 10 MiB to its end through requests of at most 10 MiB")
+        @DisplayName("The options of a YouTube CDN link read a file past 10 MiB to its end through requests of at most 10 MiB, one after another on the same connection")
         void cdnOptionsReadInBoundedRequests(@TempDir final Path directory) throws Exception {
             final byte[] pcm = new byte[REQUEST_BYTES + REQUEST_BYTES / 4];
             final Path wav = directory.resolve("long.wav");
             Fixtures.wav(wav, 48_000, 2, pcm);
             final byte[] body = Files.readAllBytes(wav);
             final List<String> ranges = new CopyOnWriteArrayList<>();
+            final List<Integer> connections = new CopyOnWriteArrayList<>();
             final ExecutorService workers = Executors.newCachedThreadPool();
             final AVDictionary options = new AVDictionary();
             final AVFormatContext context = avformat_alloc_context();
             final AVPacket packet = av_packet_alloc();
             try (final LocalHttp origin = LocalHttp.start("/", exchange -> {
                 ranges.add(String.valueOf(exchange.getRequestHeaders().getFirst("Range")));
-                LocalHttp.respondRange(exchange, "audio/wav", body);
+                connections.add(exchange.getRemoteAddress().getPort());
+                LocalHttp.respondRange(exchange, "audio/wav", body, true);
             }, workers)) {
                 // THE OPTIONS OF A CDN LINK OPEN THE LOOPBACK FILE: FFMPEG ITSELF MUST SPLIT THE READ
                 FFDecoder.inputOptions(options, URI.create("https://rr3---sn-abc.googlevideo.com/videoplayback"), new HttpHeaders());
@@ -394,13 +402,23 @@ public class FFDecoderTest {
                 assertEquals(pcm.length, read, "every sample must be read");
 
                 long last = -1;
-                for (final String range: ranges) {
+                long previousEnd = -1;
+                int followed = 0;
+                for (int i = 0; i < ranges.size(); i++) {
+                    final String range = ranges.get(i);
                     assertTrue(range.startsWith("bytes=") && !range.endsWith("-"), "every request must name its end: " + ranges);
                     final String[] bounds = range.substring("bytes=".length()).split("-", 2);
                     assertTrue(Long.parseLong(bounds[1]) - Long.parseLong(bounds[0]) < REQUEST_BYTES, "no request may ask for more than 10 MiB: " + ranges);
                     last = Math.max(last, Math.min(Long.parseLong(bounds[1]), body.length - 1L));
+                    // A REQUEST THAT STARTS WHERE THE LAST ONE ENDED IS THE SAME READ GOING ON, AND IT KEEPS THAT CONNECTION
+                    if (i > 0 && Long.parseLong(bounds[0]) == previousEnd + 1) {
+                        followed++;
+                        assertEquals(connections.get(i - 1), connections.get(i), "a read going on must keep its connection, ranges: " + ranges + ", client ports: " + connections);
+                    }
+                    previousEnd = Long.parseLong(bounds[1]);
                 }
                 assertEquals(body.length - 1L, last, "the requests must reach the last byte: " + ranges);
+                assertTrue(followed > 0, "the read must go on past its first request: " + ranges);
             } finally {
                 av_packet_free(packet);
                 avformat_close_input(context);
@@ -432,6 +450,23 @@ public class FFDecoderTest {
                 }
             } finally {
                 workers.shutdownNow();
+            }
+        }
+
+        @Test
+        @DisplayName("Only a UDP or RTP input gets the socket buffer size, which no other protocol reads")
+        void socketBufferOnlyOnDatagramInputs() {
+            final Map<String, Boolean> schemes = Map.of("udp", true, "RTP", true, "rtsp", false, "https", false, "rtmp", false);
+            for (final Map.Entry<String, Boolean> scheme: schemes.entrySet()) {
+                final AVDictionary options = new AVDictionary();
+                try {
+                    FFDecoder.inputOptions(options, URI.create(scheme.getKey() + "://example.org/live/stream"), new HttpHeaders());
+                    final AVDictionaryEntry buffer = av_dict_get(options, "buffer_size", null, 0);
+                    if (scheme.getValue()) assertEquals("33554432", buffer == null ? null : buffer.value().getString(), scheme.getKey() + " sizes its socket buffer");
+                    else assertNull(buffer, scheme.getKey() + " has no socket buffer to size");
+                } finally {
+                    av_dict_free(options);
+                }
             }
         }
 

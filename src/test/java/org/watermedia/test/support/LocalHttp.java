@@ -65,6 +65,11 @@ public final class LocalHttp implements AutoCloseable {
 
     /** Writes {@code body} like a media CDN: a {@code Range} request gets a 206 with its {@code Content-Range}, any other the whole body. */
     public static void respondRange(final HttpExchange exchange, final String contentType, final byte[] body) throws IOException {
+        respondRange(exchange, contentType, body, false);
+    }
+
+    /** Writes {@code body} like {@link #respondRange(HttpExchange, String, byte[])}, keeping the connection for the next request of a client that asked to when {@code persistent}. */
+    public static void respondRange(final HttpExchange exchange, final String contentType, final byte[] body, final boolean persistent) throws IOException {
         final String range = exchange.getRequestHeaders().getFirst("Range");
         int start = 0;
         int end = body.length - 1;
@@ -78,7 +83,7 @@ public final class LocalHttp implements AutoCloseable {
         exchange.getResponseHeaders().set("Accept-Ranges", "bytes");
         // THE SERVER DROPS EVERY CONNECTION A CLIENT ASKED TO CLOSE WITHOUT SAYING SO; ANNOUNCING IT STOPS A PERSISTENT
         // CLIENT (FFMPEG) FROM WRITING ITS NEXT REQUEST INTO THAT DEAD SOCKET
-        exchange.getResponseHeaders().set("Connection", "close");
+        if (!persistent) exchange.getResponseHeaders().set("Connection", "close");
         if (start > end) {
             exchange.getResponseHeaders().set("Content-Range", "bytes */" + body.length);
             exchange.sendResponseHeaders(416, -1);

@@ -341,12 +341,13 @@ public final class FFDecoder {
         final long analyzeMs = WaterMediaConfig.codecs.ffmpeg.analyzeDuration;
         if (analyzeMs > 0) av_dict_set(options, "analyzeduration", String.valueOf(analyzeMs * 1_000L), 0);
         av_dict_set(options, "probesize", String.valueOf(DataTool.megabytes(WaterMediaConfig.codecs.ffmpeg.probeSize)), 0);
-        av_dict_set(options, "buffer_size", "33554432", 0);
-        av_dict_set(options, "rtbufsize", "15000000", 0);
-        av_dict_set(options, "http_persistent", "1", 0);
-        av_dict_set(options, "multiple_requests", "0", 0);
-        // ONLY YOUTUBE'S CDN: ANYWHERE ELSE EACH RANGE WOULD BE ONE MORE REQUEST
-        if (host.equals(YOUTUBE_CDN) || host.endsWith("." + YOUTUBE_CDN)) av_dict_set(options, "request_size", String.valueOf(YOUTUBE_REQUEST_BYTES), 0);
+        // THE SOCKET BUFFER OF A DATAGRAM INPUT, WHICH NO OTHER PROTOCOL READS
+        if (scheme.equals("udp") || scheme.equals("rtp")) av_dict_set(options, "buffer_size", "33554432", 0);
+        // ONLY YOUTUBE'S CDN: ANYWHERE ELSE EACH RANGE WOULD BE ONE MORE REQUEST. ITS RANGES FOLLOW EACH OTHER ON ONE CONNECTION
+        if (host.equals(YOUTUBE_CDN) || host.endsWith("." + YOUTUBE_CDN)) {
+            av_dict_set(options, "request_size", String.valueOf(YOUTUBE_REQUEST_BYTES), 0);
+            av_dict_set(options, "multiple_requests", "1", 0);
+        }
         av_dict_set(options, "reconnect", "1", 0);
         av_dict_set(options, "reconnect_streamed", "1", 0);
         av_dict_set(options, "reconnect_delay_max", "5", 0);
@@ -357,7 +358,6 @@ public final class FFDecoder {
         // AN HLS SEGMENT THAT FAILS TO OPEN IS ASKED FOR AGAIN BEFORE IT IS SKIPPED
         av_dict_set(options, "seg_max_retry", "2", 0);
         av_dict_set(options, "rtsp_transport", "tcp", 0);
-        av_dict_set(options, "max_delay", "5000000", 0);
     }
 
     /** Returns a video decoder that emits frames without an accelerator, or {@code fallback} when the codec's default already does. */
