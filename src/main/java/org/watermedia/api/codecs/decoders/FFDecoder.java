@@ -197,6 +197,7 @@ public final class FFDecoder {
     private boolean slotWarned;
     private boolean audioUnusableWarned;
     private boolean audioChangeWarned;
+    private boolean trackSeekWarned;
 
     /** Prepares a decoder of {@code uri}, its video when {@code video} and the audio {@code audio} chooses when not null, with its threads named after {@code group}; nothing opens until {@link #start()}. */
     public FFDecoder(final String group, final URI uri, final HttpHeaders headers, final boolean video, final AudioChoice audio,
@@ -547,7 +548,13 @@ public final class FFDecoder {
                         continue;
                     }
 
-                    if (this.useAudioTrack && this.trackFormatContext != null) avformat.av_seek_frame(this.trackFormatContext, -1, ffTs, seekFlags);
+                    // EVERY PACKET OF THE TRACK'S SOUND IS AN ENTRY POINT, SO IT LANDS ON THE TARGET: WITHOUT ANY, A WEBM LANDS ON
+                    // THE CUE BEFORE IT (UP TO 10 s ON YOUTUBE) AND THE CLOCK STARTS THERE
+                    if (this.useAudioTrack && this.trackFormatContext != null
+                            && avformat.av_seek_frame(this.trackFormatContext, -1, ffTs, seekFlags | avformat.AVSEEK_FLAG_ANY) < 0 && !this.aborted) {
+                        if (!this.trackSeekWarned) LOGGER.warn(IT, "Audio track failed to seek to {}ms, its sound keeps the position it had", targetMs);
+                        this.trackSeekWarned = true;
+                    }
                     if (precise && !(reopened && targetMs == 0)) this.syncDrain(targetMs, packet, trackPacket);
 
                     this.ensureDecodeThreads();

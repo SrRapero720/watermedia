@@ -14,6 +14,8 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.watermedia.WaterMediaConfig;
+import org.watermedia.api.codecs.AudioCodec;
+import org.watermedia.api.codecs.Container;
 import org.watermedia.api.codecs.decoders.FFDecoder.AudioChoice;
 import org.watermedia.api.codecs.decoders.FFDecoder.AudioStream;
 import org.watermedia.api.util.HttpHeaders;
@@ -104,6 +106,10 @@ public class FFDecoderTest {
     private static final int FULL_SECONDS = 20;
     private static final int PACED_RATE_HZ = 48_000;
     private static final int PACED_SECONDS = 12;
+    // A SEEK BESIDE A SEPARATE TRACK: THE TARGET SITS BETWEEN TWO CUES OF AN AUDIO-ONLY WEBM, WHICH CARRIES ONE PER CLUSTER
+    private static final int SEEK_SECONDS = 20;
+    private static final long SEEK_TARGET_MS = 12_500L;
+    private static final long SEEK_SLACK_MS = 60L; // THREE OPUS PACKETS
 
     // ==========================================================================
     // INTERNAL API
@@ -849,6 +855,34 @@ public class FFDecoderTest {
                 }
             }
         }
+
+        @Test
+        @DisplayName("A seek lands a separate WebM track on its target instead of on the cue before it")
+        void seekLandsTheTrackOnItsTarget(@TempDir final Path directory) throws Exception {
+            final Path main = directory.resolve("main.mkv");
+            final Path track = directory.resolve("track.webm");
+            Fixtures.segment(main, RATE_HZ, SEEK_SECONDS, Fixtures.level(0));
+            Fixtures.clip(track, Container.WEBM, null, AudioCodec.OPUS, 0, 0, FPS, SEEK_SECONDS);
+
+            // HELD FROM THE OPEN, NOTHING PAST THE HEADERS IS READ: THE CUES ARE ALL THE TRACK'S INDEX KNOWS WHEN THE SEEK COMES
+            final Recorder host = new Recorder(new FFDecoder.Pcm(SampleType.S16, 2));
+            final Linear timeline = new Linear(true);
+            timeline.seek(SEEK_TARGET_MS);
+            final FFDecoder decoder = new FFDecoder("FFThread-Seek", main.toUri(), new HttpHeaders(), false,
+                    new AudioChoice(List.of(new Track("Deutsch", "de", track.toUri())), AudioChoice.AUTO, -1, null), timeline, host);
+            try {
+                decoder.start();
+                assertTrue(host.opened.await(OPEN_TIMEOUT_MS, TimeUnit.MILLISECONDS), "the input must open");
+                assertNull(host.failure, "the input must open without a failure");
+                assertTrue(PlayerWait.awaitCondition(() -> !timeline.seekPending(), OPEN_TIMEOUT_MS), "the seek must be served");
+                timeline.release();
+                assertTrue(PlayerWait.awaitCondition(() -> decoder.audioFrames().peek() != null, OPEN_TIMEOUT_MS), "the track must decode after the seek");
+                final long landed = decoder.audioFrames().peek().ptsMs;
+                assertTrue(Math.abs(landed - SEEK_TARGET_MS) <= SEEK_SLACK_MS, "the track must land on " + SEEK_TARGET_MS + " ms, landed on " + landed + " ms");
+            } finally {
+                decoder.close();
+            }
+        }
     }
 
     @Nested
@@ -932,18 +966,27 @@ public class FFDecoderTest {
         }
     }
 
-    // A TIMELINE WITHOUT SEEKS THAT RECORDS WHETHER THE DEMUXER REPORTED THE END OF THE INPUT;
+    // A TIMELINE THAT RECORDS WHETHER THE DEMUXER REPORTED THE END OF THE INPUT AND HANDS OVER THE QUICK SEEK seek() LEAVES;
     // A HELD ONE STAYS PAUSED, SO THE DEMUXER PARKS ONCE THE INPUT IS OPEN, UNTIL release()
     private static final class Linear implements FFDecoder.Timeline {
         private volatile boolean held;
         private volatile boolean finished;
+        private volatile FFDecoder.Seek seek;
 
         private Linear(final boolean held) { this.held = held; }
 
         private void release() { this.held = false; }
+        private void seek(final long targetMs) { this.seek = new FFDecoder.Seek(targetMs, false); }
 
-        @Override public FFDecoder.Seek consumeSeek() { return null; }
-        @Override public boolean seekPending() { return false; }
+        // ONLY THE DEMUX THREAD TAKES IT
+        @Override
+        public FFDecoder.Seek consumeSeek() {
+            final FFDecoder.Seek seek = this.seek;
+            this.seek = null;
+            return seek;
+        }
+
+        @Override public boolean seekPending() { return this.seek != null; }
         @Override public boolean holding() { return this.held; }
         @Override public void awaitChange(final long timeoutMs) throws InterruptedException { Thread.sleep(timeoutMs > 0 ? timeoutMs : 50); }
         @Override public void serial(final int serial) {}
